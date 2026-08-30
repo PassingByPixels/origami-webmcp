@@ -14,6 +14,9 @@ export interface JsonSchemaProp {
   description?: string;
   enum?: readonly string[];
   items?: JsonSchemaProp;
+  /** Nested object shape — define_block's `def` is the only one deep enough to need it. */
+  properties?: Record<string, JsonSchemaProp>;
+  required?: string[];
   minimum?: number;
   maxLength?: number;
   maxItems?: number;

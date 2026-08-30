@@ -1,4 +1,5 @@
 import {
+  COMPOSITE_FIELD_TYPES,
   FOLD_TYPES,
   KINDS,
   activeContentFlags,
@@ -10,7 +11,11 @@ import {
   parseDeck,
   renderComposite,
   serializeModel,
+  stripBlockInstances,
+  validateBlockDef,
+  validateDeck,
   validateSlideContent,
+  type CompositeBlockDef,
   type DeckModel,
   type FoldType,
   type Op,
@@ -105,12 +110,25 @@ function coerceAndValidate(m: DeckModel, chunkId: string, html: string): string 
   return slide!.kind === 'table' ? bakeTableInner(reply.inner, Date.now()) : reply.inner;
 }
 
+/** What save_deck managed to do. The page owns the how (File System Access, autosave); the
+    tool only reports it — and it NEVER throws, so an unattended agent can always finish. */
+export interface SaveOutcomeReport {
+  written: boolean;
+  where: string;
+  note: string;
+}
+export type SaveFn = (text: string) => Promise<SaveOutcomeReport>;
+
 export interface ToolDeps {
   deck: DeckStore;
   proposals: ProposalStore;
   /** Injected in tests so create_deck does not need a network fetch. */
   runtimeJs?: () => Promise<string>;
+  /** Injected by the page. Absent === no disk route at all (unit tests, or a host with no FSA). */
+  save?: SaveFn;
 }
+
+const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
 
 export function buildTools(deps: ToolDeps): ToolDef[] {
   const { deck, proposals } = deps;
@@ -155,18 +173,19 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // DEVIATION: no filesystem. The stdio version writes a file into the first served folder
       // and returns its path; this one mints the same bytes into the tab and opens them.
       description:
-        'Create a NEW blank Fold — a fresh, valid deck with one editable fold — and OPEN IT IN THIS TAB. The human sees it render immediately. Call this FIRST when asked to build something from nothing, then author it with add_chunk / write_chunk. Nothing is written to disk: the human saves the file with the Save button when they are happy. Refuses if the Fold already open has unsaved changes, so it can never discard the human\'s work. foldType picks the reading experience (deck | scroll | ledger; default deck).',
+        'Create a NEW blank Fold — a fresh, valid deck with one editable fold — and OPEN IT IN THIS TAB. It renders immediately. Call this FIRST when asked to build something from nothing, then author it with add_chunk / add_custom_fold / write_chunk and finish with save_deck. foldType picks the reading experience: "deck" (default card-stage) | "scroll" (a long-form document — pair it with document-kind folds) | "ledger". If a Fold with UNSAVED changes is already open this refuses rather than throw that work away; pass discard:true to replace it anyway (use that when you are running unattended and the open Fold is not the human\'s work).',
       inputSchema: {
         type: 'object',
         properties: {
           title: { type: 'string', maxLength: 200, description: 'Deck title (default "Untitled deck"); also seeds the suggested filename' },
           foldType: { type: 'string', enum: FOLD_TYPES, description: 'deck (default card-stage) | scroll (long-form document) | ledger' },
+          discard: { type: 'boolean', description: 'Replace an open Fold that has unsaved changes, losing them. Default false (refuse instead)' },
         },
       },
-      execute: async ({ title, foldType }) => {
+      execute: async ({ title, foldType, discard }) => {
         const open = deck.peek();
-        if (open?.dirty) {
-          return fail('the Fold already open has unsaved changes — ask the human to save (or discard) it before creating a new one', { openTitle: open.model.title });
+        if (open?.dirty && discard !== true) {
+          return fail('the Fold already open has unsaved changes — save it, or call again with discard:true to replace it anyway', { openTitle: open.model.title });
         }
         const deckTitle = (typeof title === 'string' && title.trim()) || 'Untitled deck';
         const ft = (foldType ?? 'deck') as FoldType;
@@ -302,6 +321,46 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     },
 
     {
+      name: 'add_custom_fold',
+      description:
+        'Add a whole CUSTOM FOLD (a full page) as one fold — the same feature the Studio exposes in its left rail. Pass `html`, the fold\'s inner. For a page a human EDITS by clicking straight on it, compose it from Origami\'s inline-editable blocks inside a <div class="slide-inner">: headings (<h2>/<h3>), paragraphs (<p>, <p class="lede">, <p class="eyebrow">), lists (<ul><li>…), and stat cards (<div class="card-grid"><div class="stat-card"><div class="big">42</div><div class="lbl">Label</div></div>…</div>). Or paste a full report verbatim — active content (scripts, <style>, remote assets) is ALLOWED but flags the deck active so a recipient opens it under the padlock; only a stray <template> or unbalanced <script> is rejected (it would corrupt the single file). This CHANGES THE OPEN FOLD and re-renders it.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          html: { type: 'string', description: "The fold's inner HTML — a whole page (editable Origami blocks in a .slide-inner, or a raw report)" },
+          label: { type: 'string', description: 'Sidebar label (default: "Custom fold")' },
+          position: { type: 'integer', minimum: 0, description: '0-based insert index (default: end)' },
+        },
+        required: ['html'],
+      },
+      execute: async ({ html, label, position }) => {
+        const out = deck.mutate((m) => {
+          const b = buildInsert(m, { kind: 'free', html, position, label: label ?? 'Custom fold' });
+          if ('error' in b) refuse(b.error, b.extra);
+          const ins = b as Extract<InsertBuild, { id: string }>;
+          const op: Op =
+            ins.grants.length > 0
+              ? { t: 'batch', ops: [ins.insert, { t: 'deck.caps', capabilities: [...m.capabilities, ...ins.grants] }] }
+              : ins.insert;
+          applyOp(m, op);
+          return { b: ins, index: m.order.indexOf(ins.id) };
+        });
+        const active = activeContentFlags(out.b.inner).map((v) => v.rule);
+        return ok({
+          foldId: out.b.id,
+          index: out.index,
+          capabilitiesGranted: out.b.grants,
+          activeContent: active,
+          padlock: active.length > 0,
+          note:
+            active.length > 0
+              ? 'active content present — the deck opens under the padlock (allowed by design)'
+              : 'inert — no padlock',
+        });
+      },
+    },
+
+    {
       name: 'delete_chunk',
       description:
         'Hide or delete a slide in the open Fold — this CHANGES THE DECK the human is looking at. Default mode "hide" keeps the slide in the file but out of the show (the recoverable path — prefer it); mode "delete" removes the slide template entirely. Use propose_delete when the human should approve first.',
@@ -320,6 +379,99 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           else applyOp(m, { t: 'slide.remove', id: chunkId });
         });
         return ok({ [mode === 'hide' ? 'hidden' : 'deleted']: chunkId, note: 'applied to the open Fold — not yet on disk (the human saves).' });
+      },
+    },
+
+    {
+      name: 'define_block',
+      description:
+        'Register (or update) a COMPOSITE BLOCK definition in the deck — a reusable typed component a human can still edit field-by-field. The def is a template of inert primitives + a field manifest; once defined, author instances via add_chunk(block, fields). The template MUST render inert (no <script>/<style>/<iframe>/on*/remote URLs) — an active template is rejected. Re-defining the same kind replaces it (bump version). This CHANGES THE OPEN FOLD.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          def: {
+            type: 'object',
+            description: 'the CompositeBlockDef',
+            properties: {
+              kind: { type: 'string', description: 'x.<name> — lowercase letters/digits/hyphens; never collides with built-ins' },
+              name: { type: 'string' },
+              version: { type: 'integer', minimum: 1 },
+              fields: {
+                type: 'array',
+                description: 'the human-edit contract — the Studio auto-generates a control per field',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string', description: 'identifier, referenced in the template as {{name}}' },
+                    type: { type: 'string', enum: COMPOSITE_FIELD_TYPES },
+                    label: { type: 'string' },
+                    options: { type: 'array', items: { type: 'string' }, description: 'required for type "select"' },
+                    default: { type: 'string' },
+                  },
+                  required: ['name', 'type'],
+                },
+              },
+              template: { type: 'string', description: 'inert HTML using {{field}} placeholders (HTML-escaped at render)' },
+              schemaComment: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['kind', 'name', 'version', 'fields', 'template'],
+          },
+        },
+        required: ['def'],
+      },
+      execute: async ({ def }) => {
+        const violations = validateBlockDef(def);
+        if (violations.length > 0) return fail('invalid block def — nothing was registered', { violations });
+        const d = def as CompositeBlockDef;
+        deck.mutate((m) => applyOp(m, { t: 'deck.blocks', blocks: { ...m.blocks, [d.kind]: d } }));
+        return ok({
+          defined: d.kind,
+          version: d.version,
+          fields: d.fields.map((f) => f.name),
+          note: 'now author instances with add_chunk({block:"' + d.kind + '", fields:{…}})',
+        });
+      },
+    },
+
+    {
+      name: 'list_block_defs',
+      description:
+        'List the composite block definitions registered in this deck (kind, name, version, fields). Use a kind with add_chunk(block, fields).',
+      inputSchema: { type: 'object', properties: {} },
+      execute: async () =>
+        ok({
+          blocks: Object.values(deck.model().blocks).map((d) => ({ kind: d.kind, name: d.name, version: d.version, fields: d.fields })),
+        }),
+    },
+
+    {
+      name: 'delete_block',
+      description:
+        'Delete a composite block definition from the deck. Non-destructive: every placed instance keeps its baked output but loses its data-script, becoming plain inert content — so there is no dangling reference and the deck stays valid. This CHANGES THE OPEN FOLD.',
+      inputSchema: {
+        type: 'object',
+        properties: { kind: { type: 'string', description: 'Block kind x.<name> from list_block_defs' } },
+        required: ['kind'],
+      },
+      execute: async ({ kind }) => {
+        const out = deck.mutate((m) => {
+          const def = m.blocks[kind];
+          if (!def) refuse(`unknown composite block "${kind}"`, { availableBlocks: Object.keys(m.blocks) });
+          const nextBlocks = { ...m.blocks };
+          delete nextBlocks[kind];
+          const ops: Op[] = [{ t: 'deck.blocks', blocks: nextBlocks }];
+          let frozen = 0;
+          for (const [id, slide] of m.slides) {
+            const { inner, removed } = stripBlockInstances(slide.inner, kind);
+            if (removed > 0) {
+              ops.push({ t: 'slide.inner', id, inner });
+              frozen += removed;
+            }
+          }
+          applyOp(m, ops.length > 1 ? { t: 'batch', ops } : ops[0]!);
+          return { name: def!.name, frozen };
+        });
+        return ok({ deleted: kind, name: out.name, instancesFrozen: out.frozen });
       },
     },
 
@@ -373,7 +525,41 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       },
     },
 
-    /* ---------- propose-review-accept (§3): stage changes for the HUMAN to review ---------- */
+    {
+      name: 'save_deck',
+      // DEVIATION: the stdio server's edits already wrote through, so save_deck was only a
+      // re-validate. Here it is the ONLY route to disk — and it must never throw, or an
+      // unattended agent would have no way to finish.
+      description:
+        'Finish the job: re-validate the Fold and put it on disk. If the page holds a writable handle for the file (the human opened it with the file picker, or saved it once), this WRITES THAT FILE. If it does not — a Fold created in this tab, a browser without the File System Access API, or a revoked permission — nothing is lost: the working copy is persisted in the browser and the result says the human must press Save. It never fails for want of a handle, so always end on it. Safe to call any number of times; it never changes content.',
+      inputSchema: { type: 'object', properties: {} },
+      execute: async () => {
+        const text = deck.serialize(new Date().toISOString());
+        const violations = validateDeck(parseDeck(text));
+        if (violations.length > 0) return fail('the Fold fails format validation — it was NOT saved', { violations });
+        const outcome = deps.save
+          ? await deps.save(text)
+          : {
+              written: false,
+              where: 'nowhere — this host has no save route',
+              note: 'validated only: this build was constructed without a save route, so the Fold exists in memory alone.',
+            };
+        return ok({
+          saved: outcome.written,
+          validated: true,
+          where: outcome.where,
+          bytes: utf8Bytes(text),
+          title: deck.model().title,
+          slides: deck.model().order.length,
+          note: outcome.note,
+        });
+      },
+    },
+
+    /* ---------- propose-review-accept (§3) ----------
+       Either side can resolve a proposal: the human clicks Accept / Reject on the card, or an
+       agent calls accept_proposal / reject_proposal. Both routes run ProposalStore.accept /
+       .reject — one code path, one conflict gate, one provenance stamp. */
 
     {
       name: 'propose_chunk',
@@ -495,6 +681,52 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'The review queue: every staged proposal for the open Fold with author, title, the target chunk, the before/after content, and a conflict flag (true if that chunk changed since the proposal was made). Empty until propose_chunk / propose_add / propose_delete stages something. The human accepts or rejects them by clicking the cards in the page.',
       inputSchema: { type: 'object', properties: {} },
       execute: async () => ok({ proposals: await proposals.views(deck.model()) }),
+    },
+
+    {
+      name: 'accept_proposal',
+      // DEVIATION: no file write ("and write the file immediately (no save_deck needed)" ->
+      // applies to the open Fold; call save_deck when you are done).
+      description:
+        'Accept a staged proposal — apply its edit to the open Fold immediately. Refuses if the target chunk changed since the proposal was made: returns conflicted with the proposed + current content so you can re-propose against the new base (never a silent overwrite). Video capabilities the edit needs are granted on accept. This is the same action the human takes by clicking Accept on the proposal card, so use it when you are running unattended — and prefer leaving the card for the human when one is watching and the change is a judgement call.',
+      inputSchema: {
+        type: 'object',
+        properties: { proposalId: { type: 'string', description: 'Proposal id from list_proposals' } },
+        required: ['proposalId'],
+      },
+      execute: async ({ proposalId }) => {
+        const res = await proposals.accept(deck, proposalId);
+        if (!res.ok) {
+          return fail(res.error, {
+            ...(res.conflicted ? { conflicted: true } : {}),
+            ...(res.targetId ? { targetId: res.targetId } : {}),
+            ...(res.proposed !== undefined ? { proposed: res.proposed } : {}),
+            ...(res.current !== undefined ? { current: res.current } : {}),
+          });
+        }
+        return ok({
+          accepted: proposalId,
+          action: res.action,
+          applied: res.targetId,
+          capabilitiesGranted: res.capabilitiesGranted,
+          remainingProposals: res.remaining,
+          note: 'applied to the open Fold — call save_deck when the work is done.',
+        });
+      },
+    },
+
+    {
+      name: 'reject_proposal',
+      description: 'Drop a staged proposal without applying it. The same action the human takes by clicking Reject on the proposal card.',
+      inputSchema: {
+        type: 'object',
+        properties: { proposalId: { type: 'string', description: 'Proposal id from list_proposals' } },
+        required: ['proposalId'],
+      },
+      execute: async ({ proposalId }) => {
+        if (!proposals.reject(proposalId)) return fail(`unknown proposal "${proposalId}" — call list_proposals`);
+        return ok({ rejected: proposalId, remainingProposals: proposals.count() });
+      },
     },
   ];
 }

@@ -1,20 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { buildModel, parseDeck } from '../../vendor/format-dist/index.js';
-import { harness, innerWith, sampleDeck } from './harness.js';
+import { KINDS, buildModel, parseDeck } from '../../vendor/format-dist/index.js';
+import { DeckStore } from '../../src/core/deck-store.js';
+import { ProposalStore } from '../../src/core/proposal-store.js';
+import { createRegistry } from '../../src/core/tools.js';
+import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
 
 /* These run against the REAL vendored @origami/format + @origami/runtime — no mocks, no
    stubs. Every assertion is about observable deck state (what the model holds, what the
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 14 web tools, and NOT accept/reject', () => {
+  it('registers exactly the 21 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
+      'accept_proposal',
       'add_chunk',
+      'add_custom_fold',
       'create_deck',
+      'define_block',
+      'delete_block',
       'delete_chunk',
       'get_kind_schema',
+      'list_block_defs',
       'list_chunks',
       'list_proposals',
       'origami_guide',
@@ -22,13 +30,36 @@ describe('tool surface', () => {
       'propose_chunk',
       'propose_delete',
       'read_chunk',
+      'reject_proposal',
+      'save_deck',
       'set_fold_type',
       'set_header',
       'write_chunk',
     ]);
-    // the deliberate design change: no agent can apply its own proposal
-    expect(h.registry.get('accept_proposal')).toBeUndefined();
-    expect(h.registry.get('reject_proposal')).toBeUndefined();
+    // the filesystem-bound trio stays out
+    for (const absent of ['list_decks', 'open_deck', 'refresh_sources']) {
+      expect(h.registry.get(absent), absent).toBeUndefined();
+    }
+  });
+
+  it("origami_guide's kind catalog matches the format library's actual KINDS", async () => {
+    const guide = await harness().json('origami_guide');
+    expect(Object.keys(guide.kinds).sort()).toEqual(Object.keys(KINDS).sort());
+    for (const key of Object.keys(KINDS)) {
+      expect(guide.kinds[key].name, key).toBe(KINDS[key]!.name);
+      expect(guide.kinds[key].schema, key).toEqual(KINDS[key]!.schemaComment);
+    }
+  });
+
+  it('origami_guide advertises every registered tool and no phantom ones', async () => {
+    const h = harness();
+    const guide = await h.json('origami_guide');
+    const registered = h.registry.list().map((t) => t.name).sort();
+    expect(Object.keys(guide.tools).sort()).toEqual(registered);
+    // and the review protocol no longer claims only a human can resolve a proposal
+    expect(guide.reviewProtocol).toMatch(/EITHER a human .* OR by you calling accept_proposal \/ reject_proposal/);
+    expect(guide.knownGaps).toBeUndefined();
+    expect(Object.keys(guide.notAvailableHere).sort()).toEqual(['list_decks', 'open_deck', 'refresh_sources']);
   });
 
   it('every tool carries a description and an object input schema', () => {
@@ -43,7 +74,10 @@ describe('tool surface', () => {
     const guide = await h.json('origami_guide');
     expect(guide.formatVersion).toBe('1');
     expect(Object.keys(guide.kinds)).toContain('free');
-    expect(guide.notAvailableHere.accept_proposal).toMatch(/only the human/i);
+    // v1 listed accept/reject as unavailable-by-design; they are real tools now
+    expect(guide.notAvailableHere.accept_proposal).toBeUndefined();
+    expect(guide.tools.accept_proposal).toMatch(/Apply a staged proposal/);
+    expect(guide.tools.save_deck).toMatch(/writable handle/);
 
     const one = await h.json('origami_guide', { kind: 'free' });
     expect(one.kind).toBe('free');
@@ -145,14 +179,224 @@ describe('create_deck -> add_chunk -> list/read/write_chunk -> serialize round-t
     expect(manifest.foldType).toBe('scroll');
   });
 
-  it('create_deck refuses to discard an open Fold with unsaved changes', async () => {
+  it('create_deck refuses to discard an open Fold with unsaved changes, unless told to', async () => {
     const h = harness();
     await h.json('create_deck', { title: 'First' });
     await h.json('add_chunk', {});
     const r = await h.call('create_deck', { title: 'Second' });
     expect(r.isError).toBe(true);
-    expect(JSON.parse(r.content[0]!.text).error).toMatch(/unsaved changes/);
+    expect(JSON.parse(r.content[0]!.text).error).toMatch(/discard:true/);
     expect(h.deck.model().title).toBe('First');
+
+    // an unattended agent can proceed on its own say-so
+    const forced = await h.json('create_deck', { title: 'Second', discard: true });
+    expect(forced.title).toBe('Second');
+    expect(h.deck.model().title).toBe('Second');
+  });
+
+  it('create_deck honours foldType scroll and it survives serialization', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Long Read', foldType: 'scroll' });
+    expect(created.foldType).toBe('scroll');
+    expect(buildModel(parseDeck(h.deck.serialize())).foldType).toBe('scroll');
+
+    const ledger = await h.json('create_deck', { title: 'Ledger One', foldType: 'ledger', discard: true });
+    expect(ledger.foldType).toBe('ledger');
+  });
+
+  it('add_custom_fold takes a whole page and reports the padlock honestly', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Custom' });
+
+    const inert = await h.json('add_custom_fold', {
+      html: '<div class="slide-inner"><h2>Quarterly report</h2><div class="card-grid"><div class="stat-card"><div class="big">42</div><div class="lbl">Sites</div></div></div></div>',
+      label: 'Report',
+    });
+    expect(inert.padlock).toBe(false);
+    expect(inert.activeContent).toEqual([]);
+    expect(h.deck.model().slides.get(inert.foldId)!.label).toBe('Report');
+    expect(h.deck.serialize()).toContain('Quarterly report');
+
+    const active = await h.json('add_custom_fold', { html: '<div class="slide-inner"><style>h2{color:red}</style><h2>Styled</h2></div>' });
+    expect(active.padlock).toBe(true);
+    expect(active.activeContent.length).toBeGreaterThan(0);
+    expect(active.note).toMatch(/padlock/);
+  });
+});
+
+describe('composite blocks', () => {
+  const DEF = {
+    kind: 'x.kpi',
+    name: 'KPI card',
+    version: 1,
+    fields: [
+      { name: 'value', type: 'text', label: 'Value' },
+      { name: 'label', type: 'text', label: 'Label' },
+    ],
+    template: '<div class="stat-card"><div class="big">{{value}}</div><div class="lbl">{{label}}</div></div>',
+  };
+
+  it('define -> instance -> list -> delete keeps the placed content as inert markup', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+
+    const defined = await h.json('define_block', { def: DEF });
+    expect(defined).toMatchObject({ defined: 'x.kpi', version: 1, fields: ['value', 'label'] });
+
+    const listed = await h.json('list_block_defs', {});
+    expect(listed.blocks).toHaveLength(1);
+    expect(listed.blocks[0]).toMatchObject({ kind: 'x.kpi', name: 'KPI card', version: 1 });
+
+    const placed = await h.json('add_chunk', { block: 'x.kpi', fields: { value: '128', label: 'Deployments' } });
+    const inner = h.deck.model().slides.get(placed.chunkId)!.inner;
+    expect(inner).toContain('128');
+    expect(inner).toContain('Deployments');
+    expect(inner).toContain('data-odata="block"');
+    expect(h.deck.model().slides.get(placed.chunkId)!.label).toBe('KPI card');
+
+    const deleted = await h.json('delete_block', { kind: 'x.kpi' });
+    expect(deleted).toMatchObject({ deleted: 'x.kpi', name: 'KPI card', instancesFrozen: 1 });
+    const after = h.deck.model().slides.get(placed.chunkId)!.inner;
+    expect(after).toContain('128'); // the baked output survives
+    expect(after).not.toContain('data-odata="block"'); // the dangling data-script does not
+    expect(Object.keys(h.deck.model().blocks)).toHaveLength(0);
+  });
+
+  it('rejects a block def whose template would render active content', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Bad block' });
+    const r = await h.call('define_block', {
+      def: { ...DEF, kind: 'x.evil', template: '<div onclick="steal()">{{value}}</div>' },
+    });
+    expect(r.isError).toBe(true);
+    expect(Object.keys(h.deck.model().blocks)).toHaveLength(0);
+  });
+
+  it('add_chunk refuses an unknown composite kind and names what IS defined', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Unknown block' });
+    await h.json('define_block', { def: DEF });
+    const r = await h.call('add_chunk', { block: 'x.nope', fields: {} });
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.content[0]!.text).availableBlocks).toEqual(['x.kpi']);
+  });
+});
+
+describe('table formulas are baked by the real calc engine', () => {
+  /* The point of vendoring @origami/calc: assert the ARITHMETIC lands in the file, not that
+     some function was called. B*C per row and a SUM over the column. */
+  const tableInner = (rows: string[][]) =>
+    `<div class="o-table-shell">
+<script type="application/json" data-odata="table">
+${JSON.stringify(
+  {
+    columns: [{ label: 'Item' }, { label: 'Qty', align: 'right' }, { label: 'Unit', align: 'right' }, { label: 'Total', align: 'right' }],
+    rows,
+    formulas: { D1: '=B1*C1', D2: '=B2*C2', D3: '=SUM(D1:D2)' },
+    named: { grandTotal: '=D3' },
+  },
+  null,
+  2
+)}
+</script>
+      <div class="o-table" data-table-mount></div>
+    </div>`;
+
+  const tableJson = (text: string, chunkId: string) => {
+    const inner = buildModel(parseDeck(text)).slides.get(chunkId)!.inner;
+    return JSON.parse(/data-odata="table"[^>]*>([\s\S]*?)<\/script>/.exec(inner)![1]!.replace(/\\u003c/g, '<'));
+  };
+
+  it('computes 7*3, 5*4 and their SUM at write time', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    // deliberately WRONG stale values in the D column — the bake must overwrite them
+    const added = await h.json('add_chunk', {
+      kind: 'table',
+      html: tableInner([
+        ['Widgets', '7', '3', '999'],
+        ['Gadgets', '5', '4', '999'],
+        ['Total', '', '', '999'],
+      ]),
+    });
+
+    const data = tableJson(h.deck.serialize(), added.chunkId);
+    expect(data.rows[0][3]).toBe('21'); // 7 * 3
+    expect(data.rows[1][3]).toBe('20'); // 5 * 4
+    expect(data.rows[2][3]).toBe('41'); // SUM(D1:D2)
+    expect(data.formulas.D3).toBe('=SUM(D1:D2)'); // the formulas ride along, inert
+  });
+
+  it('re-bakes on write_chunk too, so an edited table is never stale', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger 2' });
+    const added = await h.json('add_chunk', { kind: 'table' });
+
+    await h.json('write_chunk', {
+      chunkId: added.chunkId,
+      html: tableInner([
+        ['Widgets', '10', '10', '0'],
+        ['Gadgets', '2', '6', '0'],
+        ['Total', '', '', '0'],
+      ]),
+    });
+
+    const data = tableJson(h.deck.serialize(), added.chunkId);
+    expect(data.rows[0][3]).toBe('100');
+    expect(data.rows[1][3]).toBe('12');
+    expect(data.rows[2][3]).toBe('112');
+  });
+
+  it('bakes the built-in table starter (3*4 + 2*5 = 22)', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Starter' });
+    const added = await h.json('add_chunk', { kind: 'table' });
+    const data = tableJson(h.deck.serialize(), added.chunkId);
+    expect([data.rows[0][3], data.rows[1][3], data.rows[2][3]]).toEqual(['12', '10', '22']);
+  });
+
+  it('leaves a table with no formulas exactly as written', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'No formulas' });
+    const plain = '<div class="o-table-shell">\n<script type="application/json" data-odata="table">\n{"columns":[{"label":"A"}],"rows":[["x"]]}\n</script>\n<div class="o-table" data-table-mount></div>\n</div>';
+    const added = await h.json('add_chunk', { kind: 'table', html: plain });
+    expect(tableJson(h.deck.serialize(), added.chunkId).rows).toEqual([['x']]);
+  });
+});
+
+describe('save_deck', () => {
+  it('validates and never throws when the host has no save route', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Nowhere' });
+    const res = await h.call('save_deck', {});
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body).toMatchObject({ saved: false, validated: true, title: 'Nowhere', slides: 1 });
+    expect(body.bytes).toBeGreaterThan(1000);
+  });
+
+  it('reports written:true through an injected save route, and passes it the real bytes', async () => {
+    const deck = new DeckStore();
+    const proposals = new ProposalStore();
+    let captured = '';
+    const registry = createRegistry({
+      deck,
+      proposals,
+      runtimeJs,
+      save: async (text) => {
+        captured = text;
+        return { written: true, where: 'deck.origami.html', note: 'written to the file on disk.' };
+      },
+    });
+    await registry.invoke('create_deck', { title: 'Somewhere' });
+    await registry.invoke('add_chunk', { html: innerWith('Saved heading', 'Saved body') });
+    const body = JSON.parse((await registry.invoke('save_deck', {})).content[0]!.text);
+
+    expect(body).toMatchObject({ saved: true, validated: true, where: 'deck.origami.html', slides: 2 });
+    // the bytes handed to the page are the real, complete, re-parseable Fold
+    expect(captured).toContain('Saved heading');
+    expect(buildModel(parseDeck(captured)).order).toHaveLength(2);
+    expect(body.bytes).toBe(new TextEncoder().encode(captured).length);
   });
 });
 
@@ -380,5 +624,77 @@ describe('proposals: staged, human-applied', () => {
     const h = harness();
     await h.json('create_deck', { title: 'PR unknown' });
     expect(await h.proposals.accept(h.deck, 'pdeadbeef')).toMatchObject({ ok: false, conflicted: false });
+  });
+});
+
+describe('an agent can resolve its own proposals — the same path the card uses', () => {
+  it('propose_chunk -> accept_proposal applies, with provenance, end to end', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Unattended' });
+    const id = created.chunks[0].id;
+
+    const staged = await h.json('propose_chunk', {
+      chunkId: id,
+      html: innerWith('Agent decided', 'No human present'),
+      author: 'agent:codex',
+    });
+    expect(h.deck.model().slides.get(id)!.inner).not.toContain('Agent decided');
+
+    const accepted = await h.json('accept_proposal', { proposalId: staged.proposalId });
+    expect(accepted).toMatchObject({ accepted: staged.proposalId, action: 'edit', applied: id, remainingProposals: 0 });
+    expect(h.deck.model().slides.get(id)!.inner).toContain('Agent decided');
+    expect(h.deck.model().slides.get(id)!.oby).toBe('agent:codex'); // same stamp as a card accept
+    expect(h.proposals.count()).toBe(0);
+  });
+
+  it('reject_proposal drops it and leaves the Fold byte-identical', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Unattended reject' });
+    const before = h.deck.serialize();
+    const staged = await h.json('propose_chunk', { chunkId: created.chunks[0].id, html: innerWith('Dropped', 'Dropped') });
+
+    const rejected = await h.json('reject_proposal', { proposalId: staged.proposalId });
+    expect(rejected).toMatchObject({ rejected: staged.proposalId, remainingProposals: 0 });
+    expect(h.deck.serialize()).toBe(before);
+
+    const again = await h.call('reject_proposal', { proposalId: staged.proposalId });
+    expect(again.isError).toBe(true); // and a second reject is an error envelope, not a throw
+  });
+
+  it('accept_proposal refuses a conflicted proposal with the 3-way view', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Unattended conflict' });
+    const id = created.chunks[0].id;
+    const staged = await h.json('propose_chunk', { chunkId: id, html: innerWith('Stale', 'Stale') });
+    await h.json('write_chunk', { chunkId: id, html: innerWith('Moved on', 'Moved on') });
+
+    const res = await h.call('accept_proposal', { proposalId: staged.proposalId });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body).toMatchObject({ conflicted: true, targetId: id });
+    expect(body.proposed).toContain('Stale');
+    expect(body.current).toContain('Moved on');
+    expect(h.deck.model().slides.get(id)!.inner).toContain('Moved on');
+    expect(h.proposals.count()).toBe(1); // still reviewable
+  });
+
+  it('accepting an unknown proposal id returns an error envelope', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Unattended unknown' });
+    const res = await h.call('accept_proposal', { proposalId: 'pdeadbeef' });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/unknown proposal/);
+  });
+
+  it('propose_add -> accept_proposal adds the slide with the proposed label', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Unattended add' });
+    const staged = await h.json('propose_add', { html: innerWith('Agent added', 'Body'), label: 'Agent fold', author: 'agent:codex' });
+    expect(h.deck.model().order).toHaveLength(1);
+
+    await h.json('accept_proposal', { proposalId: staged.proposalId });
+    expect(h.deck.model().order).toHaveLength(2);
+    expect(h.deck.model().slides.get(staged.newChunkId)!.label).toBe('Agent fold');
+    expect(h.deck.serialize()).toContain('Agent added');
   });
 });

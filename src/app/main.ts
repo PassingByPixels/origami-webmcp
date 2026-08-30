@@ -1,7 +1,7 @@
 import { DeckStore } from '../core/deck-store.js';
 import { ProposalStore } from '../core/proposal-store.js';
 import { connectWebMcp } from '../core/registry.js';
-import { createRegistry } from '../core/tools.js';
+import { createRegistry, type SaveOutcomeReport } from '../core/tools.js';
 import { TestConsole } from './console.js';
 import {
   canSaveInPlace,
@@ -24,7 +24,7 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 const deck = new DeckStore();
 const proposals = new ProposalStore();
-const registry = createRegistry({ deck, proposals });
+const registry = createRegistry({ deck, proposals, save: saveFromTool });
 
 const preview = new Preview($<HTMLIFrameElement>('preview'), $('empty-state'));
 
@@ -179,6 +179,38 @@ btnSave.addEventListener('click', async () => {
 btnSaveAs.addEventListener('click', async () => {
   if (deck.isOpen()) await doSaveAs(deck.serialize(new Date().toISOString()));
 });
+
+/**
+ * save_deck's disk route. It must NEVER throw and never open a picker: an unattended agent has
+ * nobody to click one. With a writable handle it writes the real file; without one it leaves the
+ * working copy in the autosave slot and says so, so the agent can tell the human to press Save.
+ */
+async function saveFromTool(text: string): Promise<SaveOutcomeReport> {
+  if (handle) {
+    const out = await saveToHandle(handle, text);
+    if (out.ok) {
+      deck.markSaved();
+      clearAutosave();
+      refreshChrome();
+      say(`Saved to ${out.name} (by an agent)`);
+      return { written: true, where: out.name, note: 'written to the file on disk.' };
+    }
+    writeAutosave(deck.name(), text);
+    say(`An agent tried to save and could not: ${out.reason}`, true);
+    return {
+      written: false,
+      where: 'the browser autosave slot',
+      note: `the file could not be written (${out.reason}) — the working copy is kept in the browser. Ask the human to press Save.`,
+    };
+  }
+  const kept = writeAutosave(deck.name(), text);
+  say('An agent finished — press Save to put the Fold on disk.');
+  return {
+    written: false,
+    where: kept ? 'the browser autosave slot' : 'memory only (browser storage is unavailable)',
+    note: `this page holds no writable handle for "${deck.name()}" — nothing was written to disk. Ask the human to press Save (or Save as…) in the page.`,
+  };
+}
 
 async function doSaveAs(text: string): Promise<void> {
   const res = await saveAs(text, deck.name());
