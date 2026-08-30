@@ -1,0 +1,25 @@
+import { validateDrawData } from '../draw-data.js';
+export const drawBlock = {
+    key: 'draw',
+    name: 'Drawing',
+    schemaComment: [
+        'a freehand drawing — an IN-SLIDE block, insertable on any fold (a "Draw" fold is a free card holding one)',
+        'shape: <figure class="o-drawfig anim"> holding ONE inert <script type="application/json" data-odata="draw"> block,',
+        '  then <div class="o-draw" data-draw-mount></div> (the runtime renders the hand-drawn SVG here), then a <figcaption>',
+        'JSON shape: { elements: [ {id, type: rect|diamond|ellipse|arrow|line|freedraw|text, x, y, width, height,',
+        '  angle?, stroke: "#hex", fill?: ""|"#hex", fillStyle?: hachure|cross|solid, strokeWidth?: 1-8,',
+        '  strokeStyle?: solid|dashed|dotted, roughness?: 0|1|2, opacity?: 0-100, seed?, points?: [[dx,dy]...],',
+        '  text?, fontSize?, font?: playfair|lora|inter|source-serif|caveat, textAlign?, name?,',
+        '  attach?: { from?: id, to?: id } } ] } (max 200 elements)',
+        'attach glues an arrow/line end to another element: moving either party re-points the arrow — prefer it over hand-placing endpoints',
+        'wpct (10-100) sets the block layout width percent — the width grip; it never rescales the ink',
+        'replayOrder lists element ids in stroke-replay order and replay:false disables the entrance animation',
+        'coordinates are unbounded scene units; the canvas is FIXED at w×h once saved — place new elements inside 0,0..w,h',
+        'agents: read the existing scene FIRST, then patch the minimum — elements are addressed by id; keep ids stable',
+        'give each important element a short unique name (≤40 chars) so follow-up prompts can address it by meaning',
+        'arrow/line/freedraw carry their shape in points ([[dx,dy] relative to x,y], at least 2); text carries its string in text',
+        'seed drives the deterministic hand-drawn jitter — the same seed always renders the same strokes',
+        'when editing the JSON keep every "<" escaped as \\u003c — never emit a raw "<" inside the block',
+    ],
+    data: { placement: 'block', validate: validateDrawData },
+};
