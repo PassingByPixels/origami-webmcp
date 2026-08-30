@@ -170,7 +170,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         }
         const deckTitle = (typeof title === 'string' && title.trim()) || 'Untitled deck';
         const ft = (foldType ?? 'deck') as FoldType;
-        const text = assembleBlankDeck({
+        const text = await assembleBlankDeck({
           title: deckTitle,
           foldType: ft,
           now: new Date().toISOString(),

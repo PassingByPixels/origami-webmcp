@@ -1,5 +1,4 @@
 import { FORMAT_VERSION, type FoldType, type Manifest } from '../../vendor/format-dist/index.js';
-import { assembleDeck } from '../../vendor/runtime-dist/index.js';
 import { FREE_STARTER_INNER } from './starters.js';
 
 /* Ported from the monorepo's packages/mcp/src/new-deck.ts. Same manifest, same assembleDeck,
@@ -8,7 +7,12 @@ import { FREE_STARTER_INNER } from './starters.js';
    ONE deviation: the stdio build inlines the viewer IIFE at BUILD time via an esbuild `define`.
    A 242 KB string inlined into the app bundle would be paid for on every page load even by
    someone who only opens an existing deck, so this build ships it as a static sibling asset and
-   fetches it once, lazily, on the first create_deck. Same bytes, later. */
+   fetches it once, lazily, on the first create_deck. Same bytes, later.
+
+   @origami/runtime is imported DYNAMICALLY for the same reason: assembleDeck drags the base +
+   kinds + theme stylesheets with it (340 KB of the 479 KB bundle), and nothing but create_deck
+   needs them. Opening an existing Fold never loads that chunk — the Fold carries its own
+   engine, so serializeModel alone renders it. */
 
 export interface BlankDeckOpts {
   title: string;
@@ -23,7 +27,8 @@ export interface BlankDeckOpts {
   runtimeJs: string;
 }
 
-export function assembleBlankDeck(opts: BlankDeckOpts): string {
+export async function assembleBlankDeck(opts: BlankDeckOpts): Promise<string> {
+  const { assembleDeck } = await import('../../vendor/runtime-dist/index.js');
   const { title, foldType, now, id, slideId, runtimeJs } = opts;
   const manifest: Manifest = {
     v: FORMAT_VERSION,
