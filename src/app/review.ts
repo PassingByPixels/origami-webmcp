@@ -8,6 +8,13 @@ import type { ProposalStore } from '../core/proposal-store.js';
  * write_chunk uses — a reviewed change and a trusted change land identically.
  */
 export class ReviewPanel {
+  /* refresh() awaits a hash per proposal, so two refreshes can be in flight at once — an
+     accept fires one from the deck's change event and another from the queue's. Without a
+     generation token the SLOWER, older render can land last and paint the card that was just
+     accepted back onto the page. Every refresh claims a generation and drops its own result
+     if a newer one started while it was awaiting. */
+  private generation = 0;
+
   constructor(
     private readonly list: HTMLElement,
     private readonly countEl: HTMLElement,
@@ -19,6 +26,7 @@ export class ReviewPanel {
   }
 
   async refresh(): Promise<void> {
+    const mine = ++this.generation;
     this.countEl.textContent = String(this.proposals.count());
     if (!this.deck.isOpen() || this.proposals.count() === 0) {
       this.list.replaceChildren(
@@ -29,6 +37,7 @@ export class ReviewPanel {
       return;
     }
     const views = await this.proposals.views(this.deck.model());
+    if (mine !== this.generation) return; // a newer refresh started while we hashed — it wins
     this.list.replaceChildren(...views.map((v) => this.card(v)));
   }
 
@@ -54,11 +63,18 @@ export class ReviewPanel {
       );
     }
 
-    if (v.before !== undefined && v.action !== 'add') {
-      card.append(el('div', 'diff-label', 'Now'), el('pre', '', trim(v.before)));
-    }
+    // The proposed text is what the decision turns on, so it is open; the current text is
+    // one click away. Two tall blocks pushed Accept/Reject off the panel.
     if (v.after !== undefined) {
       card.append(el('div', 'diff-label', v.action === 'add' ? 'New chunk' : 'Proposed'), el('pre', '', trim(v.after)));
+    }
+    if (v.before !== undefined && v.action !== 'add') {
+      const details = document.createElement('details');
+      details.className = 'before';
+      const summary = document.createElement('summary');
+      summary.textContent = v.action === 'edit' ? 'Current text' : 'The chunk as it stands';
+      details.append(summary, el('pre', '', trim(v.before)));
+      card.append(details);
     }
 
     const actions = el('div', 'card-actions');

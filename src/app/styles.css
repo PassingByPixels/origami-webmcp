@@ -20,6 +20,10 @@
 
 * { box-sizing: border-box; }
 
+/* Every author `display:` below outranks the UA's [hidden]{display:none}, so state toggled
+   with el.hidden would render anyway. This one line keeps the attribute authoritative. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -227,12 +231,15 @@ main {
   border-radius: 6px;
   padding: 8px;
   margin: 0 0 9px;
-  max-height: 150px;
+  max-height: 128px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
 }
 .card .diff-label { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 3px; }
+.card details.before { margin-bottom: 9px; }
+.card details.before summary { font-size: 11px; color: var(--ink-faint); cursor: pointer; margin-bottom: 5px; }
+.card details.before pre { margin-bottom: 0; }
 .card-actions { display: flex; gap: 8px; }
 .card-actions button { flex: 1 1 auto; font-size: 12px; padding: 6px 10px; }
 
