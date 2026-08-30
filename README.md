@@ -76,7 +76,7 @@ Keyboard: **Ctrl/Cmd+Enter** in the arguments box invokes the selected tool.
 ```
 npm run typecheck     # tsc over src/ and again over tests/ + build scripts
 npm test              # vitest — 43 units against the real vendored @origami/format + @origami/calc
-npm run test:e2e      # playwright — 17 smokes in real Chromium against the built dist/
+npm run test:e2e      # playwright — 21 smokes: 17 in bundled Chromium, 4 in your installed Chrome
 ```
 
 * `tests/e2e/app.spec.ts` drives the console the way you would by hand.
@@ -87,6 +87,9 @@ npm run test:e2e      # playwright — 17 smokes in real Chromium against the bu
   `origami_guide` → `get_kind_schema('venn')` → `create_deck(foldType:'scroll')` → a venn fold →
   a flow fold → `propose_chunk` → `accept_proposal` → `save_deck`, asserting the serialized deck
   carries both data blocks and the accepted change, and that the diagrams actually mounted.
+* `tests/e2e/webmcp-native.spec.ts` runs that same unattended flow through the **real** WebMCP API
+  in your **installed stable Chrome** — see “This is verified, not assumed” below. It skips loudly
+  if you have no Chrome ≥ 146, and never touches your own Chrome profile.
 
 `npm run test:e2e` needs `npx playwright install chromium` once, and a current `dist/`
 (`npm run build`).
@@ -101,34 +104,57 @@ proposal](https://github.com/webmachinelearning/webmcp)), then `navigator.modelC
 of the ecosystem and the earlier Chrome previews expose). The status bar says which one it found,
 or *not available (console only)* — it never claims a connection it does not have.
 
-To get a real one, **verified against Chrome's own docs, not from memory**:
+**No Canary needed.** WebMCP ships behind a flag in **ordinary stable Chrome from version 146**
+(minimum 146.0.7672.0). Four steps:
 
-1. Install **Chrome Canary** (WebMCP landed as a flagged preview in Chrome 146; the Model Context
-   Tool Inspector's own prerequisites ask for **150.0.7861.0 or higher**, so take a recent Canary).
+1. Use the Chrome you already have, as long as it is **146 or newer** — check at `chrome://version`.
 2. Go to **`chrome://flags/#enable-webmcp-testing`**, set **“WebMCP for testing”** to **Enabled**,
-   and relaunch. (Flag name confirmed at
+   and relaunch. (Flag confirmed at
    [developer.chrome.com/docs/ai/webmcp](https://developer.chrome.com/docs/ai/webmcp).)
-3. Load `http://127.0.0.1:5173`. The status pill should now read
-   *WebMCP: connected via document.modelContext — 21 tools*.
+3. Load `http://127.0.0.1:5173`. The status pill now reads
+   **“WebMCP: connected via document.modelContext — 21 tools”**.
 4. To call the tools, install the **WebMCP – Model Context Tool Inspector** extension
    ([Chrome Web Store](https://chromewebstore.google.com/detail/gbpdfapgefenggkahomfgkhfehlcenpd),
    [source](https://github.com/beaufortfrancois/model-context-tool-inspector)). Its side panel lists
    every tool registered on the page, shows the input schema, and runs tools manually or through
    Gemini. It is written by a Chrome DevRel engineer but is **not** an officially supported Google
    product.
-5. Or drive them straight from DevTools:
-   ```js
-   const tools = await document.modelContext.getTools?.();
-   await document.modelContext.executeTool(tools[0], JSON.stringify({}));
-   ```
 
-Chrome's WebMCP origin trial runs from Chrome 149; until then the flag is the only way in. If none
-of that is available on your machine, nothing is lost — the test console does everything.
+Or drive them straight from DevTools — this is the real API, no extension required:
 
-**Untested claim, stated as such:** the Canary + flag + Inspector path above has *not* been run on
-this machine (no Canary installed here). What IS verified is the shim's fallback: in stock
-Chromium the app reports *not available (console only)* and all 21 tools still run — asserted by
-`tests/e2e/app.spec.ts`. Confirm the Canary path by following steps 1–4 and checking the pill.
+```js
+const tools = await document.modelContext.getTools();          // 21 of them
+const t = tools.find((x) => x.name === 'create_deck');
+await document.modelContext.executeTool(t, JSON.stringify({ title: 'Hello' }));
+```
+
+`localhost` counts as a secure context, so the plain `http://127.0.0.1:5173` dev server is fine —
+you do not need HTTPS.
+
+### This is verified, not assumed
+
+`tests/e2e/webmcp-native.spec.ts` proves it on a real browser: it launches the **installed stable
+Chrome** (`channel: 'chrome'`) in a throwaway profile with WebMCP enabled from the command line,
+and drives the app through Chrome's own `document.modelContext.getTools()` / `.executeTool()` —
+no mock host anywhere in that file. Last run, on **Chrome 151.0.7922.174**:
+
+```
+  no flags                  -> {"document":false,"navigator":false,"secureContext":true}
+  --enable-features=WebMCP  -> {"document":true,"navigator":true,"secureContext":true}
+  Chrome 151.0.7922.174 getTools() -> 21 tools; inputSchema arrives as "string"
+  drove 8 native executeTool calls on Chrome 151.0.7922.174; final Fold 389632 bytes
+```
+
+**The command-line equivalent of the flag is `--enable-features=WebMCP`** — undocumented, found by
+reading candidate feature names out of `chrome.dll` and testing them. Use it to script a browser;
+use the `chrome://flags` toggle for everyday browsing. (`--enable-features=WebMCPTesting` also
+works and additionally exposes `navigator.modelContextTesting`, a separate test-harness surface
+this app does not use.) One trap worth knowing: the API is **not** present on `about:blank`, so
+probe it on a real page or you will conclude the flag did nothing.
+
+The spec skips loudly, with a banner explaining why, on any machine without Chrome ≥ 146 — a
+skipped native proof must never read as a passing one. And if none of this is available to you,
+nothing is lost: the test console does everything.
 
 ---
 
