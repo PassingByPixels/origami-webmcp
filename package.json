@@ -9,7 +9,9 @@
     "serve": "node build.mjs --serve",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "demo": "node demo/author-demo.mjs",
+    "demo:audit": "node demo/audit-artifact.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
