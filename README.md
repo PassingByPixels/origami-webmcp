@@ -10,7 +10,11 @@ without a human ever clicking anything. When a human *is* watching, staged propo
 as review cards they can Accept or Reject — the same code path, a second front door.
 
 It is a static site: `npm run build` produces a `dist/` you can drop on any static host
-(origami.gratis included). Zero runtime npm dependencies, zero CDN references, no framework.
+(origami.gratis included). Zero runtime npm dependencies, no framework, and nothing is fetched
+from a CDN. `npm run build` prints every external URL string it finds in the bundle; the ones it
+lists are the SVG namespace (`http://www.w3.org/2000/svg`), the video-embed URL TEMPLATES the
+deck runtime builds when a Fold carries a video block, and one `origamilabs.nl` link. None of
+them loads app code, and none is fetched unless a deck asks for it.
 
 ---
 
@@ -75,8 +79,8 @@ Keyboard: **Ctrl/Cmd+Enter** in the arguments box invokes the selected tool.
 
 ```
 npm run typecheck     # tsc over src/ and again over tests/ + build scripts
-npm test              # vitest — 43 units against the real vendored @origami/format + @origami/calc
-npm run test:e2e      # playwright — 21 smokes: 17 in bundled Chromium, 4 in your installed Chrome
+npm test              # vitest — 95 units against the real vendored @origami/format + @origami/calc
+npm run test:e2e      # playwright — 32 smokes: 24 in bundled Chromium, 8 in your installed Chrome
 ```
 
 * `tests/e2e/app.spec.ts` drives the console the way you would by hand.
@@ -89,7 +93,14 @@ npm run test:e2e      # playwright — 21 smokes: 17 in bundled Chromium, 4 in y
   carries both data blocks and the accepted change, and that the diagrams actually mounted.
 * `tests/e2e/webmcp-native.spec.ts` runs that same unattended flow through the **real** WebMCP API
   in your **installed stable Chrome** — see “This is verified, not assumed” below. It skips loudly
-  if you have no Chrome ≥ 146, and never touches your own Chrome profile.
+  if you have no Chrome ≥ 146, and never touches your own Chrome profile. It also carries the
+  measurements the rest of this README quotes: what Chrome does with tool annotations, and the
+  three `SAVE (a|b|c)` tests behind “What a page can really save”.
+* The units cover `inspect_render`'s rules as arithmetic (no browser needed), every guide recipe
+  added to a real deck and re-validated, every fold starter, undo byte-compared against the Fold
+  before and after, and each `save_deck` outcome shape. `app.spec.ts` is where the claims that
+  need a real layout live: a recipe mounting and counting up, `inspect_render` finding a real
+  overflow and a real blank fold, and a staged proposal surviving an actual page reload.
 
 `npm run test:e2e` needs `npx playwright install chromium` once, and a current `dist/`
 (`npm run build`).
@@ -141,8 +152,15 @@ no mock host anywhere in that file. Last run, on **Chrome 151.0.7922.174**:
 ```
   no flags                  -> {"document":false,"navigator":false,"secureContext":true}
   --enable-features=WebMCP  -> {"document":true,"navigator":true,"secureContext":true}
-  Chrome 151.0.7922.174 getTools() -> 21 tools; inputSchema arrives as "string"
-  drove 8 native executeTool calls on Chrome 151.0.7922.174; final Fold 389632 bytes
+  Chrome 151.0.7922.174 getTools() -> 24 tools; inputSchema arrives as "string"
+  annotations survive registration? YES
+    origami_guide.annotations -> {"readOnlyHint":true,"untrustedContentHint":false}
+    delete_chunk.annotations  -> {"readOnlyHint":false,"untrustedContentHint":false}
+  drove 8 native executeTool calls on Chrome 151.0.7922.174; final Fold 391881 bytes
+  SAVE (b) userActivation at the call -> {"isActive":false,"hasBeenActive":true}
+  SAVE (b) downloads the browser actually STARTED -> 2
+  SAVE (c) OPFS read-back -> {"size":391251,"hasVenn":true,"hasManifest":true}
+  SAVE (a) {"quotaMB":10240,"storagePersisted":false,"handleIsStructuredCloneable":true}
 ```
 
 **The command-line equivalent of the flag is `--enable-features=WebMCP`** — undocumented, found by
