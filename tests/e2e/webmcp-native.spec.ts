@@ -1,6 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { chromium } from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
@@ -54,14 +54,24 @@ async function launchChrome(args: string[]): Promise<Chrome | { skip: string }> 
 }
 
 async function cleanup(dir: string): Promise<void> {
-  // Windows can hold the profile briefly after close; a couple of retries is enough.
-  for (let i = 0; i < 4; i++) {
+  // Chrome on Windows keeps a handle on the profile for a while after close — 4 quick retries
+  // was not enough and left a .tmp-chrome-* directory behind in the repo. Back off further, and
+  // sweep any survivors on the next run (see the beforeAll below) so junk cannot accumulate.
+  for (let i = 0; i < 12; i++) {
     try {
       await rm(dir, { recursive: true, force: true });
       return;
     } catch {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 250 * (i + 1)));
     }
+  }
+  console.log(`  note: could not remove the throwaway profile ${dir} — it is gitignored and the next run sweeps it`);
+}
+
+/** Delete throwaway profiles a previous run could not (Windows file locks). */
+async function sweepStaleProfiles(): Promise<void> {
+  for (const name of await readdir(process.cwd())) {
+    if (name.startsWith('.tmp-chrome-')) await rm(join(process.cwd(), name), { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -119,6 +129,9 @@ const URL = 'http://127.0.0.1:5174/index.html';
 const BLANK = 'http://127.0.0.1:5174/favicon.svg';
 
 test.describe('native WebMCP in the installed stable Chrome', () => {
+  test.beforeAll(sweepStaleProfiles);
+  test.afterAll(sweepStaleProfiles);
+
   test('the flag is what turns document.modelContext on — control vs treatment', async () => {
     const off = await launchChrome([]);
     if ('skip' in off) skipLoudly(off.skip);
