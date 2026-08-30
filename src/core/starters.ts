@@ -13,10 +13,8 @@ export const FREE_STARTER_INNER = `
 `;
 
 /** A starter ledger `table`: a tiny budget with live formulas + a named output. rows
-    are pre-baked. Same shape as the Studio's TABLE_STARTER. No raw "<" inside the JSON
-    block (the carrier invariant).
-
-    DEVIATION from stdio: the web app does NOT re-bake formulas on write — see bake.ts. */
+    are pre-baked (the app re-bakes on write anyway — see bake.ts). Same shape as the
+    Studio's TABLE_STARTER. No raw "<" inside the JSON block (the carrier invariant). */
 export const TABLE_STARTER_INNER = `
   <div class="o-table-shell">
     <header class="o-table-head">
