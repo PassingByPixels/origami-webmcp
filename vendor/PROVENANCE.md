@@ -11,3 +11,5 @@ Copied: 2026-08-30
                     do NOT import it; port definitions from it.)
 
 Refresh procedure: rebuild the source repo (npm run build), re-copy, update this file.
+
+- calc-dist/     = packages/calc/dist   (cleanroom calc engine; zero deps; exports recalc/recalcTabs; added 2026-08-30 for in-browser table recalc)
