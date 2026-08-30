@@ -11,6 +11,10 @@ interface FsaFileHandle {
   name: string;
   createWritable(): Promise<FsaWritable>;
   getFile(): Promise<File>;
+  /** Chrome keeps write permission across visits for a handle the human granted once; these
+      let the page ask what it still holds. MEASURED present on Chrome 151 (both functions). */
+  queryPermission?: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<PermissionState>;
+  requestPermission?: (opts?: { mode?: 'read' | 'readwrite' }) => Promise<PermissionState>;
 }
 interface FsaWindow {
   showOpenFilePicker?: (opts?: unknown) => Promise<FsaFileHandle[]>;
@@ -64,15 +68,39 @@ function legacyOpen(): Promise<OpenedFile | null> {
   });
 }
 
-export type SaveOutcome = { ok: true; how: 'in-place' | 'download'; name: string } | { ok: false; reason: string };
+export type SaveOutcome = { ok: true; how: 'in-place' | 'download'; name: string; bytes?: number } | { ok: false; reason: string };
 
-/** Write back to the handle the file came from. */
+/**
+ * Write back to the handle the file came from, and VERIFY the bytes landed by reading the file
+ * size back. save_deck reports `saved: true` on the strength of this, so "createWritable did not
+ * throw" is not good enough.
+ *
+ * Permission is checked BEFORE the write rather than after a failure: Chrome can still hold the
+ * handle while the write permission has lapsed, and `prompt` cannot be resolved by an unattended
+ * agent (requestPermission needs a user gesture), so the honest move is to say so rather than to
+ * throw an opaque error.
+ */
 export async function saveToHandle(handle: FsaFileHandle, text: string): Promise<SaveOutcome> {
   try {
+    if (typeof handle.queryPermission === 'function') {
+      const state = await handle.queryPermission({ mode: 'readwrite' });
+      if (state !== 'granted') {
+        return {
+          ok: false,
+          reason:
+            state === 'prompt'
+              ? 'write permission for this file has lapsed and re-granting it needs a click — press Save in the page'
+              : `write permission for this file is "${state}"`,
+        };
+      }
+    }
     const w = await handle.createWritable();
     await w.write(text);
     await w.close();
-    return { ok: true, how: 'in-place', name: handle.name };
+    const bytes = (await handle.getFile()).size;
+    const expected = new TextEncoder().encode(text).length;
+    if (bytes !== expected) return { ok: false, reason: `wrote ${expected} bytes but the file holds ${bytes}` };
+    return { ok: true, how: 'in-place', name: handle.name, bytes };
   } catch (e) {
     return { ok: false, reason: (e as Error).message };
   }

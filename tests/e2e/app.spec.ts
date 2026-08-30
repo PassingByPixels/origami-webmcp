@@ -429,3 +429,38 @@ test('a reloaded proposal against an unchanged chunk still applies', async ({ pa
   await expect(preview(page)).toContainText(marker);
   await expect(page.getByTestId('proposal-card')).toHaveCount(0);
 });
+
+test('save_deck banks the Fold in browser storage, and the human can get it back out', async ({ page }) => {
+  /* The route back out of OPFS. save_deck always writes the whole Fold into the origin's private
+     file system, which is real storage but INVISIBLE — nothing outside this page can read it. So
+     "it is saved in the browser" would be true and useless without this button. */
+  await page.goto('/index.html');
+  await expect(page.getByTestId('btn-lastsave')).toBeHidden(); // nothing banked yet
+
+  await invoke(page, 'create_deck', { title: 'Banked Deck', discard: true });
+  await invoke(page, 'add_chunk', { starter: 'flowchart' });
+  const saved = await invoke(page, 'save_deck', {});
+
+  // no picker was clicked, so it must NOT claim a save — but the bytes are not lost either
+  expect(saved.body.saved).toBe(false);
+  expect(saved.body.opfs.written).toBe(true);
+  expect(saved.body.opfs.path).toBe('saves/banked-deck.origami.html');
+  expect(saved.body.opfs.bytes).toBe(saved.body.bytes);
+  expect(saved.body.durability).toMatch(/in this browser only/);
+
+  // the affordance appears, named with the real size
+  const btn = page.getByTestId('btn-lastsave');
+  await expect(btn).toBeVisible();
+  await expect(btn).toContainText('Download last save');
+
+  // and clicking it hands back the SAME bytes save_deck banked
+  const [download] = await Promise.all([page.waitForEvent('download'), btn.click()]);
+  expect(download.suggestedFilename()).toBe('banked-deck.origami.html');
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const text = Buffer.concat(chunks).toString('utf8');
+  expect(Buffer.byteLength(text, 'utf8')).toBe(saved.body.bytes);
+  expect(text).toContain('data-odata="flow"');
+  expect(text).toContain('id="origami-manifest"');
+});

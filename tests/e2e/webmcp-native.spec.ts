@@ -38,7 +38,7 @@ async function launchChrome(args: string[]): Promise<Chrome | { skip: string }> 
   const dir = await mkdtemp(join(process.cwd(), '.tmp-chrome-'));
   let ctx: BrowserContext;
   try {
-    ctx = await chromium.launchPersistentContext(dir, { channel: 'chrome', headless: true, args });
+    ctx = await chromium.launchPersistentContext(dir, { channel: 'chrome', headless: true, args, acceptDownloads: true });
   } catch (e) {
     await cleanup(dir);
     return { skip: `stable Chrome could not be launched (channel:"chrome"): ${(e as Error).message.split('\n')[0]}` };
@@ -294,6 +294,183 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
       expect(saved.isError).toBe(false);
       expect(saved.body).toMatchObject({ saved: false, validated: true, title: 'Native Agent Run', slides: 3 });
       console.log(`  drove ${8} native executeTool calls on Chrome ${c.version}; final Fold ${saved.body.bytes} bytes`);
+    } finally {
+      await close(c);
+    }
+  });
+
+  /* ---------------------------------------------------------------------------------------
+     THE SAVE INVESTIGATION.
+
+     The challenge that started it: "you were able to save the demo html without me, so it must
+     be possible." It was, and it is worth being exact about how. demo/author-demo.mjs drives the
+     page from NODE; it reads the finished deck out of the preview's srcdoc and then calls
+     node:fs writeFile itself. Those bytes were written by a process on the machine, not by the
+     page. Nothing inside the sandbox gained a new power.
+
+     What the PAGE can do is measured below, on the installed stable Chrome, rather than assumed.
+     --------------------------------------------------------------------------------------- */
+
+  test('SAVE (b): a programmatic download with NO user activation', async () => {
+    /* The trap this test exists to avoid: page.evaluate() runs WITH transient user activation, so
+       the obvious version of this measurement passes for the wrong reason. The first attempt at it
+       reported isActive:true and proved nothing. Everything here is therefore scheduled from a
+       timer at page load — no evaluate, no click, nothing that hands the page activation at the
+       moment of the attempt — and the activation state is recorded at the call itself. */
+    const launched = await launchChrome(FEATURE_ARGS);
+    if ('skip' in launched) skipLoudly(launched.skip);
+    const c = launched as Chrome;
+    const started: string[] = [];
+    c.page.on('download', (d) => started.push(d.suggestedFilename()));
+    try {
+      await c.page.addInitScript(() => {
+        (window as any).__save = { stage: 'scheduled' };
+        setTimeout(() => {
+          const p = (window as any).__save;
+          p.activationAtCall = {
+            isActive: navigator.userActivation?.isActive,
+            hasBeenActive: navigator.userActivation?.hasBeenActive,
+          };
+          for (const n of [1, 2]) {
+            try {
+              // window.URL, not URL: this file has a module-level `URL` const for the app's
+              // address, and inside addInitScript tsc resolves the bare name to that string.
+              const url = window.URL.createObjectURL(new Blob(['deck bytes ' + n], { type: 'text/html' }));
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'gestureless-' + n + '.origami.html';
+              document.body.append(a);
+              a.click();
+              a.remove();
+              p['attempt' + n] = 'no throw';
+            } catch (e) {
+              p['attempt' + n] = 'threw: ' + String(e);
+            }
+          }
+          p.stage = 'done';
+        }, 6500); // well past the ~5s transient-activation window
+      });
+      await c.page.goto(URL);
+      await c.page.waitForFunction(() => (window as any).__save?.stage === 'done', null, { timeout: 30_000 });
+      await c.page.waitForTimeout(1500);
+      const probe = await c.page.evaluate(() => (window as any).__save);
+
+      console.log(`  SAVE (b) on Chrome ${c.version}, headless:`);
+      console.log(`    userActivation at the call -> ${JSON.stringify(probe.activationAtCall)}`);
+      console.log(`    attempt 1 -> ${probe.attempt1};  attempt 2 -> ${probe.attempt2}`);
+      console.log(`    downloads the browser actually STARTED -> ${started.length} ${JSON.stringify(started)}`);
+      console.log('    CAVEAT: Playwright runs with acceptDownloads, so a "Download multiple files?"');
+      console.log('    prompt that a default profile might raise is auto-accepted here. This proves Chrome');
+      console.log('    STARTS the download with no gesture, not that an un-automated profile never asks.');
+
+      expect(probe.activationAtCall.isActive, 'the measurement is void if activation was present').toBe(false);
+      expect(probe.attempt1).toBe('no throw');
+      expect(probe.attempt2).toBe('no throw');
+      // both, not just the first: the second is where multiple-download gating would bite
+      expect(started, 'Chrome started BOTH gesture-less downloads').toHaveLength(2);
+    } finally {
+      await close(c);
+    }
+  });
+
+  test('SAVE (c): save_deck writes the OPFS backstop and reports each outcome truthfully', async () => {
+    const launched = await launchChrome(FEATURE_ARGS);
+    if ('skip' in launched) skipLoudly(launched.skip);
+    const c = launched as Chrome;
+    try {
+      await c.page.goto(URL);
+      await expect(c.page.getByTestId('mcp-status')).toContainText('connected');
+      await nativeTool(c.page, 'create_deck', { title: 'Save Investigation', discard: true });
+      await nativeTool(c.page, 'add_chunk', { starter: 'venn' });
+
+      const saved = await nativeTool(c.page, 'save_deck');
+      console.log(
+        `  SAVE (c) save_deck -> ${JSON.stringify({
+          saved: saved.body.saved,
+          opfs: saved.body.opfs,
+          downloadStarted: saved.body.downloadStarted,
+          durability: saved.body.durability,
+        })}`
+      );
+
+      // no picker was ever clicked, so there is no handle and NOTHING may claim a file save
+      expect(saved.body.saved, 'no handle was ever granted, so this must not claim a save').toBe(false);
+      expect(saved.body.validated).toBe(true);
+      expect(saved.body.durability).toMatch(/in this browser only/);
+
+      // the backstop really wrote the whole Fold — read it back out of OPFS independently
+      expect(saved.body.opfs.written).toBe(true);
+      const readBack = await c.page.evaluate(async (path: string) => {
+        const [dirName, fileName] = path.split('/');
+        const root = await (navigator.storage as any).getDirectory();
+        const dir = await root.getDirectoryHandle(dirName);
+        const fh = await dir.getFileHandle(fileName);
+        const f = await fh.getFile();
+        const text = await f.text();
+        return { size: f.size, hasVenn: text.includes('data-odata="venn"'), hasManifest: text.includes('id="origami-manifest"') };
+      }, saved.body.opfs.path as string);
+
+      console.log(`    OPFS read-back -> ${JSON.stringify(readBack)} (save_deck reported ${saved.body.bytes} bytes)`);
+      expect(readBack.size).toBe(saved.body.bytes); // the same bytes, not a truncated copy
+      expect(readBack.hasVenn, 'the OPFS copy is the WHOLE Fold, blocks included').toBe(true);
+      expect(readBack.hasManifest).toBe(true);
+
+      // and the human has a way back to those bytes
+      await expect(c.page.getByTestId('btn-lastsave')).toBeVisible();
+    } finally {
+      await close(c);
+    }
+  });
+
+  test('SAVE (a): FSA handle persistence — what can and cannot be measured without a human', async () => {
+    /* Honest limit. Whether a handle the human granted ONCE silently re-acquires write on a later
+       visit needs someone to click a native Save-as dialog, which no automated browser can drive.
+       What IS measurable without a human is measured; the rest is reported as unmeasured, with the
+       exact experiment that would settle it. */
+    const launched = await launchChrome(FEATURE_ARGS);
+    if ('skip' in launched) skipLoudly(launched.skip);
+    const c = launched as Chrome;
+    try {
+      await c.page.goto(URL);
+      const facts = await c.page.evaluate(async () => {
+        const root = await (navigator.storage as any).getDirectory();
+        const fh = await root.getFileHandle('permission-probe.txt', { create: true });
+        const est = await navigator.storage.estimate();
+        return {
+          showSaveFilePicker: typeof (window as any).showSaveFilePicker,
+          showOpenFilePicker: typeof (window as any).showOpenFilePicker,
+          queryPermissionOnHandle: typeof fh.queryPermission,
+          requestPermissionOnHandle: typeof fh.requestPermission,
+          permissionOfAnOpfsHandle: fh.queryPermission ? await fh.queryPermission({ mode: 'readwrite' }) : 'n/a',
+          handleIsStructuredCloneable: (() => {
+            try {
+              structuredClone(fh);
+              return true;
+            } catch (e) {
+              return String((e as Error).name);
+            }
+          })(),
+          quotaMB: Math.round((est.quota ?? 0) / 1048576),
+          storagePersisted: await navigator.storage.persisted?.(),
+        };
+      });
+
+      console.log(`  SAVE (a) on Chrome ${c.version}: ${JSON.stringify(facts)}`);
+      console.log('    MEASURED: the picker APIs exist, handles expose queryPermission/requestPermission,');
+      console.log('    a handle is structured-cloneable (so it CAN be kept in IndexedDB between visits),');
+      console.log(`    and the origin has a ${facts.quotaMB} MB quota against localStorage's ~5 MB.`);
+      console.log('    NOT MEASURED: whether a handle granted by a human through showSaveFilePicker still');
+      console.log('    reports "granted" on a LATER visit. That needs a real click on a native dialog, which');
+      console.log('    no automated browser can drive. To settle it: press Save as... once, reload, and read');
+      console.log('    handle.queryPermission({mode:"readwrite"}) before touching anything.');
+
+      expect(facts.showSaveFilePicker).toBe('function');
+      expect(facts.queryPermissionOnHandle).toBe('function');
+      expect(facts.requestPermissionOnHandle).toBe('function');
+      expect(facts.handleIsStructuredCloneable, 'a handle must be cloneable to survive in IndexedDB').toBe(true);
+      expect(facts.quotaMB, 'OPFS must have far more room than the ~5 MB localStorage slot').toBeGreaterThan(100);
+      // storage is NOT persistent by default — the caveat save_deck reports to the agent
+      expect(facts.storagePersisted).toBe(false);
     } finally {
       await close(c);
     }

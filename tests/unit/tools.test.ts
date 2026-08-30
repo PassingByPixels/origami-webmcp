@@ -1488,3 +1488,96 @@ describe('tool annotations', () => {
     expect(h.registry.get('create_deck')!.description).toMatch(/discard:true/);
   });
 });
+
+describe('save_deck never claims a save that did not happen', () => {
+  /* The user's challenge behind this work was "you saved the demo file without me, so it must be
+     possible". It was: a NODE script wrote those bytes, outside the page sandbox. What the page
+     itself can do is narrower, and the whole point of these tests is that the result says which
+     of the three things actually happened rather than rounding all of them up to "saved". */
+
+  const deckWith = async (save: (text: string) => Promise<any>) => {
+    const deck = new DeckStore();
+    const registry = createRegistry({ deck, proposals: new ProposalStore(), runtimeJs, save });
+    await registry.invoke('create_deck', { title: 'Save shapes' });
+    return async () => JSON.parse((await registry.invoke('save_deck', {})).content[0]!.text);
+  };
+
+  it('saved:true ONLY for a verified file write', async () => {
+    const run = await deckWith(async (text) => ({
+      written: true,
+      where: 'deck.origami.html',
+      note: `written to the file on disk and read back: ${text.length} bytes.`,
+      opfs: { written: true, path: 'saves/deck.origami.html', bytes: 10 },
+    }));
+    const body = await run();
+    expect(body.saved).toBe(true);
+    expect(body.durability).toBe("on the human's disk");
+  });
+
+  it('a started DOWNLOAD is never reported as saved', async () => {
+    // Chrome was measured starting a gesture-less download, but the page cannot see where the
+    // bytes went — so downloadStarted is its own field and `saved` stays false.
+    const run = await deckWith(async () => ({
+      written: false,
+      where: 'saves/deck.origami.html (browser storage)',
+      downloadStarted: true,
+      opfs: { written: true, path: 'saves/deck.origami.html', bytes: 4242 },
+      note: 'a download was STARTED without a user gesture — the page cannot see whether it landed.',
+    }));
+    const body = await run();
+    expect(body.saved).toBe(false);
+    expect(body.downloadStarted).toBe(true);
+    expect(body.durability).toMatch(/in this browser only/);
+    expect(body.note).toMatch(/cannot see whether it landed/);
+  });
+
+  it('reports the OPFS backstop failing rather than hiding it behind "saved: false"', async () => {
+    const run = await deckWith(async () => ({
+      written: false,
+      where: 'the browser autosave slot',
+      downloadStarted: false,
+      opfs: { written: false, why: 'this browser has no Origin Private File System (navigator.storage.getDirectory)' },
+      note: 'nothing durable was written.',
+    }));
+    const body = await run();
+    expect(body.saved).toBe(false);
+    expect(body.opfs).toMatchObject({ written: false });
+    expect(body.opfs.why).toMatch(/no Origin Private File System/);
+    expect(body.durability).toMatch(/in memory only/);
+  });
+
+  it('a handle whose permission lapsed is reported as NOT saved, with the reason', async () => {
+    const run = await deckWith(async () => ({
+      written: false,
+      where: 'saves/deck.origami.html (browser storage)',
+      opfs: { written: true, path: 'saves/deck.origami.html', bytes: 99 },
+      note: 'the file could NOT be written (write permission for this file has lapsed and re-granting it needs a click — press Save in the page).',
+    }));
+    const body = await run();
+    expect(body.saved).toBe(false);
+    expect(body.note).toMatch(/permission for this file has lapsed/);
+    expect(body.durability).toMatch(/not on their disk/);
+  });
+
+  it('describes all three outcomes, so an agent can read the result correctly', () => {
+    const d = harness().registry.get('save_deck')!.description;
+    expect(d).toMatch(/saved:true means/);
+    expect(d).toMatch(/opfs\.written means/);
+    expect(d).toMatch(/downloadStarted means/);
+    expect(d).toMatch(/NEVER reported as saved/);
+    expect(d).toMatch(/evict/); // the browser-storage caveat is stated, not glossed
+  });
+});
+
+describe('the OPFS backstop', () => {
+  it('sanitises a filename so a deck title can never escape the saves directory', async () => {
+    const { safeName } = await import('../../src/app/opfs.js');
+    expect(safeName('../../etc/passwd')).not.toContain('/');
+    expect(safeName('..\\..\\win.ini')).not.toContain('\\');
+    expect(safeName('a/b:c*d?e"f<g>h|i.origami.html')).toBe('a-b-c-d-e-f-g-h-i.origami.html');
+    expect(safeName('')).toBe('untitled.origami.html');
+    expect(safeName('...')).toBe('untitled.origami.html');
+    expect(safeName('x'.repeat(400)).length).toBe(120);
+    expect(safeName('welcome.origami.html')).toBe('welcome.origami.html');
+  });
+});

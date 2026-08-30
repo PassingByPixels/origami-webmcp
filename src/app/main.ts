@@ -8,11 +8,13 @@ import {
   clearAutosave,
   pickFile,
   readAutosave,
+  downloadBlob,
   saveAs,
   saveToHandle,
   writeAutosave,
   type FsaFileHandle,
 } from './files.js';
+import { getPointer, readLastOpfs, writeOpfs } from './opfs.js';
 import { measureRender } from './measure.js';
 import { Preview } from './preview.js';
 import { ReviewPanel } from './review.js';
@@ -195,11 +197,26 @@ btnSaveAs.addEventListener('click', async () => {
 });
 
 /**
- * save_deck's disk route. It must NEVER throw and never open a picker: an unattended agent has
- * nobody to click one. With a writable handle it writes the real file; without one it leaves the
- * working copy in the autosave slot and says so, so the agent can tell the human to press Save.
+ * save_deck's disk route, re-shaped around what was actually MEASURED (see README, "What a page
+ * can really save"). It must NEVER throw and never open a picker: an unattended agent has nobody
+ * to click one. Three things happen, in this order, and the result says which of them did:
+ *
+ *   1. HANDLE. With a writable File System Access handle, write the real file and read the byte
+ *      count back. This is the ONLY route that reports saved:true.
+ *   2. OPFS. Always — handle or no handle. A real 10 GB-quota file system, private to this
+ *      origin, needing no permission and no gesture. It replaces the ~5 MB localStorage slot
+ *      that used to fail silently on a Fold with images.
+ *   3. DOWNLOAD. Only when there is no handle. Chrome 151 was measured starting a programmatic
+ *      download with navigator.userActivation.isActive === false, twice in a row, headless and
+ *      headed. But the page cannot see where the bytes went, and a normal profile may still put
+ *      the second one behind a prompt no agent can answer — so this reports downloadStarted, and
+ *      never saved.
  */
 async function saveFromTool(text: string): Promise<SaveOutcomeReport> {
+  // The backstop runs first and unconditionally: if everything below fails, the bytes still exist.
+  const opfs = await writeOpfs(deck.name(), text);
+  if (opfs.written) refreshLastSave();
+
   if (handle) {
     const out = await saveToHandle(handle, text);
     if (out.ok) {
@@ -207,22 +224,42 @@ async function saveFromTool(text: string): Promise<SaveOutcomeReport> {
       clearAutosave();
       refreshChrome();
       say(`Saved to ${out.name} (by an agent)`);
-      return { written: true, where: out.name, note: 'written to the file on disk.' };
+      return { written: true, where: out.name, note: `written to the file on disk and read back: ${out.bytes} bytes.`, opfs };
     }
     writeAutosave(deck.name(), text);
     say(`An agent tried to save and could not: ${out.reason}`, true);
     return {
       written: false,
-      where: 'the browser autosave slot',
-      note: `the file could not be written (${out.reason}) — the working copy is kept in the browser. Ask the human to press Save.`,
+      where: opfs.written ? `${opfs.path} (browser storage)` : 'the browser autosave slot',
+      note: `the file could NOT be written (${out.reason}). ${opfs.written ? 'The full Fold is in browser storage instead.' : ''} Ask the human to press Save.`,
+      opfs,
     };
   }
-  const kept = writeAutosave(deck.name(), text);
-  say('An agent finished — press Save to put the Fold on disk.');
+
+  // No handle: try the download, and be exact about what that does and does not prove.
+  let downloadStarted = false;
+  try {
+    downloadBlob(text, deck.name());
+    downloadStarted = true;
+  } catch {
+    downloadStarted = false; // a browser that refuses outright — reported, not swallowed
+  }
+  writeAutosave(deck.name(), text);
+  say(downloadStarted ? 'An agent saved — check your downloads, or press Save to choose a location.' : 'An agent finished — press Save to put the Fold on disk.');
   return {
     written: false,
-    where: kept ? 'the browser autosave slot' : 'memory only (browser storage is unavailable)',
-    note: `this page holds no writable handle for "${deck.name()}" — nothing was written to disk. Ask the human to press Save (or Save as…) in the page.`,
+    where: opfs.written ? `${opfs.path} (browser storage)` : 'the browser autosave slot',
+    downloadStarted,
+    opfs,
+    note:
+      `this page holds no writable handle for "${deck.name()}", so nothing was written to a file this page can verify. ` +
+      (downloadStarted
+        ? 'A download was STARTED without a user gesture — on Chrome that usually lands the file in the Downloads folder, but the page cannot see whether it did, and a browser may block a repeat download behind a prompt. Do not report the deck as saved on the strength of it. '
+        : 'This browser refused to start a download from script. ') +
+      (opfs.written
+        ? `The complete Fold IS in this browser's private file system (${opfs.path}, ${opfs.bytes} bytes) and the human can retrieve it with the "Download last save" button in the page. Browser storage is not persistent, so tell them to save it properly. `
+        : `Browser storage was unavailable (${opfs.why}). `) +
+      'Ask the human to press Save (or Save as…) to put it on their disk.',
   };
 }
 
@@ -241,6 +278,36 @@ async function doSaveAs(text: string): Promise<void> {
 }
 
 if (!canSaveInPlace()) btnSaveAs.title = 'This browser has no file picker — Save as downloads the Fold instead.';
+
+/* ---------- the way back out of browser storage ----------
+   save_deck always writes the whole Fold into OPFS, which is real storage but INVISIBLE: nothing
+   outside this origin can read it, so without this button an agent's "it is saved in the browser"
+   would be true and useless. A click is a user gesture, so this download is never in doubt. */
+
+const btnLastSave = $<HTMLButtonElement>('btn-lastsave');
+
+function refreshLastSave(): void {
+  const ptr = getPointer();
+  btnLastSave.hidden = ptr === null;
+  if (ptr) {
+    const kb = Math.max(1, Math.round(ptr.bytes / 1024));
+    btnLastSave.textContent = `Download last save (${kb} KB)`;
+    btnLastSave.title = `${ptr.name} — kept in this browser at ${new Date(ptr.at).toLocaleString()}. Browser storage is not permanent; save it somewhere you own.`;
+  }
+}
+
+btnLastSave.addEventListener('click', async () => {
+  const last = await readLastOpfs();
+  if (!last) {
+    say('The last save is no longer in browser storage — the browser evicted it.', true);
+    refreshLastSave();
+    return;
+  }
+  downloadBlob(last.text, last.name);
+  say(`Downloading ${last.name} from browser storage.`);
+});
+
+refreshLastSave();
 
 /* ---------- drag and drop ---------- */
 

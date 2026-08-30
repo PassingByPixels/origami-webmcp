@@ -183,7 +183,8 @@ src/app/           the page
   measure.ts         inspect_render's off-screen measuring frame + injected measurer
   review.ts          the proposal cards and their Accept / Reject buttons
   console.ts         the test console
-  files.ts           File System Access open/save, download fallback, localStorage autosave
+  files.ts           File System Access open/save (permission-checked, byte-verified), autosave
+  opfs.ts            the Origin Private File System backstop + the "Download last save" pointer
   index.html         the shell
   styles.css         the brand
 
@@ -231,7 +232,7 @@ apply to **all** of them:
 | `list_starters` + `add_chunk(starter)` | **Not in the stdio server at all.** Its starters are two inner strings picked by `kind`, with no catalog. These are the Studio rail's whole-fold starters — roadmap, flowchart, node graph, drawing, venn, ledger — each a free card holding one seeded data block, ported verbatim from `packages/studio-core/src/lib/palette.ts`. `starter` also works on `propose_add`, and is refused alongside `html`/`block` rather than silently winning. |
 | `inspect_render` | **Not in the stdio server at all.** It has no browser, so it cannot lay a deck out; this is the one thing a page can tell an agent that a file-writing process cannot. It renders the serialized Fold in a hidden, off-screen `sandbox="allow-scripts"` iframe with a measuring script appended after the deck's LAST `</body>`, walks every fold, and posts the geometry back by `postMessage` (matched on a nonce — a sandboxed frame's `event.origin` is the string `"null"`). Reports overflow, masthead clip, blank folds and colliding SVG labels. A fold it cannot put on screen comes back `measured:false` with the reason; a host with no layout says so for the whole deck. |
 | `undo` | **Not in the stdio server at all.** A stdio call has no session, so it has no stack to unwind; a page does. Built on `@origami/format`'s `History`: `DeckStore.apply` records each op's inverse, one entry per tool call. Scope is stated in the description — it cannot cross a `create_deck` or a newly opened Fold (both reset the stack), it never touches bytes already written to disk, 50 steps deep, no redo. |
-| `save_deck` | **Re-purposed, not just re-worded.** In the stdio server every edit had already written through, so `save_deck` was a re-validate. Here it is the only route to disk: it re-validates, then writes the file if the page holds a writable File System Access handle, and otherwise persists the working copy in the browser and reports that the human must press Save. It never opens a picker (nobody would be there to click it) and **never throws for want of a handle**, so an unattended agent can always finish. |
+| `save_deck` | **Re-purposed, not just re-worded.** In the stdio server every edit had already written through, so `save_deck` was a re-validate. Here it is the only route out of the tab, and it reports three separate outcomes rather than one boolean: a verified handle write (`saved`), the OPFS backstop (`opfs.written`), and a fired download (`downloadStarted`). See **What a page can really save** for the measurements that shaped it. It never opens a picker (nobody would be there to click it) and **never throws for want of a handle**, so an unattended agent can always finish. |
 | `propose_chunk` · `propose_add` · `propose_delete` | “STAGED for a human (or another agent) to review” → “STAGED as a review card in the human's page, which only THEY can accept or reject” **is gone as of round 2**; they now say the change is staged for a human *or* an agent to resolve. |
 | `list_proposals` | Adds “The human accepts or rejects them by clicking the cards in the page.” |
 | `accept_proposal` | “write the file immediately (no save_deck needed)” → applies to the open Fold; call `save_deck` when done. Adds a sentence on choosing between resolving it yourself and leaving the card for a watching human. |
@@ -289,6 +290,102 @@ do.
 
 ---
 
+## What a page can really save
+
+The demo writes a finished `.origami.html` into your Downloads folder with nobody clicking
+anything, which raises a fair question: if that is possible, why does `save_deck` ever say the
+human has to press Save?
+
+**Because the demo does not save from the page.** `demo/author-demo.mjs` is a Node script. It
+drives the browser, reads the finished deck out of the preview's `srcdoc`, and then calls
+`writeFile` *itself*, as a process on your machine. Those bytes are written outside the sandbox.
+Nothing the page can reach got a new power, and no amount of tool design inside the tab reproduces
+it.
+
+So the question was put to the browser instead. Everything below was measured on the installed
+stable **Chrome 151.0.7922.174**, in a throwaway profile, by
+`tests/e2e/webmcp-native.spec.ts` — the three `SAVE (a|b|c)` tests. Re-run them and the numbers
+print themselves.
+
+### (b) Can a tool call start a download with no user gesture?
+
+**Yes — Chrome starts it.** The first attempt at this measurement was worthless and worth
+recording: `page.evaluate()` runs *with* transient user activation, so a download fired from it
+proves nothing. The real test schedules everything from a timer at page load, 6.5 s after
+navigation, and records the activation state at the moment of the call:
+
+```
+  userActivation at the call -> {"isActive":false,"hasBeenActive":true}
+  attempt 1 -> no throw;  attempt 2 -> no throw
+  downloads the browser actually STARTED -> 2 ["gestureless-1.origami.html","gestureless-2.origami.html"]
+```
+
+Both downloads, not just the first — the second is where multiple-download gating would bite.
+
+**The caveat is load-bearing.** Playwright runs with `acceptDownloads`, so a *"Download multiple
+files?"* prompt that a default profile might raise is auto-accepted here. This proves Chrome
+**starts** the download without a gesture; it does not prove an un-automated profile never asks.
+And the page cannot observe where the file went in either case. So `save_deck` reports
+`downloadStarted: true` and **never** counts it as a save.
+
+### (c) The OPFS backstop
+
+`save_deck` now always writes the complete Fold into the Origin Private File System — a real file
+system, private to this origin, needing no permission and no gesture. Measured:
+
+```
+  save_deck -> {"saved":false,
+                "opfs":{"written":true,"path":"saves/save-investigation.origami.html","bytes":391251},
+                "downloadStarted":true,
+                "durability":"in this browser only — retrievable by the human, but evictable and not on their disk"}
+  OPFS read-back -> {"size":391251,"hasVenn":true,"hasManifest":true}
+```
+
+The file is read back and its size compared before the write is reported, so a truncated or
+quota-failed write cannot pass as success. This replaces the old `localStorage` autosave as the
+durable path: the origin quota measured **10240 MB** against localStorage's ~5 MB, which is the
+gap a Fold with embedded images used to fall through *silently*.
+
+Two things follow, and both are in the tool's own result. OPFS is **invisible** — nothing outside
+this origin can read it — so the page grows a **Download last save** button, the human's route
+back to those bytes. And `navigator.storage.persisted()` measured **false**, so the browser may
+evict it: it is a backstop against a refresh or a crash, not a substitute for the human's disk.
+
+### (a) Does a granted file handle survive to the next visit?
+
+**Measured, and partly unmeasurable here.** What is true without a human:
+
+```
+  {"showSaveFilePicker":"function","showOpenFilePicker":"function",
+   "queryPermissionOnHandle":"function","requestPermissionOnHandle":"function",
+   "permissionOfAnOpfsHandle":"granted","handleIsStructuredCloneable":true,
+   "quotaMB":10240,"storagePersisted":false}
+```
+
+A `FileSystemFileHandle` is structured-cloneable, so it **can** be kept in IndexedDB between
+visits, and handles do expose `queryPermission` / `requestPermission`.
+
+**What is NOT measured: whether a handle a human granted through `showSaveFilePicker` still
+reports `granted` on a later visit.** Getting one requires a real click on a native OS dialog,
+which no automated browser can drive, so this repo does not claim an answer. To settle it: press
+**Save as…** once, reload, and read `handle.queryPermission({mode:'readwrite'})` before touching
+anything. Persisting handles in IndexedDB is deliberately **not** implemented until that returns
+`granted` — shipping it on an assumption would put an unverified promise in front of the human's
+files.
+
+What *is* implemented is the half that could be verified: `saveToHandle` checks
+`queryPermission` **before** writing and reports a lapsed permission in words an agent can act on,
+instead of throwing an opaque error, and it reads the file size back before reporting `saved:true`.
+
+### So what does `save_deck` claim?
+
+| Field | Means |
+|---|---|
+| `saved: true` | Bytes were written to a real file through a File System Access handle **and read back to confirm it**. The only outcome that is a save. |
+| `opfs.written` | The complete Fold is in this browser's private file system. Real, retrievable via **Download last save**, evictable, not on the human's disk. |
+| `downloadStarted` | A download was fired at the browser. Where it landed is unobservable from the page. Never counted as a save. |
+| `durability` | One sentence covering all three, so an agent does not have to infer it from booleans and get it wrong. |
+
 ## Known gaps
 
 * Proposals live in memory, and ride along in the autosave record so a refresh keeps them with
@@ -297,13 +394,15 @@ do.
   in the meantime still refuses with `conflicted` rather than overwriting. The stdio server
   persists to `~/.origami/proposals/` because its proposer and reviewer are different processes;
   here they are the same page.
-* Autosave uses `localStorage`. Every call is wrapped, so a private window or a full quota degrades
-  to “no autosave” rather than a broken page — but a Fold with large embedded assets can exceed the
-  ~5 MB origin quota and silently fail to autosave.
+* The *resume-after-refresh* autosave still uses `localStorage` (~5 MB), so a very large Fold can
+  exceed it and fail to autosave. The **save** path no longer depends on it: `save_deck` writes the
+  full Fold to OPFS, measured at a 10240 MB quota. Every storage call is wrapped, so a private
+  window or a full quota degrades to “no autosave” rather than a broken page.
 * `Save as…` needs the File System Access API for a true save; elsewhere (Firefox, Safari) it falls
-  back to a download of the same bytes. `save_deck` never falls back to a download — a download is
-  a user gesture, and an unattended agent has no gesture to give — so on those browsers an agent
-  always ends with “ask the human to press Save”.
+  back to a download of the same bytes. `save_deck` DOES now attempt a gesture-less download when it
+  holds no handle — measured to start on Chrome 151 with `userActivation.isActive === false` — but
+  reports it as `downloadStarted`, never as saved, because the page cannot see where it landed. The
+  OPFS copy is what makes the work safe either way. See “What a page can really save”.
 * Cross-block `@block.output` table references do not resolve here. `recalc` is within-block, as it
   is in the stdio server; the Studio resolves them when it opens the Fold.
 

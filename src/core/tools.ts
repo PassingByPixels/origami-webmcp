@@ -125,9 +125,15 @@ function coerceAndValidate(m: DeckModel, chunkId: string, html: string): string 
 /** What save_deck managed to do. The page owns the how (File System Access, autosave); the
     tool only reports it — and it NEVER throws, so an unattended agent can always finish. */
 export interface SaveOutcomeReport {
+  /** TRUE only when bytes were written to a real file AND read back to confirm it. */
   written: boolean;
   where: string;
   note: string;
+  /** The OPFS backstop: attempted on every save, reported either way. */
+  opfs?: { written: boolean; path?: string; bytes?: number; why?: string };
+  /** A programmatic download was STARTED. The page cannot see where it landed, so this is
+      never the same claim as `written`. */
+  downloadStarted?: boolean;
 }
 export type SaveFn = (text: string) => Promise<SaveOutcomeReport>;
 
@@ -671,7 +677,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // re-validate. Here it is the ONLY route to disk — and it must never throw, or an
       // unattended agent would have no way to finish.
       description:
-        'Finish the job: re-validate the Fold and put it on disk. If the page holds a writable handle for the file (the human opened it with the file picker, or saved it once), this WRITES THAT FILE. If it does not — a Fold created in this tab, a browser without the File System Access API, or a revoked permission — nothing is lost: the working copy is persisted in the browser and the result says the human must press Save. It never fails for want of a handle, so always end on it. Safe to call any number of times; it never changes content.',
+        `Finish the job: re-validate the Fold and put it somewhere durable. READ THE RESULT — it tells you exactly which of three things happened, and only one of them is a save. (1) saved:true means the page held a writable File System Access handle for the file and the bytes were written AND read back to confirm it. (2) opfs.written means the complete Fold is in this browser's own private file system, which needs no permission and no gesture and has room for a Fold with images; it is real storage but INVISIBLE outside this page, so the human retrieves it with the "Download last save" button. It is also not permanent — the browser may evict it. (3) downloadStarted means a download was fired at the browser; on Chrome that usually lands the file in Downloads, but this page cannot see where it went and a browser may block a repeat, so it is NEVER reported as saved. When saved is false the work is safe but the human still has to press Save (or Save as…) to put it on their own disk — say so rather than reporting success. It never throws and never opens a picker (nobody would be there to click it), so always end on it. Safe to call any number of times; it never changes content.`,
       inputSchema: { type: 'object', properties: {} },
       execute: async () => {
         const text = deck.serialize(new Date().toISOString());
@@ -688,6 +694,15 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           saved: outcome.written,
           validated: true,
           where: outcome.where,
+          ...(outcome.opfs ? { opfs: outcome.opfs } : {}),
+          ...(outcome.downloadStarted !== undefined ? { downloadStarted: outcome.downloadStarted } : {}),
+          // What is TRUE of the bytes right now, in one field, so an agent does not have to
+          // infer it from three booleans and get it wrong.
+          durability: outcome.written
+            ? "on the human's disk"
+            : outcome.opfs?.written
+              ? 'in this browser only — retrievable by the human, but evictable and not on their disk'
+              : 'in memory only — nothing durable was written',
           bytes: utf8Bytes(text),
           title: deck.model().title,
           slides: deck.model().order.length,
