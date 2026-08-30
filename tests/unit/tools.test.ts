@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { KINDS, buildModel, parseDeck, validateDeck } from '../../vendor/format-dist/index.js';
+import { FORMAT_BLOCKS, KINDS, buildModel, parseDeck, validateDeck } from '../../vendor/format-dist/index.js';
 import { FLOW_INNER, VENN_INNER } from '../fixtures.js';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { ProposalStore } from '../../src/core/proposal-store.js';
@@ -582,6 +582,45 @@ describe('content policy is the write gate', () => {
     const res = await h.json('write_chunk', { chunkId: id, html: '<div class="slide-inner"><h2 onclick="x()">Hi</h2></div>' });
     expect(res.applied).toBe(id);
     expect(res.activeContent.length).toBeGreaterThan(0);
+  });
+});
+
+describe('the kind catalog steers, and knownIssues is measured', () => {
+  it('tells an agent to wrap every in-slide block kind in a free card — derived, not hard-coded', async () => {
+    /* The steer comes off FORMAT_BLOCKS' own `placement` facet, not a list kept in this repo, so
+       a kind added upstream picks up the right advice with no edit here. Asserting it against the
+       same registry is the point: the test fails if the guide ever stops deriving it. */
+    const guide = await harness().json('origami_guide');
+    const dataKinds = FORMAT_BLOCKS.filter((b) => b.data?.placement === 'block').map((b) => b.key);
+    expect(dataKinds.length, 'the registry must actually have block-placement kinds').toBeGreaterThan(5);
+
+    for (const key of dataKinds) {
+      const entry = guide.kinds[key];
+      expect(entry.placement, key).toBe('in-slide block');
+      expect(entry.howToAdd, key).toMatch(/PREFER a FREE CARD holding one/);
+      expect(entry.howToAdd, key).toContain(`add_chunk({ kind: "${key}"`); // the honest alternative is still named
+    }
+    // and the layout kinds are NOT told to wrap themselves
+    for (const key of ['cover', 'free', 'document', 'bullets', 'stats']) {
+      expect(guide.kinds[key].placement, key).toBe('whole fold');
+      expect(guide.kinds[key].howToAdd, key).toMatch(/A WHOLE FOLD/);
+    }
+    // the steer restates each kind's OWN schema, which says the same thing in prose
+    expect(KINDS.flow!.schemaComment.join(' ')).toMatch(/a "Flowchart" fold is a free card holding one/);
+  });
+
+  it('knownIssues records what was MEASURED, not what was reported', async () => {
+    const guide = await harness().json('origami_guide');
+    const clip = guide.knownIssues.flowKindMastheadClip;
+    // the number that was actually observed, and the correction to the original claim
+    expect(clip).toMatch(/measured at 42px/);
+    expect(clip).toMatch(/121px to 253px/);
+    expect(clip).toMatch(/no rendered content is hidden/);
+    // and it does not tell an agent to work around a defect that is not there
+    expect(clip).not.toMatch(/avoid the flow kind|do not use/i);
+
+    expect(guide.knownIssues.emptyDataBlockPassesUntilSave).toMatch(/renders completely blank/);
+    expect(guide.knownIssues.studioTreeShakenCss).toMatch(/tree-shaken|stripped/);
   });
 });
 

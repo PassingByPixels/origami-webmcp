@@ -1,4 +1,4 @@
-import { FORMAT_VERSION, KINDS } from '../../vendor/format-dist/index.js';
+import { FORMAT_BLOCKS, FORMAT_VERSION, KINDS } from '../../vendor/format-dist/index.js';
 import { recipeCatalog } from './recipes.js';
 
 /**
@@ -10,6 +10,19 @@ import { recipeCatalog } from './recipes.js';
  * (a file path handle, served folders, atomic writes) does not exist in a page. Those lines are
  * marked below and listed in README "Deviations from the stdio server".
  */
+/* Which kinds are WHOLE FOLDS and which are blocks that sit on one, read off the format
+   library's own registry rather than a list kept here. Every data-carrying kind declares
+   placement 'block' ("an in-slide block, any number on any slide"), and its schemaComment says
+   the same thing in prose — "a Flowchart fold is a free card holding one". The steer below is
+   that recommendation made actionable, and it cannot drift: a kind added upstream picks up the
+   right advice with no edit here. */
+const PLACEMENT = new Map(FORMAT_BLOCKS.map((b) => [b.key as string, b.data?.placement]));
+
+const howToAdd = (key: string): string =>
+  PLACEMENT.get(key) === 'block'
+    ? `IN-SLIDE BLOCK, not a slide kind — any number of these may sit on any fold. PREFER a FREE CARD holding one: add_chunk({ kind: "free", html: '<div class="slide-inner"><p class="eyebrow">Section</p><h2>A title</h2>' + <the ${key} figure> + '</div>' }). That is what this kind's own schema recommends, and it gives the block a heading and room for a second block beside it. add_chunk({ kind: "${key}", html: <the figure> }) is also valid and is what the stdio server does, but it makes a fold whose entire body is one untitled figure.`
+    : "A WHOLE FOLD: add_chunk({ kind, html }) with the fold's inner markup.";
+
 export function origamiGuide(): Record<string, unknown> {
   return {
     formatVersion: FORMAT_VERSION,
@@ -49,7 +62,25 @@ export function origamiGuide(): Record<string, unknown> {
     },
     capabilities:
       'Embeds (video, dashboards) need a manifest capability "embed:<host>". write_chunk and add_chunk auto-grant it for recognised video blocks; otherwise the deck is flagged for the missing capability.',
-    kinds: Object.fromEntries(Object.values(KINDS).map((k) => [k.key, { name: k.name, schema: k.schemaComment }])),
+    kinds: Object.fromEntries(
+      Object.values(KINDS).map((k) => [
+        k.key,
+        {
+          name: k.name,
+          schema: k.schemaComment,
+          placement: PLACEMENT.get(k.key) === 'block' ? 'in-slide block' : 'whole fold',
+          howToAdd: howToAdd(k.key),
+        },
+      ])
+    ),
+    knownIssues: {
+      flowKindMastheadClip:
+        `REPORTED as a Folio runtime bug (a flow-kind fold's figure riding up under the deck masthead) and MEASURED here as narrower than reported. With a subtitle and chips set, the masthead (header.o-top) is 100px tall and OVERLAYS the stage; a free-kind fold keeps its content at or below that line. A flow-KIND fold's figure BOX does start above it — measured at 42px — but the top of that box is empty padding: the topmost element that actually PAINTS measured 121px to 253px across every viewport height from 240 to 720, always below the bar. So no rendered content is hidden, and there is nothing to work around today. Putting the figure in a free card (see kinds.flow.howToAdd) is still the safer shape, because a free card's padding is what holds content clear of the bar. inspect_render measures this on the real render and will say so if it ever changes.`,
+      emptyDataBlockPassesUntilSave:
+        `A data block that is valid JSON but describes nothing — {"nodes":[],"edges":[]} on a flow, an empty sets array on a venn — passes the content policy, so add_chunk returns ok and the fold renders completely blank. save_deck does refuse it at the end (flow.nodes.count), but only then, and as a schema violation rather than "this fold is blank". Call inspect_render before save_deck: a blank fold is reported as empty-fold with the painted-element count.`,
+      studioTreeShakenCss:
+        `A Fold saved by the Studio can have unused kind CSS stripped out of it, so a block you add to someone else's Fold may render unstyled even though it validates and saves. See recipes.styleCaveat. inspect_render measures geometry, not styling, and does not catch this.`,
+    },
     recipes: {
       howToUse:
         'Validated, ready-to-use inners for the free-card idioms the kind schemas NAME but do not spell out. Each `html` below is a complete slide inner: pass it to add_chunk({ kind: "free", html }) as it stands, or edit the text and keep the structure. They are copied from the Folio monorepo\'s own block palette (`source` cites where), so a fold you build from one is the same markup the Studio would have produced.',
