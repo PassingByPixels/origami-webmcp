@@ -5,6 +5,8 @@ import { DeckStore } from '../../src/core/deck-store.js';
 import { ProposalStore } from '../../src/core/proposal-store.js';
 import { createRegistry } from '../../src/core/tools.js';
 import { RECIPES } from '../../src/core/recipes.js';
+import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
+import { injectMeasurer } from '../../src/app/measure.js';
 import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
 
 /* These run against the REAL vendored @origami/format + @origami/runtime — no mocks, no
@@ -12,7 +14,7 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 22 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 23 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -24,6 +26,7 @@ describe('tool surface', () => {
       'delete_block',
       'delete_chunk',
       'get_kind_schema',
+      'inspect_render',
       'list_block_defs',
       'list_chunks',
       'list_proposals',
@@ -579,6 +582,162 @@ describe('content policy is the write gate', () => {
     const res = await h.json('write_chunk', { chunkId: id, html: '<div class="slide-inner"><h2 onclick="x()">Hi</h2></div>' });
     expect(res.applied).toBe(id);
     expect(res.activeContent.length).toBeGreaterThan(0);
+  });
+});
+
+describe('inspect_render', () => {
+  /* Two halves, tested separately. The RULES are arithmetic and are tested here with numbers
+     fed in directly — no browser needed, and no browser flakiness. That the numbers reaching
+     the rules are REAL is a different claim, and only tests/e2e/app.spec.ts can make it. */
+
+  const geo = (id: string, over: Partial<FoldGeometry> = {}): FoldGeometry => ({
+    id,
+    measured: true,
+    contentTop: 100,
+    contentHeight: 400,
+    mastheadBottom: 100,
+    blockCount: 3,
+    paintedLeaves: 4,
+    textLength: 120,
+    labels: [],
+    ...over,
+  });
+
+  const deckOf = async (n: number) => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Inspect' });
+    for (let i = 1; i < n; i++) await h.json('add_chunk', { label: `Fold ${i}` });
+    return h;
+  };
+
+  it('says so, loudly, when the host cannot measure a render at all', async () => {
+    // The unit harness injects no measure route — exactly a host with no browser layout.
+    const h = await deckOf(2);
+    const body = await h.json('inspect_render');
+    expect(body.measured).toBe(false);
+    expect(body.why).toMatch(/no browser layout/);
+    expect(body.warnings).toEqual([]);
+    expect(body.note).toMatch(/does NOT mean the deck lays out correctly/);
+    expect(body.folds).toHaveLength(2);
+    expect(body.folds.every((f: any) => f.measured === false)).toBe(true);
+    // and it never invents a number
+    for (const f of body.folds) expect(f.contentHeight).toBeUndefined();
+  });
+
+  it('reports a failed measurement as unmeasured rather than as a clean deck', async () => {
+    const deck = new DeckStore();
+    const registry = createRegistry({
+      deck,
+      proposals: new ProposalStore(),
+      runtimeJs,
+      measure: async () => {
+        throw new Error('the deck did not finish rendering within 15s, so nothing was measured');
+      },
+    });
+    await registry.invoke('create_deck', { title: 'Timeout' });
+    const body = JSON.parse((await registry.invoke('inspect_render', {})).content[0]!.text);
+    expect(body.measured).toBe(false);
+    expect(body.why).toMatch(/the measurement failed: the deck did not finish rendering/);
+    expect(body.clean).toBeUndefined(); // a failure must never read as clean:true
+  });
+
+  it('flags a fold whose content is taller than the screen', async () => {
+    const h = await deckOf(2);
+    const [a, b] = h.deck.model().order;
+    const out = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [geo(a!), geo(b!, { contentHeight: 2406 })],
+    });
+    expect(out.warnings).toHaveLength(1);
+    expect(out.warnings[0]).toMatchObject({ fold: b, issue: 'overflow' });
+    expect(out.warnings[0]!.detail).toContain('2406px tall');
+    expect(out.warnings[0]!.detail).toContain('the bottom 1686px is below the fold');
+    expect((out.folds[0] as any).fits).toBe(true);
+    expect((out.folds[1] as any).fits).toBe(false);
+  });
+
+  it('flags content clipped behind the masthead, with the real numbers', async () => {
+    /* These are the numbers measured off a real render (see the e2e): a deck with a subtitle and
+       chips has a 100px header.o-top that OVERLAYS the stage. A free fold's content starts at
+       exactly 100 and is fine; a flow-KIND fold's figure starts at 27 and loses its top 73px. */
+    const h = await deckOf(2);
+    const [free, flow] = h.deck.model().order;
+    const out = analyseRender(h.deck.model(), {
+      viewport: { width: 940, height: 471 },
+      folds: [geo(free!, { contentTop: 100, mastheadBottom: 100 }), geo(flow!, { contentTop: 27, mastheadBottom: 100 })],
+    });
+    expect(out.warnings.map((w) => w.issue)).toEqual(['masthead-clip']);
+    expect(out.warnings[0]!.fold).toBe(flow);
+    expect(out.warnings[0]!.detail).toContain('starts at 27px');
+    expect(out.warnings[0]!.detail).toContain('the first 73px is hidden');
+  });
+
+  it('flags a fold that rendered nothing — which validation cannot catch', async () => {
+    const h = await deckOf(1);
+    const out = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [geo(h.deck.model().order[0]!, { blockCount: 2, paintedLeaves: 0, textLength: 0, contentHeight: 4, contentTop: 0, mastheadBottom: 66 })],
+    });
+    // a fold with no ink is EMPTY, not "clipped" — the contentTop fallback of 0 must not be
+    // reported as content hidden behind the masthead (an empty flow block did exactly that)
+    expect(out.warnings.map((w) => w.issue)).toEqual(['empty-fold']);
+    expect(out.warnings[0]!.detail).toMatch(/0 painted element\(s\)/);
+    expect((out.folds[0] as any).rendersAnything).toBe(false);
+  });
+
+  it('flags colliding diagram labels and leaves neighbouring ones alone', async () => {
+    const h = await deckOf(1);
+    const id = h.deck.model().order[0]!;
+    const clash = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [
+        geo(id, {
+          labels: [
+            { text: 'Editable', x: 100, y: 100, w: 60, h: 14 },
+            { text: 'Portable', x: 130, y: 105, w: 60, h: 14 },
+          ],
+        }),
+      ],
+    });
+    expect(clash.warnings.map((w) => w.issue)).toEqual(['label-collision']);
+    expect(clash.warnings[0]!.detail).toContain('"Editable" and "Portable"');
+    expect(clash.warnings[0]!.detail).toMatch(/overlap by \d+px²/);
+
+    // the real venn labels measured off a render: close together, never touching
+    const apart = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [
+        geo(id, {
+          labels: [
+            { text: 'Inert', x: 394, y: 288, w: 23, h: 14 },
+            { text: 'Editable', x: 517, y: 288, w: 38, h: 14 },
+            { text: 'Portable', x: 450, y: 391, w: 40, h: 14 },
+            { text: 'A Fold', x: 457, y: 332, w: 27, h: 11 },
+          ],
+        }),
+      ],
+    });
+    expect(apart.warnings).toEqual([]);
+  });
+
+  it('never turns an unmeasured fold into a warning', async () => {
+    const h = await deckOf(2);
+    const [a, b] = h.deck.model().order;
+    const out = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [geo(a!), { id: b!, measured: false, reason: 'this fold is hidden', contentTop: 0, contentHeight: 0, mastheadBottom: 0, blockCount: 0, paintedLeaves: 0, textLength: 0, labels: [] }],
+    });
+    expect(out.warnings).toEqual([]); // a 0px unmeasured fold is NOT an empty fold
+    expect(out.folds[1]).toMatchObject({ id: b, measured: false, why: 'this fold is hidden' });
+  });
+
+  it('appends the measurer at the LAST </body>, not the first', () => {
+    // the deck inlines its whole runtime, and that bundle contains the string "</body>"
+    const deckText = '<html><body><script>var s="</body>";</script>CONTENT</body></html>';
+    const out = injectMeasurer(deckText, '<!--M-->');
+    expect(out).toBe('<html><body><script>var s="</body>";</script>CONTENT<!--M--></body></html>');
+    // and a deck with no closing tag still gets the measurer rather than losing it
+    expect(injectMeasurer('<html>no close', '<!--M-->')).toBe('<html>no close<!--M-->');
   });
 });
 

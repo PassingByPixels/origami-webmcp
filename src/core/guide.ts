@@ -56,7 +56,7 @@ export function origamiGuide(): Record<string, unknown> {
       whyTheyExist:
         'The free schema lists its vocabulary in one line and stops. It does not tell you that a stat card\'s number lives in a `.big` with data-count-to and the literal text "0", that the column count is the ATTRIBUTE data-ocols rather than a class, or that a footnote is an inline span inside the paragraph. Guessing those produces markup that validates and then renders wrong.',
       styleCaveat:
-        'A Fold created here with create_deck carries the FULL base stylesheet, so every recipe styles correctly. A Fold the human OPENED may have been saved by the Studio with unused kind CSS tree-shaken out of it — the sample deck shipped with this app, for instance, has no rule for .o-callout, .o-code, .o-footnote or .o-tcols. Those blocks still validate and still save; they just render unstyled in that deck. Nothing reports this, so prefer the plainer recipes when you are editing a Fold you did not create.',
+        'A Fold created here with create_deck carries the FULL base stylesheet, so every recipe styles correctly. A Fold the human OPENED may have been saved by the Studio with unused kind CSS tree-shaken out of it — the sample deck shipped with this app, for instance, has no rule for .o-callout, .o-code, .o-footnote or .o-tcols. Those blocks still validate and still save; they just render unstyled in that deck. inspect_render measures geometry, not styling, so it will not catch this either — prefer the plainer recipes when you are editing a Fold you did not create.',
       cards: recipeCatalog(),
     },
     tools: {
@@ -74,6 +74,7 @@ export function origamiGuide(): Record<string, unknown> {
       get_kind_schema: 'The markup contract for one kind (same as origami_guide(kind)).',
       set_header: 'Deck masthead: subtitle + metadata chips.',
       set_fold_type: 'Set the reading experience (deck | scroll | ledger).',
+      inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here.',
       undo: 'Reverse the last change to the open Fold (one tool call = one step; 50 deep, no redo, and it cannot cross a create_deck).',
       save_deck: 'Write the Fold to disk if the page holds a writable handle; otherwise persist the working copy and report that the human must press Save.',
       propose_chunk: 'Stage a chunk edit for review instead of applying it (a "document PR").',

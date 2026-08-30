@@ -25,6 +25,7 @@ import { bakeTableInner } from './bake.js';
 import type { DeckStore } from './deck-store.js';
 import { newDeckId, newProposalId, newSlideId, sha256Hex } from './ids.js';
 import { origamiGuide } from './guide.js';
+import { analyseRender, unmeasurable, type MeasureFn } from './inspect.js';
 import type { ProposalStore } from './proposal-store.js';
 import { fail, ok, refuse } from './result.js';
 import { ToolRegistry, type ToolDef } from './registry.js';
@@ -125,6 +126,9 @@ export interface ToolDeps {
   runtimeJs?: () => Promise<string>;
   /** Injected by the page. Absent === no disk route at all (unit tests, or a host with no FSA). */
   save?: SaveFn;
+  /** Injected by the page. Absent === this host cannot lay a deck out, so inspect_render
+      reports that instead of guessing (see src/core/inspect.ts). */
+  measure?: MeasureFn;
 }
 
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
@@ -561,6 +565,45 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           ...(out.noDoc
             ? { warning: 'this deck has no document-kind folds — scroll mode stacks every fold as-is; add document folds via add_chunk(kind:"document") for a long-form report' }
             : {}),
+        });
+      },
+    },
+
+    {
+      name: 'inspect_render',
+      // NOT in the stdio server: it has no browser, so it cannot lay a deck out. This is the
+      // one thing a page can tell an agent that a file-writing process cannot.
+      description:
+        'SEE THE DECK YOU CANNOT SEE. Lays the open Fold out in a real browser, off-screen, and reports the geometry of every fold as text: how tall the content is against how much screen there is, where the content starts against where the deck masthead ends, how many blocks and diagram labels rendered. It then names four defects it can prove — content that OVERFLOWS the screen, content CLIPPED behind the masthead, an EMPTY fold (a data block whose JSON did not parse renders as nothing at all, and validation will not catch that), and SVG labels that COLLIDE on a venn/flow/graph. Call it after authoring and before save_deck. Layout depends on the SCREEN, so the measurement is taken at a stated viewport (1280x720 by default) and the result names it; pass viewport to re-check a smaller one, which is where folds usually break. It measures the real render, never a model: a fold it could not put on screen comes back measured:false with the reason instead of a number, and a host with no browser layout says so for the whole deck — an absent warning is not a clean bill of health unless measured is true.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          viewport: {
+            type: 'object',
+            description: 'Screen to measure against (default 1280x720). Width 320-3840, height 240-2160.',
+            properties: { width: { type: 'integer', description: 'CSS px, 320-3840' }, height: { type: 'integer', description: 'CSS px, 240-2160' } },
+          },
+        },
+      },
+      execute: async ({ viewport }) => {
+        const model = deck.model();
+        if (!deps.measure) {
+          return ok(unmeasurable(model, 'this host has no browser layout to measure (no measurement route was injected — unit tests and non-DOM hosts)'));
+        }
+        let m;
+        try {
+          m = await deps.measure(deck.serialize(), [...model.order], viewport);
+        } catch (e) {
+          return ok(unmeasurable(model, `the measurement failed: ${(e as Error).message}`));
+        }
+        const { folds, warnings } = analyseRender(model, m);
+        return ok({
+          measured: true,
+          viewport: m.viewport,
+          note: `measured in a real off-screen render at ${m.viewport.width}x${m.viewport.height} CSS px. Layout is viewport-dependent — a fold that fits here can still break on a shorter screen, so re-run with a smaller viewport before you call a deck safe.`,
+          folds,
+          warnings,
+          clean: warnings.length === 0,
         });
       },
     },

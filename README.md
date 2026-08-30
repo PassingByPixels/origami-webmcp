@@ -169,6 +169,7 @@ src/core/          the deck + tools; no DOM, so vitest exercises exactly what sh
   guide.ts           origami_guide's payload, built from the live KINDS/FORMAT_VERSION
   blank-deck.ts      create_deck's assembler (dynamic-imports @origami/runtime)
   starters.ts        FREE_STARTER_INNER / TABLE_STARTER_INNER, verbatim from the monorepo
+  inspect.ts         inspect_render's rules — pure arithmetic over measured geometry
   recipes.ts         copy-paste free-card idioms for the guide, verbatim from the block palette
   video-caps.ts      videoCapsNeeded, verbatim from the stdio server
   bake.ts            table formulas -> values on write, via the vendored @origami/calc
@@ -178,6 +179,7 @@ src/core/          the deck + tools; no DOM, so vitest exercises exactly what sh
 src/app/           the page
   main.ts            wiring: store, registry, WebMCP connect, toolbar, drag-drop, autosave
   preview.ts         serializeModel -> iframe srcdoc (sandbox=allow-scripts, never same-origin)
+  measure.ts         inspect_render's off-screen measuring frame + injected measurer
   review.ts          the proposal cards and their Accept / Reject buttons
   console.ts         the test console
   files.ts           File System Access open/save, download fallback, localStorage autosave
@@ -225,6 +227,7 @@ apply to **all** of them:
 | `delete_chunk` | Adds one sentence pointing at `propose_delete`. |
 | `define_block` · `list_block_defs` · `delete_block` | Descriptions verbatim bar the write clause. |
 | `set_header` · `set_fold_type` | None beyond the two global ones. |
+| `inspect_render` | **Not in the stdio server at all.** It has no browser, so it cannot lay a deck out; this is the one thing a page can tell an agent that a file-writing process cannot. It renders the serialized Fold in a hidden, off-screen `sandbox="allow-scripts"` iframe with a measuring script appended after the deck's LAST `</body>`, walks every fold, and posts the geometry back by `postMessage` (matched on a nonce — a sandboxed frame's `event.origin` is the string `"null"`). Reports overflow, masthead clip, blank folds and colliding SVG labels. A fold it cannot put on screen comes back `measured:false` with the reason; a host with no layout says so for the whole deck. |
 | `undo` | **Not in the stdio server at all.** A stdio call has no session, so it has no stack to unwind; a page does. Built on `@origami/format`'s `History`: `DeckStore.apply` records each op's inverse, one entry per tool call. Scope is stated in the description — it cannot cross a `create_deck` or a newly opened Fold (both reset the stack), it never touches bytes already written to disk, 50 steps deep, no redo. |
 | `save_deck` | **Re-purposed, not just re-worded.** In the stdio server every edit had already written through, so `save_deck` was a re-validate. Here it is the only route to disk: it re-validates, then writes the file if the page holds a writable File System Access handle, and otherwise persists the working copy in the browser and reports that the human must press Save. It never opens a picker (nobody would be there to click it) and **never throws for want of a handle**, so an unattended agent can always finish. |
 | `propose_chunk` · `propose_add` · `propose_delete` | “STAGED for a human (or another agent) to review” → “STAGED as a review card in the human's page, which only THEY can accept or reject” **is gone as of round 2**; they now say the change is staged for a human *or* an agent to resolve. |

@@ -13,6 +13,7 @@ import {
   writeAutosave,
   type FsaFileHandle,
 } from './files.js';
+import { measureRender } from './measure.js';
 import { Preview } from './preview.js';
 import { ReviewPanel } from './review.js';
 
@@ -24,9 +25,17 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 const deck = new DeckStore();
 const proposals = new ProposalStore();
-const registry = createRegistry({ deck, proposals, save: saveFromTool });
+const previewFrame = $<HTMLIFrameElement>('preview');
+const registry = createRegistry({
+  deck,
+  proposals,
+  save: saveFromTool,
+  // inspect_render measures in its OWN off-screen frame at a fixed, stated viewport, so the
+  // verdict does not change with the human's window size and the visible deck is never disturbed.
+  measure: measureRender,
+});
 
-const preview = new Preview($<HTMLIFrameElement>('preview'), $('empty-state'));
+const preview = new Preview(previewFrame, $('empty-state'));
 
 const message = $('app-message');
 let messageTimer: number | undefined;

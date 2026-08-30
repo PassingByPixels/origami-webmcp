@@ -32,10 +32,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('22');
+  await expect(page.getByTestId('tool-count')).toHaveText('23');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('22 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('23 tools registered locally');
   // an agent can run the whole loop, review included
   for (const name of ['propose_chunk', 'accept_proposal', 'reject_proposal', 'save_deck', 'define_block', 'add_custom_fold']) {
     await expect(page.getByTestId(`tool-${name}`), name).toBeVisible();
@@ -194,6 +194,135 @@ test('a guide recipe, copied verbatim, mounts and runs in the real deck', async 
   const cols = guide.body.recipes.cards['text-columns-3'];
   await invoke(page, 'add_chunk', { kind: 'free', html: cols.html, label: 'Columns' });
   await expect(frame.locator('.o-tcols[data-ocols="3"] > .o-text')).toHaveCount(3);
+});
+
+test('inspect_render measures a REAL layout and names two real defects', async ({ page }) => {
+  /* The unit suite proves the RULES against numbers handed straight in. This proves the numbers
+     are real: a deck is built with two defects that genuinely render wrong, and inspect_render
+     has to find both by laying the actual Fold out in an actual browser.
+
+     Defect 2 is the one a validator cannot help with in time. An empty flow data block
+     (nodes: []) passes the content policy and add_chunk accepts it, so the agent gets an "ok"
+     and a fold that draws NOTHING. save_deck does eventually refuse it — asserted below — but
+     only at the very end, with a schema violation rather than "this fold is blank". */
+  await page.goto('/index.html');
+  await invoke(page, 'create_deck', { title: 'Inspect Me', discard: true });
+  await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
+
+  const dataBlock = (kind: string, data: unknown) =>
+    `<script type="application/json" data-odata="${kind}">${JSON.stringify(data).replace(/</g, '\u003c')}</script>`;
+
+  const blank = await invoke(page, 'add_chunk', {
+    kind: 'flow',
+    label: 'Blank flow',
+    html: `<figure class="o-flowfig anim">${dataBlock('flow', { nodes: [], edges: [] })}<div class="o-flow" data-flow-mount></div></figure>`,
+  });
+  expect(blank.state, 'an empty data block is ACCEPTED — that is the point').toContain('ok');
+
+  const tall = await invoke(page, 'add_chunk', {
+    kind: 'free',
+    label: 'Overflowing',
+    html:
+      '<div class="slide-inner"><h2>Tall</h2>' +
+      Array.from({ length: 60 }, (_, i) => `<p>Line ${i} — padding padding padding padding padding padding</p>`).join('') +
+      '</div>',
+  });
+
+  const res = await invoke(page, 'inspect_render', { viewport: { width: 940, height: 471 } });
+  expect(res.state).toContain('ok');
+  expect(res.body.viewport).toEqual({ width: 940, height: 471 });
+  expect(res.body.measured, JSON.stringify(res.body).slice(0, 400)).toBe(true);
+  expect(res.body.folds).toHaveLength(3);
+
+  // every fold reached the stage and produced a real number
+  for (const f of res.body.folds) {
+    expect(f.measured, `${f.label} was not measured`).toBe(true);
+    expect(f.contentHeight).toBeGreaterThan(0);
+  }
+
+  const issues = res.body.warnings.map((w: any) => `${w.issue}:${w.fold}`);
+  expect(issues, JSON.stringify(res.body.warnings)).toContain(`overflow:${tall.body.chunkId}`);
+  expect(issues, JSON.stringify(res.body.warnings)).toContain(`empty-fold:${blank.body.chunkId}`);
+  expect(res.body.clean).toBe(false);
+
+  // the blank fold is reported blank and NOT as clipped: with no ink there is no contentTop,
+  // and the 0 fallback must not be dressed up as "hidden behind the masthead"
+  const blankGeo = res.body.folds.find((f: any) => f.id === blank.body.chunkId);
+  expect(blankGeo.rendersAnything).toBe(false);
+  expect(res.body.warnings.filter((w: any) => w.fold === blank.body.chunkId).map((w: any) => w.issue)).toEqual(['empty-fold']);
+
+  // the cover, which is fine, is reported fine — a tool that warns about everything says nothing
+  const cover = res.body.folds.find((f: any) => f.label === 'Cover');
+  expect(cover.rendersAnything).toBe(true);
+  expect(cover.fits).toBe(true);
+  expect(cover.contentTop).toBeGreaterThanOrEqual(cover.mastheadBottom);
+  expect(res.body.warnings.filter((w: any) => w.fold === cover.id)).toEqual([]);
+
+  const tallGeo = res.body.folds.find((f: any) => f.id === tall.body.chunkId);
+  console.log(
+    `  measured render @${res.body.viewport.width}x${res.body.viewport.height}: ` +
+      `cover contentTop=${cover.contentTop}px vs mastheadBottom=${cover.mastheadBottom}px; ` +
+      `blank flow paints nothing; overflowing fold contentHeight=${tallGeo.contentHeight}px`
+  );
+
+  // save_deck refuses the same deck, but only at the end and only as a schema violation
+  const saved = await invoke(page, 'save_deck', {});
+  expect(saved.state).toContain('error');
+  expect(JSON.stringify(saved.body.violations)).toContain('flow.nodes.count');
+
+  // and the measuring frame cleaned itself up — it must never linger next to the preview
+  await expect(page.locator('[data-testid="measure-frame"]')).toHaveCount(0);
+});
+
+test('inspect_render is viewport-dependent, and says which viewport it used', async ({ page }) => {
+  /* MEASURED, and it corrects the brief this work started from. The claim under test was that a
+     flow-KIND fold's figure "starts ~26px with a 100px masthead" and so loses its top behind the
+     bar. The figure BOX does sit high — its top edge measured 42px under a 100px header — but the
+     figure's top is empty padding: the topmost element that actually PAINTS measured 121-253px
+     across every viewport height from 240 to 720, always below the bar. So no ink is hidden, and
+     inspect_render correctly declines to warn. What is real is that geometry moves a lot with the
+     screen, which is why the viewport is a parameter and is named in every result. */
+  await page.goto('/index.html');
+  await invoke(page, 'create_deck', { title: 'Viewport', discard: true });
+  await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
+  await invoke(page, 'add_chunk', {
+    kind: 'free',
+    label: 'Some copy',
+    html: '<div class="slide-inner"><h2>Heading</h2>' + Array.from({ length: 14 }, (_, i) => `<p>Line ${i} of body copy.</p>`).join('') + '</div>',
+  });
+
+  const short = await invoke(page, 'inspect_render', { viewport: { width: 940, height: 300 } });
+  const tallView = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 900 } });
+  expect(short.body.viewport).toEqual({ width: 940, height: 300 });
+  expect(tallView.body.viewport).toEqual({ width: 1280, height: 900 });
+
+  const pick = (r: any) => r.body.folds.find((f: any) => f.label === 'Some copy');
+  expect(pick(short).fits, 'the copy fold must NOT fit on a 300px screen').toBe(false);
+  expect(pick(tallView).fits, 'the same fold must fit on a 900px screen').toBe(true);
+  // same deck, same bytes, opposite verdict — which is why a verdict without a viewport is noise
+  expect(short.body.clean).toBe(false);
+  expect(tallView.body.clean).toBe(true);
+
+  // no masthead clip at EITHER size: the deck's own layout keeps content below the bar
+  for (const r of [short, tallView]) expect(r.body.warnings.filter((w: any) => w.issue === 'masthead-clip')).toEqual([]);
+  console.log(
+    `  same deck: 300px -> fits=${pick(short).fits} (content ${pick(short).contentHeight}px), ` +
+      `900px -> fits=${pick(tallView).fits} (content ${pick(tallView).contentHeight}px)`
+  );
+});
+
+test('inspect_render reports a clean deck as clean, and never touches the preview', async ({ page }) => {
+  await page.goto('/index.html');
+  await invoke(page, 'create_deck', { title: 'Tidy', discard: true });
+  const before = await page.getByTestId('preview').getAttribute('srcdoc');
+
+  const res = await invoke(page, 'inspect_render', {});
+  expect(res.body.measured).toBe(true);
+  expect(res.body.warnings, JSON.stringify(res.body.warnings)).toEqual([]);
+  expect(res.body.clean).toBe(true);
+
+  // measuring is READ-ONLY: same bytes in the preview, and the Fold is not marked dirty by it
+  expect(await page.getByTestId('preview').getAttribute('srcdoc')).toBe(before);
 });
 
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
