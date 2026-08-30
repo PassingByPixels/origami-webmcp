@@ -21,9 +21,17 @@ export declare function vennContainingSets(data: VennData, x: number, y: number)
 /** A stable key for an overlap: its circle indices, sorted. */
 export declare const vennOverlapKey: (sets: number[]) => string;
 /** Word-wrap `text` into lines that each fit `maxWidth` viewBox units at `fontSize`.
-    Splits on spaces first; a single over-long word is then broken at character boundaries
-    so nothing ever overflows its segment. Deterministic — no DOM measurement. */
+    Breaks at WORD BOUNDARIES ONLY — a word is never cut. It used to fall back to breaking an
+    over-wide word at character boundaries, which turned "Them" in a narrow lobe into "The" over
+    "m": a word chopped mid-way is not a smaller label, it is a different word. A word too wide
+    for its region is handled before we get here (fitVennLabelSize shrinks the label to fit it);
+    if it is STILL too wide at the floor, it stays whole and overhangs, which reads.
+    Deterministic — no DOM measurement. */
 export declare function wrapVennLabel(text: string, fontSize: number, maxWidth: number): string[];
+/** The size at which this label's WIDEST WORD fits `maxWidth`, never above `fontSize` and
+    never below the floor. estTextWidth is linear in fontSize, so the ratio is exact rather
+    than a search. Returns `fontSize` unchanged whenever every word already fits. */
+export declare function fitVennLabelSize(text: string, fontSize: number, maxWidth: number): number;
 /** Merge the named overlaps whose keys are in `keys` into one: union of their sets,
     label centred at the centroid, position at the centroid. Requires 2+ matching
     overlaps, else returns `data` unchanged (nothing to merge). */

@@ -2128,6 +2128,10 @@ function normalizeLanes(raw) {
     };
   }).filter((l) => l.label.length > 0);
 }
+function laneKeyFor(value, lanes, laneIds) {
+  if (lanes.length === 0) return {};
+  return { lane: typeof value === "string" && laneIds.has(value) ? value : lanes[0].id };
+}
 function normalizeFlowData(raw) {
   const d = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const lanes = normalizeLanes(d.lanes);
@@ -2147,7 +2151,7 @@ function normalizeFlowData(raw) {
       ...deco(o),
       ...width !== void 0 ? { width } : {},
       ...height !== void 0 ? { height } : {},
-      ...typeof o.lane === "string" && laneIds.has(o.lane) ? { lane: o.lane } : {},
+      ...laneKeyFor(o.lane, lanes, laneIds),
       ...x !== void 0 && y !== void 0 ? { x, y } : {}
     };
   });
@@ -2175,7 +2179,7 @@ function normalizeGraphData(raw) {
       ...o.shape === "box" || o.shape === "diamond" || o.shape === "circle" || o.shape === "hexagon" ? { shape: o.shape } : {},
       ...width !== void 0 ? { width } : {},
       ...height !== void 0 ? { height } : {},
-      ...typeof o.lane === "string" && laneIds.has(o.lane) ? { lane: o.lane } : {},
+      ...laneKeyFor(o.lane, lanes, laneIds),
       ...deco(o)
     };
   });
@@ -2360,6 +2364,95 @@ function dmHalo(g, cx, cy, w, h) {
     "stroke-width": "1.5",
     "stroke-dasharray": "5 4"
   }, g);
+}
+var dmLane = null;
+function dmSyncLane(data) {
+  if (dmLane && !(data.lanes ?? []).some((l) => l.id === dmLane)) dmLane = null;
+}
+function addDiagramLane(data) {
+  const lanes = [...data.lanes ?? []].sort((a, b) => a.order - b.order);
+  const open = () => {
+    let n = 1;
+    while (lanes.some((l) => l.id === `lane${n}`)) n++;
+    lanes.push({ id: `lane${n}`, label: `Lane ${n}`, order: lanes.length });
+  };
+  const from = lanes.length;
+  open();
+  if (from === 0) open();
+  lanes.forEach((l, i) => l.order = i);
+  const ids = new Set(lanes.map((l) => l.id));
+  for (const n of data.nodes) {
+    if (n.lane !== void 0 && ids.has(n.lane)) continue;
+    const y = n.y;
+    const strip = from === 0 && typeof y === "number" && Number.isFinite(y) ? Math.min(lanes.length - 1, Math.max(0, Math.floor(y / 100 * lanes.length))) : 0;
+    n.lane = lanes[strip].id;
+  }
+  data.lanes = lanes;
+}
+function removeDiagramLane(data, id, seat) {
+  const lanes = [...data.lanes ?? []].sort((a, b) => a.order - b.order);
+  const at = lanes.findIndex((l) => l.id === id);
+  if (at < 0) return;
+  const nodes = data.nodes;
+  if (lanes.length <= 2) {
+    for (const n of nodes) {
+      delete n.lane;
+      if (n.x === void 0 || n.y === void 0) {
+        const p = seat?.(n.id);
+        if (p) {
+          n.x = p.x;
+          n.y = p.y;
+        }
+      }
+    }
+    delete data.lanes;
+    return;
+  }
+  const rest = lanes.filter((l) => l.id !== id);
+  rest.forEach((l, i) => l.order = i);
+  const nearest = rest[Math.min(at, rest.length - 1)].id;
+  for (const n of nodes) if (n.lane === id) n.lane = nearest;
+  data.lanes = rest;
+}
+function wireLaneBand(rect, layer, band, vw, vh, pos, data, commit) {
+  if (!band.id) return;
+  const id = band.id;
+  rect.setAttribute("data-lane", id);
+  rect.style.cursor = "pointer";
+  rect.addEventListener("mousedown", (e) => e.stopPropagation());
+  const paint = () => {
+    if (dmLane !== id) return;
+    const g = svgEl("g", { class: "o-dlane-x", "data-lane-close": id }, layer);
+    g.style.cursor = "pointer";
+    g.style.pointerEvents = "all";
+    g.addEventListener("mousedown", (e) => e.stopPropagation());
+    const cx = LANE_X_EDIT - 18;
+    const cy = band.y + 22;
+    svgEl("circle", { cx: `${cx}`, cy: `${cy}`, r: "12", fill: "var(--paper, #fff)", stroke: "var(--rule)" }, g);
+    svgEl("path", {
+      d: `M${cx - 4} ${cy - 4}L${cx + 4} ${cy + 4}M${cx + 4} ${cy - 4}L${cx - 4} ${cy + 4}`,
+      stroke: "var(--ink)",
+      "stroke-width": "1.7",
+      "stroke-linecap": "round",
+      fill: "none"
+    }, g);
+    g.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dmLane = null;
+      removeDiagramLane(data, id, (nodeId) => {
+        const p = pos.get(nodeId);
+        return p ? { x: Math.round(p.x / vw * 1e3) / 10, y: Math.round(p.y / vh * 1e3) / 10 } : void 0;
+      });
+      commit(data);
+    });
+  };
+  rect.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dmLane = dmLane === id ? null : id;
+    layer.querySelectorAll(".o-dlane-x").forEach((n) => n.remove());
+    paint();
+  });
+  paint();
 }
 function dmToggleSelect(svg, id, halo2) {
   const was = dmSelected === id;
@@ -2571,6 +2664,8 @@ function flowAutoPositions(data) {
 }
 var LHW = 140;
 var LANE_TOP = 16;
+var LANE_X_VIEW = 12;
+var LANE_X_EDIT = 40;
 var LANE_GAP = 20;
 var LANE_MIN_H = 72;
 var FLOW_ROW_H = FH + FGY + 14;
@@ -2594,13 +2689,7 @@ function laneDepthMap(laneNodes, edges) {
 function flowLanePositions(data) {
   const lanes = [...data.lanes ?? []].sort((a, b) => a.order - b.order);
   const buckets = lanes.map((l) => ({ id: l.id, label: l.label, color: l.color, actor: l.actor, nodes: [] }));
-  const unassigned = [];
-  for (const n of data.nodes) {
-    const bucket = buckets.find((b) => b.id === n.lane);
-    if (bucket) bucket.nodes.push(n);
-    else unassigned.push(n);
-  }
-  if (unassigned.length) buckets.push({ id: null, label: "", nodes: unassigned });
+  for (const n of data.nodes) (buckets.find((b) => b.id === n.lane) ?? buckets[0]).nodes.push(n);
   const pos = /* @__PURE__ */ new Map();
   const bands = [];
   let y = LANE_TOP;
@@ -2740,6 +2829,7 @@ function renderFlow(slide, data, opts = {}) {
   const mount = slide.querySelector("[data-flow-mount]");
   if (!mount) return;
   dmCancelPendingSelect();
+  dmSyncLane(data);
   mount.textContent = "";
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
   const hasLanes = !!(data.lanes && data.lanes.length > 0);
@@ -2773,7 +2863,7 @@ function renderFlow(slide, data, opts = {}) {
   if (hasLanes) {
     const laneLayer = svgEl("g", { class: "o-flow-lanes" }, svg);
     bands.forEach((band, i) => {
-      svgEl("rect", {
+      const rect = svgEl("rect", {
         x: "0",
         y: String(band.y),
         width: String(vw),
@@ -2785,8 +2875,9 @@ function renderFlow(slide, data, opts = {}) {
         "stroke-opacity": "0.25"
       }, laneLayer);
       if (band.label) {
+        const hx = String(opts.edit ? LANE_X_EDIT : LANE_X_VIEW);
         const t = svgEl("text", {
-          x: "12",
+          x: hx,
           y: String(band.y + 26),
           "text-anchor": "start",
           fill: "var(--ink)",
@@ -2795,7 +2886,7 @@ function renderFlow(slide, data, opts = {}) {
         t.textContent = band.label;
         if (band.actor) {
           const a = svgEl("text", {
-            x: "12",
+            x: hx,
             y: String(band.y + 44),
             "text-anchor": "start",
             fill: "var(--ink-soft)",
@@ -2804,6 +2895,7 @@ function renderFlow(slide, data, opts = {}) {
           a.textContent = band.actor;
         }
       }
+      if (opts.edit) wireLaneBand(rect, laneLayer, band, vw, vh, pos, data, opts.edit.onCommit);
     });
   }
   const edges = svgEl("g", {}, svg);
@@ -3048,10 +3140,7 @@ var GLANE_ROW_H = 70;
 function graphLanePositions(data) {
   const lanes = [...data.lanes ?? []].sort((a, b) => a.order - b.order);
   const byLane = new Map(lanes.map((l) => [l.id, []]));
-  for (const n of data.nodes) {
-    const bucket = byLane.get(n.lane ?? "");
-    if (bucket) bucket.push(n);
-  }
+  for (const n of data.nodes) (byLane.get(n.lane ?? "") ?? byLane.get(lanes[0].id)).push(n);
   const pos = /* @__PURE__ */ new Map();
   const bands = [];
   let y = LANE_TOP;
@@ -3084,6 +3173,7 @@ function renderGraph(slide, data, opts = {}) {
   const mount = slide.querySelector("[data-graph-mount]");
   if (!mount) return;
   dmCancelPendingSelect();
+  dmSyncLane(data);
   mount.textContent = "";
   const byId = new Map(data.nodes.map((n) => [n.id, n]));
   const hasLanes = !!(data.lanes && data.lanes.length > 0);
@@ -3100,8 +3190,9 @@ function renderGraph(slide, data, opts = {}) {
   const markerId = addEdgeMarker(svg);
   if (hasLanes) {
     const laneLayer = svgEl("g", { class: "o-flow-lanes" }, svg);
+    const laneGeom = new Map(data.nodes.map((n) => [n.id, nodePos(n)]));
     bands.forEach((band, i) => {
-      svgEl("rect", {
+      const rect = svgEl("rect", {
         x: "0",
         y: String(band.y),
         width: String(GVW),
@@ -3113,8 +3204,9 @@ function renderGraph(slide, data, opts = {}) {
         "stroke-opacity": "0.25"
       }, laneLayer);
       if (band.label) {
+        const hx = String(opts.edit ? LANE_X_EDIT : LANE_X_VIEW);
         const t = svgEl("text", {
-          x: "12",
+          x: hx,
           y: String(band.y + 26),
           "text-anchor": "start",
           fill: "var(--ink)",
@@ -3123,7 +3215,7 @@ function renderGraph(slide, data, opts = {}) {
         t.textContent = band.label;
         if (band.actor) {
           const a = svgEl("text", {
-            x: "12",
+            x: hx,
             y: String(band.y + 44),
             "text-anchor": "start",
             fill: "var(--ink-soft)",
@@ -3132,6 +3224,7 @@ function renderGraph(slide, data, opts = {}) {
           a.textContent = band.actor;
         }
       }
+      if (opts.edit) wireLaneBand(rect, laneLayer, band, GVW, vh, laneGeom, data, opts.edit.onCommit);
     });
   }
   const edges = svgEl("g", {}, svg);
@@ -3747,6 +3840,11 @@ function evaluateCondFmt(values, rules, merges) {
 var DRAW_MAX_ELEMENTS = 200;
 var DRAW_MAX_POINTS = 1200;
 var DRAW_TYPES = ["rect", "diamond", "ellipse", "arrow", "line", "freedraw", "text"];
+
+// ../format/dist/venn-data.js
+var VENN_SIZE_MIN = 0.5;
+var VENN_SIZE_MAX = 2;
+var VENN_NUDGE_MAX = 60;
 
 // ../format/dist/cell-format.js
 var ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -9098,6 +9196,20 @@ var svgEl4 = (tag, attrs, parent) => {
   return e;
 };
 var clampCount = (x) => x === 3 || x === 4 || x === 5 || x === 6 ? x : 2;
+function sizeKey(raw) {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return {};
+  const size = Math.max(VENN_SIZE_MIN, Math.min(VENN_SIZE_MAX, raw));
+  return size === 1 ? {} : { size };
+}
+function nudgeKeys(o) {
+  const one = (raw) => {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return 0;
+    return Math.round(Math.max(-VENN_NUDGE_MAX, Math.min(VENN_NUDGE_MAX, raw)) * 10) / 10;
+  };
+  const dx = one(o.dx);
+  const dy = one(o.dy);
+  return { ...dx ? { dx } : {}, ...dy ? { dy } : {} };
+}
 function normalizeVennData(raw) {
   const d = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const count = clampCount(d.count);
@@ -9107,7 +9219,9 @@ function normalizeVennData(raw) {
     const o = rawSets[i] ?? {};
     sets.push({
       label: typeof o.label === "string" ? o.label.slice(0, 40) : DEFAULT_LABELS[i],
-      color: typeof o.color === "string" && HEX_RE4.test(o.color) ? o.color : DEFAULT_COLORS[i]
+      color: typeof o.color === "string" && HEX_RE4.test(o.color) ? o.color : DEFAULT_COLORS[i],
+      ...sizeKey(o.size),
+      ...nudgeKeys(o)
     });
   }
   const overlaps2 = [];
@@ -9120,7 +9234,7 @@ function normalizeVennData(raw) {
     const label = typeof o.label === "string" ? o.label.slice(0, 40) : "";
     const x = typeof o.x === "number" && Number.isFinite(o.x) ? Math.max(0, Math.min(100, o.x)) : 50;
     const y = typeof o.y === "number" && Number.isFinite(o.y) ? Math.max(0, Math.min(100, o.y)) : 50;
-    overlaps2.push({ sets: idx, label, x, y });
+    overlaps2.push({ sets: idx, label, x, y, ...sizeKey(o.size), ...nudgeKeys(o) });
   }
   return { count, sets, ...overlaps2.length ? { overlaps: overlaps2 } : {} };
 }
@@ -9172,43 +9286,38 @@ function vennContainingSets(data, x, y) {
   return out;
 }
 var vennOverlapKey = (sets) => [...sets].sort((a, b) => a - b).join(",");
-function breakWord(w, fontSize, maxWidth) {
-  if (estTextWidth(w, fontSize) <= maxWidth) return [w];
-  const out = [];
-  let piece = "";
-  for (const ch of w) {
-    if (piece && estTextWidth(piece + ch, fontSize) > maxWidth) {
-      out.push(piece);
-      piece = ch;
-    } else {
-      piece += ch;
-    }
-  }
-  if (piece) out.push(piece);
-  return out;
-}
 function wrapVennLabel(text, fontSize, maxWidth) {
   const words = text.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [""];
   const lines = [];
   let cur = "";
   for (const w of words) {
-    const pieces = breakWord(w, fontSize, maxWidth);
-    pieces.forEach((piece, i) => {
-      if (!cur) {
-        cur = piece;
-      } else if (i === 0 && estTextWidth(`${cur} ${piece}`, fontSize) <= maxWidth) {
-        cur += ` ${piece}`;
-      } else {
-        lines.push(cur);
-        cur = piece;
-      }
-    });
+    if (!cur) cur = w;
+    else if (estTextWidth(`${cur} ${w}`, fontSize) <= maxWidth) cur += ` ${w}`;
+    else {
+      lines.push(cur);
+      cur = w;
+    }
   }
   if (cur) lines.push(cur);
   return lines;
 }
+var MIN_LABEL_SIZE = 7;
+function fitVennLabelSize(text, fontSize, maxWidth) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return fontSize;
+  const widest = Math.max(...words.map((w) => estTextWidth(w, fontSize)));
+  if (widest <= maxWidth) return fontSize;
+  return Math.max(MIN_LABEL_SIZE, fontSize * maxWidth / widest);
+}
 var LABEL_EDGE_MARGIN = 8;
+function nudged(x, y, dx, dy, vb) {
+  const m = 10;
+  return {
+    x: Math.max(m, Math.min(vb.w - m, x + (dx ?? 0))),
+    y: Math.max(m, Math.min(vb.h - m, y + (dy ?? 0)))
+  };
+}
 function setLabelWrapWidth(p) {
   const dy = Math.abs(p.ly - p.cy);
   const halfChord = Math.sqrt(Math.max(0, p.r * p.r - dy * dy));
@@ -9255,8 +9364,9 @@ function halo(t, ink) {
   t.setAttribute("paint-order", "stroke fill");
 }
 function wrappedText(parent, o) {
-  const lines = wrapVennLabel(o.text, o.fontSize, o.maxWidth);
-  const lineH = o.fontSize * 1.24;
+  const size = fitVennLabelSize(o.text, o.fontSize, o.maxWidth);
+  const lines = wrapVennLabel(o.text, size, o.maxWidth);
+  const lineH = size * 1.24;
   const t = svgEl4("text", {
     class: o.cls,
     x: o.x,
@@ -9264,7 +9374,7 @@ function wrappedText(parent, o) {
     "text-anchor": "middle",
     "dominant-baseline": "middle",
     fill: o.ink,
-    "font-size": String(o.fontSize),
+    "font-size": String(Math.round(size * 100) / 100),
     "font-weight": String(o.fontWeight),
     "font-family": "var(--font, Inter, system-ui, sans-serif)",
     ...o.fontStyle ? { "font-style": o.fontStyle } : {},
@@ -9274,7 +9384,11 @@ function wrappedText(parent, o) {
   lines.forEach((line, i) => {
     const span2 = svgEl4("tspan", {
       x: o.x,
-      dy: i === 0 ? lines.length > 1 ? -lineH * 0.62 : 0 : lineH
+      // centre the BLOCK on the label point: half a line-height per line above the middle.
+      // The old -0.62 was a two-line constant applied to every count, so a wrapped label sat
+      // 0.12 line-heights high at two lines and 0.38 LOW at three — a systematic, N-dependent
+      // drift that read as a label slightly ajar of the region it names.
+      dy: i === 0 ? -(lines.length - 1) / 2 * lineH : lineH
     }, t);
     span2.textContent = line;
   });
@@ -9310,23 +9424,25 @@ function vennSceneSvg(data, selected) {
   n.sets.forEach((set, i) => {
     const p = places[i];
     const ink = inkFor(luminance2(set.color));
+    const seat = nudged(p.lx, p.ly, set.dx, set.dy, vb);
     wrappedText(labels, {
       cls: "o-venn-label",
-      x: p.lx,
-      y: p.ly,
+      x: seat.x,
+      y: seat.y,
       text: set.label || DEFAULT_LABELS[i],
       ink,
-      fontSize: 15,
+      fontSize: 15 * (set.size ?? 1),
       fontWeight: 600,
       maxWidth: setLabelWrapWidth(p),
-      attrs: { "data-set": String(i) }
+      attrs: { "data-set": String(i), "data-size": String(set.size ?? 1), "data-dx": String(set.dx ?? 0), "data-dy": String(set.dy ?? 0) }
     });
   });
   for (const o of n.overlaps ?? []) {
     const ink = inkFor(blendLuminance(o.sets.map((i) => n.sets[i]?.color ?? DEFAULT_COLORS[i])));
     const key = vennOverlapKey(o.sets);
-    const cx = o.x / 100 * vb.w;
-    const cy = o.y / 100 * vb.h;
+    const seat = nudged(o.x / 100 * vb.w, o.y / 100 * vb.h, o.dx, o.dy, vb);
+    const cx = seat.x;
+    const cy = seat.y;
     if (selected?.has(key)) {
       const sel = svgEl4("rect", {
         class: "o-venn-sel",
@@ -9345,11 +9461,11 @@ function vennSceneSvg(data, selected) {
       y: cy,
       text: o.label,
       ink,
-      fontSize: 12.5,
+      fontSize: 12.5 * (o.size ?? 1),
       fontWeight: 500,
       maxWidth: 104,
       fontStyle: "italic",
-      attrs: { "data-overlap": key }
+      attrs: { "data-overlap": key, "data-size": String(o.size ?? 1), "data-dx": String(o.dx ?? 0), "data-dy": String(o.dy ?? 0) }
     });
   }
   return svg;
@@ -10808,7 +10924,7 @@ function createViewer(manifest, hooks, assets = {}) {
     <div class="o-banner"><span>Editing \u2014 changes live here until you save a copy.</span><button class="o-save">Save a copy</button></div>
     <main class="o-stage"></main>
     <footer class="o-bottom">
-      <a class="o-mark" href="https://origami.gratis" target="_blank" rel="noopener"><svg viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor"><animateTransform attributeName="transform" type="translate" values="0 0; 0 -1; 0 0" keyTimes="0;0.5;1" dur="4.5s" repeatCount="indefinite"/><g opacity="0.45"><animateTransform attributeName="transform" type="rotate" values="0 36 40; 7 36 40; 0 36 40" keyTimes="0;0.5;1" dur="3.2s" repeatCount="indefinite"/><polygon points="30,40 47,40 52,11"/></g><g><animateTransform attributeName="transform" type="rotate" values="0 34 40; -12 34 40; 0 34 40" keyTimes="0;0.5;1" dur="3.2s" repeatCount="indefinite"/><polygon points="26,40 48,40 43,7" opacity="0.92"/></g><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>made with origami</a>
+      <a class="o-mark" href="https://origamilabs.nl" target="_blank" rel="noopener"><svg viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor"><animateTransform attributeName="transform" type="translate" values="0 0; 0 -1; 0 0" keyTimes="0;0.5;1" dur="4.5s" repeatCount="indefinite"/><g opacity="0.45"><animateTransform attributeName="transform" type="rotate" values="0 36 40; 7 36 40; 0 36 40" keyTimes="0;0.5;1" dur="3.2s" repeatCount="indefinite"/><polygon points="30,40 47,40 52,11"/></g><g><animateTransform attributeName="transform" type="rotate" values="0 34 40; -12 34 40; 0 34 40" keyTimes="0;0.5;1" dur="3.2s" repeatCount="indefinite"/><polygon points="26,40 48,40 43,7" opacity="0.92"/></g><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>made with origami</a>
       <div class="o-pipstack">
         <div class="o-pips" role="group" aria-label="Slide position"></div>
         <div class="o-subpips" role="group" aria-label="Position within group" hidden></div>
@@ -12642,6 +12758,7 @@ export {
   THEMES,
   THEME_CSS,
   TRACKER_STATUSES,
+  addDiagramLane,
   applyBrandLogoVar,
   applyFavicon,
   assembleDeck,
@@ -12724,6 +12841,7 @@ export {
   releaseFloatBands,
   releaseRuns,
   releaseRunsIn,
+  removeDiagramLane,
   renderChart,
   renderDiagramError,
   renderDocToc,

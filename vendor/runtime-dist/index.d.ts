@@ -18,7 +18,7 @@ export { renderTable, renderTableError, parseTableSlideData, mountTables, finali
 export { renderDocToc, docMount, docFinalize, paginateDoc, docBlockFull, reserveCardBands, releaseCardBands, releaseFloatBands, bandSlot, reserveCardBandsWhenSettled } from './document.js';
 export { freeIntervals, spanInBand, inflate, usable, type Exclusion } from './wrap-geometry.js';
 export { holdRuns, isRunsHeld, mountRuns, releaseRuns, releaseRunsIn, runnable, runsMounted, tokenize, withSource } from './wrap-runs.js';
-export { renderFlow, renderGraph, renderDiagramError, parseFlowSlideData, parseGraphSlideData, normalizeFlowData, normalizeGraphData, mountFlows, finalizeFlows, mountGraphs, finalizeGraphs, setDiagramSnap, graphLayout, DIAGRAM_ICONS, type GraphLayoutMode, type DiagramRenderOpts, } from './diagram.js';
+export { renderFlow, renderGraph, renderDiagramError, parseFlowSlideData, parseGraphSlideData, normalizeFlowData, normalizeGraphData, mountFlows, finalizeFlows, mountGraphs, finalizeGraphs, setDiagramSnap, addDiagramLane, removeDiagramLane, graphLayout, DIAGRAM_ICONS, type GraphLayoutMode, type DiagramRenderOpts, } from './diagram.js';
 export { renderDraw, mountDraws, finalizeDraws, normalizeDrawData, drawSceneSvg, sceneBounds, mulberry32, sketchyLine, simplifyPoints, smoothPath, hachureLines, } from './draw.js';
 export { renderVenn, mountVenns, finalizeVenns, normalizeVennData, vennSceneSvg, vennLayout, vennViewBox, vennContainingSets, vennOverlapKey, wrapVennLabel, mergeVennOverlaps, parseVennSlideData, } from './venn.js';
 export { renderChart, mountCharts, parseChartFigureData, normalizeChartData, plotHeightBounds, niceMax, CHART_W, CHART_FONT_STACK, CHART_H, CHART_PALETTE, sliceColor, } from './chart.js';

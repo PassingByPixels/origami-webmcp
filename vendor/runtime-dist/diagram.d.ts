@@ -27,6 +27,25 @@ export interface DiagramRenderOpts {
     };
 }
 export declare const setDiagramSnap: (on: boolean) => void;
+/** Add a swim lane, IN PLACE, holding the invariant.
+
+    From zero this opens TWO at once and lanes every existing node: one band is not a swim-lane
+    diagram, and the blank band that used to hold the unassigned nodes is not a lane either. Each
+    node lands in the lane whose horizontal strip its current position falls in — a node with no
+    position of its own (a flow node the auto-layout places) is indeterminate and goes to Lane 1,
+    so nothing moves further than the band layout was going to move it anyway. */
+export declare function addDiagramLane(data: FlowData | GraphData): void;
+/** Remove one lane, IN PLACE, holding the invariant.
+
+    Its nodes move to the nearest surviving band. Closing when only two are left removes BOTH —
+    one lane would leave a diagram that is banded but not laned, which is the blank-band shape
+    again — and the diagram returns to the full-height laneless render with every node.lane
+    cleared. `seat` supplies a node's current PERCENT position so a node the lane layout placed
+    keeps where it sits instead of snapping back to the auto grid. */
+export declare function removeDiagramLane(data: FlowData | GraphData, id: string, seat?: (nodeId: string) => {
+    x: number;
+    y: number;
+} | undefined): void;
 export declare function renderDiagramError(slide: HTMLElement, kind: 'flow' | 'graph'): void;
 export declare function renderFlow(slide: HTMLElement, data: FlowData, opts?: DiagramRenderOpts): void;
 export type GraphLayoutMode = 'force' | 'radial' | 'tree';

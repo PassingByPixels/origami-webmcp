@@ -11,9 +11,29 @@
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 const LABEL_MAX = 40;
 export const VENN_MAX_CIRCLES = 6;
+/** Per-label text scale: a multiplier on the kind's base font size. Absent = 1. The author
+    sets it by dragging the label; the renderer may shrink further to keep a word whole, but
+    it never writes that back — this is the author's intent, not the fitted result. */
+export const VENN_SIZE_MIN = 0.5;
+export const VENN_SIZE_MAX = 2;
+/** How far a label may be nudged off its natural point, in viewBox units, on each axis. A set
+    label's natural point is its circle's lobe; an overlap's is its own x/y. The nudge is kept
+    SEPARATE from an overlap's x/y on purpose: x/y says which region the label belongs to (it is
+    what the region hit-test reads), the nudge only says where its text sits. */
+export const VENN_NUDGE_MAX = 60;
 const isHex = (x) => typeof x === 'string' && HEX.test(x);
 const isCount = (x) => x === 2 || x === 3 || x === 4 || x === 5 || x === 6;
 const isPct = (x) => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 100;
+const isSize = (x) => typeof x === 'number' && Number.isFinite(x) && x >= VENN_SIZE_MIN && x <= VENN_SIZE_MAX;
+const isNudge = (x) => typeof x === 'number' && Number.isFinite(x) && x >= -VENN_NUDGE_MAX && x <= VENN_NUDGE_MAX;
+/** The ±60 nudge check for one label's dx/dy, reported against `at` (a set or an overlap). */
+function checkNudge(o, at, bad) {
+    for (const axis of ['dx', 'dy']) {
+        if (o[axis] !== undefined && !isNudge(o[axis])) {
+            bad(`${at}.${axis}`, `${at}: ${axis} must be -${VENN_NUDGE_MAX}-${VENN_NUDGE_MAX} when present`);
+        }
+    }
+}
 /** Strict shape check. REJECT, never repair. */
 export function validateVennData(data) {
     const v = [];
@@ -47,6 +67,10 @@ export function validateVennData(data) {
             bad(`sets.${i}.label`, `set ${i}: label max ${LABEL_MAX} chars`);
         if (!isHex(s.color))
             bad(`sets.${i}.color`, `set ${i}: color must be a #hex`);
+        if (s.size !== undefined && !isSize(s.size)) {
+            bad(`sets.${i}.size`, `set ${i}: size must be ${VENN_SIZE_MIN}-${VENN_SIZE_MAX} when present`);
+        }
+        checkNudge(s, `sets.${i}`, bad);
     });
     if (d.overlaps !== undefined) {
         if (!Array.isArray(d.overlaps)) {
@@ -89,6 +113,10 @@ export function validateVennData(data) {
                     bad(`overlaps.${i}.x`, `overlap ${i}: x must be 0-100`);
                 if (!isPct(o.y))
                     bad(`overlaps.${i}.y`, `overlap ${i}: y must be 0-100`);
+                if (o.size !== undefined && !isSize(o.size)) {
+                    bad(`overlaps.${i}.size`, `overlap ${i}: size must be ${VENN_SIZE_MIN}-${VENN_SIZE_MAX} when present`);
+                }
+                checkNudge(o, `overlaps.${i}`, bad);
             });
         }
     }

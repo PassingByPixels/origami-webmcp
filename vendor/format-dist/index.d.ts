@@ -16,7 +16,7 @@ export { A1_RE, a1, colA1, colIdx, a1ToRC, a1RangeToRect, isNumeric, isErrStr, t
 export { validateGanttData, ganttDataJson, ganttWeekIndex, extractDataBlocks, GANTT_CARD_TYPES, GANTT_CARD_EFFORTS, type GanttData, type GanttCard, type GanttLens, type GanttSwimlane, type GanttMilestone, type GanttZone, } from './gantt-data.js';
 export { validateFlowData, validateGraphData, flowDataJson, graphDataJson, DIAGRAM_TONES, FLOW_SHAPES, GRAPH_SHAPES, EDGE_ARROWS, EDGE_STYLES, type FlowData, type FlowNode, type FlowLane, type GraphData, type GraphNode, type DiagramEdge, } from './diagram-data.js';
 export { validateDrawData, drawDataJson, DRAW_MAX_ELEMENTS, DRAW_MAX_POINTS, DRAW_TEXT_MAX, DRAW_TYPES, DRAW_FILL_STYLES, DRAW_STROKE_STYLES, DRAW_FONTS, DRAW_TEXT_ALIGNS, type DrawData, type DrawElement, type DrawType, type DrawFillStyle, type DrawStrokeStyle, type DrawFont, type DrawPoint, } from './draw-data.js';
-export { validateVennData, vennDataJson, VENN_MAX_CIRCLES, type VennData, type VennSet, type VennOverlap, type VennCount, } from './venn-data.js';
+export { validateVennData, vennDataJson, VENN_MAX_CIRCLES, VENN_SIZE_MIN, VENN_SIZE_MAX, VENN_NUDGE_MAX, type VennData, type VennSet, type VennOverlap, type VennCount, } from './venn-data.js';
 export { buildModel, applyOp, serializeModel, modelEquals, History, type DeckModel, type ModelSlide, type Op, type SerializeOptions, type HistoryEntry, } from './model.js';
 export { validateThemeTokens, themeCssFromTokens, replaceThemeCss } from './theme.js';
 export { validateSlideContent, activeContentFlags, hasActiveContent } from './content-policy.js';
