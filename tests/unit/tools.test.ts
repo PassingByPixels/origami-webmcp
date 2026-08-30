@@ -67,7 +67,31 @@ describe('tool surface', () => {
     for (const t of harness().registry.list()) {
       expect(t.description.length, t.name).toBeGreaterThan(40);
       expect(t.inputSchema.type, t.name).toBe('object');
+      for (const req of t.inputSchema.required ?? []) {
+        expect(t.inputSchema.properties[req], `${t.name}.${req}`).toBeDefined();
+      }
     }
+  });
+
+  it('no tool description tells an agent that a registered tool does not exist', async () => {
+    /* Round 2 shipped accept_proposal, but the three propose_* descriptions still read "only
+       THEY can accept or reject" and "there is deliberately no accept tool" — prose that would
+       stop an unattended agent from finishing even though the tool was right there. Descriptions
+       are the API here, so drift between them and the tool set is a bug, not a typo. */
+    const h = harness();
+    const banned = [/deliberately no accept tool/i, /only the human can accept/i, /only THEY can accept/i, /no accept tool/i];
+    for (const t of h.registry.list()) {
+      for (const re of banned) expect(t.description, `${t.name} description`).not.toMatch(re);
+    }
+    // every tool a description points at must actually be registered
+    const names = new Set(h.registry.list().map((t) => t.name));
+    const referenced = new Set<string>();
+    for (const t of h.registry.list()) {
+      for (const m of t.description.matchAll(/\b(accept_proposal|reject_proposal|save_deck|list_proposals|define_block|list_block_defs|add_chunk|write_chunk|get_kind_schema|list_chunks|propose_chunk|propose_delete|open_deck|list_decks|refresh_sources)\b/g)) {
+        referenced.add(m[1]!);
+      }
+    }
+    expect([...referenced].filter((n) => !names.has(n))).toEqual([]);
   });
 
   it('origami_guide answers with the live format constants and one kind on request', async () => {

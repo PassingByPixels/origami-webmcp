@@ -33,9 +33,10 @@ const ACTION_OF: Record<string, AcceptOk['action']> = {
  * are different processes. Here they are the same page, so there is nothing to hand across —
  * and nothing is written outside the deck.
  *
- * DELIBERATE DESIGN CHANGE vs the stdio server: accept and reject are NOT tools. An agent can
- * stage a proposal and read the queue; only a human clicking Accept in the page can apply one.
- * That is why `accept` lives here and not in tools.ts.
+ * A proposal has TWO front doors and one code path: a human clicking Accept / Reject on the card,
+ * and an agent calling accept_proposal / reject_proposal. Both land here, so the conflict gate and
+ * the provenance stamp cannot drift apart between them — which is why `accept` lives in the store
+ * and not inside a tool body.
  */
 export class ProposalStore {
   private list: Proposal[] = [];

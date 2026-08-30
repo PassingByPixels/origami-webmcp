@@ -563,9 +563,10 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'propose_chunk',
-      // DEVIATION: accept_proposal / reject_proposal are not tools here — the human clicks.
+      // Verbatim, plus one sentence: the staged change is also a card in the page, so a human
+      // who IS watching can resolve it without you.
       description:
-        'Propose an edit to a chunk WITHOUT applying it — STAGED as a review card in the human\'s page, which only THEY can accept or reject (a "document PR"). Same edit contract as write_chunk (send the edited <template>; id+kind immutable; single-file structure validated NOW so a broken proposal never reaches review). The proposal pins the chunk\'s current content; accepting refuses if the chunk changed since — never a silent overwrite. Returns a proposalId. Review the queue with list_proposals; there is deliberately no accept tool.',
+        'Propose an edit to a chunk WITHOUT applying it — STAGED for a human (or another agent) to review and accept (a "document PR"). It appears as a review card in the page, so a human who is watching can Accept or Reject it themselves; if nobody is, resolve it yourself with accept_proposal. Same edit contract as write_chunk (send the edited <template>; id+kind immutable; single-file structure validated NOW so a broken proposal never reaches review). The proposal pins the chunk\'s current content; accept_proposal refuses with a 3-way view if the chunk changed since — never a silent overwrite. Returns a proposalId. Review with list_proposals; apply with accept_proposal; drop with reject_proposal.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -594,7 +595,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           proposalId: p.id,
           staged: chunkId,
           activeContent: activeContentFlags(inner).map((v) => v.rule),
-          note: 'staged for review — NOT applied. It is now a card in the human\'s page; only they can accept or reject it.',
+          note: 'staged for review — NOT applied. It is a card in the page for a watching human AND an entry in list_proposals; accept_proposal applies it, reject_proposal drops it.',
         });
       },
     },
@@ -602,7 +603,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'propose_add',
       description:
-        'Propose a NEW slide WITHOUT adding it — staged as a review card only the human can accept (the add equivalent of propose_chunk). Same content args as add_chunk (kind/html, or block+fields for a composite); the content is rendered and validated now, then a slide.insert is staged. Review with list_proposals.',
+        'Propose a NEW slide WITHOUT adding it — staged for review (the add equivalent of propose_chunk). Same content args as add_chunk (kind/html, or block+fields for a composite); the content is rendered, baked and validated now, then a slide.insert is staged. It appears as a review card in the page for a watching human; resolve it yourself with accept_proposal if nobody is. Review with list_proposals; apply with accept_proposal.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -636,7 +637,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           staged: 'add',
           newChunkId: b.id,
           activeContent: activeContentFlags(b.inner).map((v) => v.rule),
-          note: 'staged for review — NOT added. It is now a card in the human\'s page; only they can accept or reject it.',
+          note: 'staged for review — NOT added. It is a card in the page for a watching human AND an entry in list_proposals; accept_proposal applies it, reject_proposal drops it.',
         });
       },
     },
@@ -644,7 +645,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'propose_delete',
       description:
-        'Propose hiding or deleting a slide WITHOUT doing it — staged as a review card only the human can accept. mode "hide" (default, recoverable) or "delete". Accepting refuses if the chunk is already gone.',
+        'Propose hiding or deleting a slide WITHOUT doing it — staged for review, as a card in the page for a watching human and as a queue entry you can resolve yourself. mode "hide" (default, recoverable) or "delete". accept_proposal refuses if the chunk is already gone.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -671,7 +672,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           baseHash: await sha256Hex(m.slides.get(chunkId)!.inner),
         };
         proposals.add(p);
-        return ok({ proposalId: p.id, staged: mode, targetId: chunkId, note: 'staged for review — only the human can accept or reject it.' });
+        return ok({ proposalId: p.id, staged: mode, targetId: chunkId, note: 'staged for review — accept_proposal applies it, reject_proposal drops it, or a watching human clicks the card.' });
       },
     },
 
