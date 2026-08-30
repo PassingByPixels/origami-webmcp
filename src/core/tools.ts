@@ -3,7 +3,6 @@ import {
   FOLD_TYPES,
   KINDS,
   activeContentFlags,
-  applyOp,
   blockInstanceJson,
   coerceChunkReply,
   extractChunk,
@@ -129,6 +128,15 @@ export interface ToolDeps {
 }
 
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
+
+/** A short, honest description of an op for the undo report: what kind of change it was and
+    which chunk it touched. A batch names its parts (e.g. an edit that also granted a capability). */
+function describeOp(op: Op): Record<string, unknown> {
+  if (op.t === 'batch') {
+    return { op: 'batch', parts: op.ops.map((o) => o.t), ...(describeOp(op.ops[0]!).targetId ? { targetId: describeOp(op.ops[0]!).targetId } : {}) };
+  }
+  return { op: op.t, ...('id' in op ? { targetId: op.id } : {}) };
+}
 
 export function buildTools(deps: ToolDeps): ToolDef[] {
   const { deck, proposals } = deps;
@@ -286,7 +294,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             caps.length > 0
               ? { t: 'batch', ops: [{ t: 'slide.inner', id: chunkId, inner }, { t: 'deck.caps', capabilities: [...m.capabilities, ...caps] }] }
               : { t: 'slide.inner', id: chunkId, inner };
-          applyOp(m, op);
+          deck.apply(m, op);
           return { caps, inner };
         });
         return ok({
@@ -339,7 +347,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             ins.grants.length > 0
               ? { t: 'batch', ops: [ins.insert, { t: 'deck.caps', capabilities: [...m.capabilities, ...ins.grants] }] }
               : ins.insert;
-          applyOp(m, op);
+          deck.apply(m, op);
           return { b: ins, index: m.order.indexOf(ins.id) };
         });
         return ok({
@@ -374,7 +382,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             ins.grants.length > 0
               ? { t: 'batch', ops: [ins.insert, { t: 'deck.caps', capabilities: [...m.capabilities, ...ins.grants] }] }
               : ins.insert;
-          applyOp(m, op);
+          deck.apply(m, op);
           return { b: ins, index: m.order.indexOf(ins.id) };
         });
         const active = activeContentFlags(out.b.inner).map((v) => v.rule);
@@ -407,8 +415,8 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       execute: async ({ chunkId, mode = 'hide' }) => {
         deck.mutate((m) => {
           if (!m.slides.has(chunkId)) refuse(`unknown chunk "${chunkId}" — call list_chunks`);
-          if (mode === 'hide') applyOp(m, { t: 'slide.meta', id: chunkId, patch: { hidden: true } });
-          else applyOp(m, { t: 'slide.remove', id: chunkId });
+          if (mode === 'hide') deck.apply(m, { t: 'slide.meta', id: chunkId, patch: { hidden: true } });
+          else deck.apply(m, { t: 'slide.remove', id: chunkId });
         });
         return ok({ [mode === 'hide' ? 'hidden' : 'deleted']: chunkId, note: 'applied to the open Fold — not yet on disk (the human saves).' });
       },
@@ -455,7 +463,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         const violations = validateBlockDef(def);
         if (violations.length > 0) return fail('invalid block def — nothing was registered', { violations });
         const d = def as CompositeBlockDef;
-        deck.mutate((m) => applyOp(m, { t: 'deck.blocks', blocks: { ...m.blocks, [d.kind]: d } }));
+        deck.mutate((m) => deck.apply(m, { t: 'deck.blocks', blocks: { ...m.blocks, [d.kind]: d } }));
         return ok({
           defined: d.kind,
           version: d.version,
@@ -500,7 +508,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
               frozen += removed;
             }
           }
-          applyOp(m, ops.length > 1 ? { t: 'batch', ops } : ops[0]!);
+          deck.apply(m, ops.length > 1 ? { t: 'batch', ops } : ops[0]!);
           return { name: def!.name, frozen };
         });
         return ok({ deleted: kind, name: out.name, instancesFrozen: out.frozen });
@@ -524,7 +532,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           const next = { ...m.header };
           if (subtitle !== undefined) next.subtitle = subtitle;
           if (chips !== undefined) next.chips = chips;
-          applyOp(m, { t: 'deck.header', header: next });
+          deck.apply(m, { t: 'deck.header', header: next });
           return m.header;
         });
         return ok({ header });
@@ -542,7 +550,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       },
       execute: async ({ foldType }) => {
         const out = deck.mutate((m) => {
-          applyOp(m, { t: 'deck.foldType', foldType });
+          deck.apply(m, { t: 'deck.foldType', foldType });
           // scroll stacks every fold as-is; a deck with no document folds reads as a stack
           // of full-screen card scenes — advise (no behaviour change, no byte impact).
           const noDoc = foldType === 'scroll' && ![...m.slides.values()].some((s) => s.kind === 'document');
@@ -553,6 +561,27 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           ...(out.noDoc
             ? { warning: 'this deck has no document-kind folds — scroll mode stacks every fold as-is; add document folds via add_chunk(kind:"document") for a long-form report' }
             : {}),
+        });
+      },
+    },
+
+    {
+      name: 'undo',
+      // NOT in the stdio server: it has no session, so it has no stack to unwind. This is a
+      // web-only tool built on @origami/format's History, which the page keeps per open Fold.
+      description:
+        'Reverse the LAST change made to the open Fold and re-render it. One tool call is one undo step, so calling this twice reverses the last two. It covers write_chunk, add_chunk, add_custom_fold, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any proposal that was accepted — by you or by the human clicking the card. It does NOT cover: create_deck or the human opening/dropping a different Fold (both replace the whole deck and reset the stack, so you cannot undo across one), a file save_deck already wrote to disk (undo changes the deck in the tab, never the bytes on disk — save again to push the reversal through), or a proposal that is still staged (staging is not a change; use reject_proposal). The stack holds the 50 most recent steps and there is no redo — re-apply by hand if you undo too far.',
+      inputSchema: { type: 'object', properties: {} },
+      execute: async () => {
+        const undone = deck.undo();
+        if (!undone) {
+          return fail('nothing to undo — no change has been made to this Fold since it was created or opened (create_deck and opening a Fold both reset the stack)');
+        }
+        return ok({
+          undone: describeOp(undone),
+          remainingUndoSteps: deck.undoDepth(),
+          chunks: deck.model().order.length,
+          note: 'reversed in the open Fold and re-rendered — the file on disk is unchanged until save_deck runs again. There is no redo.',
         });
       },
     },

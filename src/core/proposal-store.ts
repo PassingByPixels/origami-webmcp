@@ -1,4 +1,4 @@
-import { applyOp, proposalView, type DeckModel, type Op, type Proposal, type ProposalView } from '../../vendor/format-dist/index.js';
+import { proposalView, type DeckModel, type Op, type Proposal, type ProposalView } from '../../vendor/format-dist/index.js';
 import type { DeckStore } from './deck-store.js';
 import { sha256Hex } from './ids.js';
 import { videoCapsNeeded } from './video-caps.js';
@@ -127,7 +127,9 @@ export class ProposalStore {
       ops.push({ t: 'slide.meta', id: p.targetId, patch: { oby: p.author } });
     }
 
-    deck.mutate((model) => applyOp(model, ops.length > 1 ? { t: 'batch', ops } : ops[0]!));
+    // deck.apply, not the raw applyOp: an accepted proposal is a change to the Fold like any
+    // other, so it has to be reversible by the undo tool too.
+    deck.mutate((model) => deck.apply(model, ops.length > 1 ? { t: 'batch', ops } : ops[0]!));
     this.list.splice(i, 1);
     this.emit();
     return { ok: true, action: ACTION_OF[p.op.t]!, targetId: p.targetId, capabilitiesGranted: caps, remaining: this.list.length };

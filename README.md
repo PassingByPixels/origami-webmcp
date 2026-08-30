@@ -4,7 +4,7 @@ Open an Origami **Fold** (`.origami.html`) in the browser, hand Origami's author
 in-page AI agent over **WebMCP**, and save the result back to disk. No server, no account, no
 upload — the Fold is parsed, edited, rendered and saved entirely in the tab.
 
-**An agent can run the whole job unattended.** All 21 tools are on the WebMCP surface: an agent
+**An agent can run the whole job unattended.** All 22 tools are on the WebMCP surface: an agent
 creates the deck, authors every kind, stages proposals, resolves them, and calls `save_deck`
 without a human ever clicking anything. When a human *is* watching, staged proposals also render
 as review cards they can Accept or Reject — the same code path, a second front door.
@@ -112,7 +112,7 @@ or *not available (console only)* — it never claims a connection it does not h
    and relaunch. (Flag confirmed at
    [developer.chrome.com/docs/ai/webmcp](https://developer.chrome.com/docs/ai/webmcp).)
 3. Load `http://127.0.0.1:5173`. The status pill now reads
-   **“WebMCP: connected via document.modelContext — 21 tools”**.
+   **“WebMCP: connected via document.modelContext — 22 tools”**.
 4. To call the tools, install the **WebMCP – Model Context Tool Inspector** extension
    ([Chrome Web Store](https://chromewebstore.google.com/detail/gbpdfapgefenggkahomfgkhfehlcenpd),
    [source](https://github.com/beaufortfrancois/model-context-tool-inspector)). Its side panel lists
@@ -123,7 +123,7 @@ or *not available (console only)* — it never claims a connection it does not h
 Or drive them straight from DevTools — this is the real API, no extension required:
 
 ```js
-const tools = await document.modelContext.getTools();          // 21 of them
+const tools = await document.modelContext.getTools();          // 22 of them
 const t = tools.find((x) => x.name === 'create_deck');
 await document.modelContext.executeTool(t, JSON.stringify({ title: 'Hello' }));
 ```
@@ -164,7 +164,7 @@ nothing is lost: the test console does everything.
 src/core/          the deck + tools; no DOM, so vitest exercises exactly what ships
   deck-store.ts      the ONE in-memory DeckModel; mutate() applies ops and notifies views
   proposal-store.ts  the review queue + accept/reject, shared by the cards and the tools
-  tools.ts           the 21 tool defs, ported from vendor/mcp-reference/server.ts
+  tools.ts           the 22 tool defs: 21 ported from vendor/mcp-reference/server.ts, plus undo
   registry.ts        ToolRegistry + the document/navigator.modelContext feature-detect shim
   guide.ts           origami_guide's payload, built from the live KINDS/FORMAT_VERSION
   blank-deck.ts      create_deck's assembler (dynamic-imports @origami/runtime)
@@ -224,6 +224,7 @@ apply to **all** of them:
 | `delete_chunk` | Adds one sentence pointing at `propose_delete`. |
 | `define_block` · `list_block_defs` · `delete_block` | Descriptions verbatim bar the write clause. |
 | `set_header` · `set_fold_type` | None beyond the two global ones. |
+| `undo` | **Not in the stdio server at all.** A stdio call has no session, so it has no stack to unwind; a page does. Built on `@origami/format`'s `History`: `DeckStore.apply` records each op's inverse, one entry per tool call. Scope is stated in the description — it cannot cross a `create_deck` or a newly opened Fold (both reset the stack), it never touches bytes already written to disk, 50 steps deep, no redo. |
 | `save_deck` | **Re-purposed, not just re-worded.** In the stdio server every edit had already written through, so `save_deck` was a re-validate. Here it is the only route to disk: it re-validates, then writes the file if the page holds a writable File System Access handle, and otherwise persists the working copy in the browser and reports that the human must press Save. It never opens a picker (nobody would be there to click it) and **never throws for want of a handle**, so an unattended agent can always finish. |
 | `propose_chunk` · `propose_add` · `propose_delete` | “STAGED for a human (or another agent) to review” → “STAGED as a review card in the human's page, which only THEY can accept or reject” **is gone as of round 2**; they now say the change is staged for a human *or* an agent to resolve. |
 | `list_proposals` | Adds “The human accepts or rejects them by clicking the cards in the page.” |
@@ -267,7 +268,6 @@ do.
 * Autosave uses `localStorage`. Every call is wrapped, so a private window or a full quota degrades
   to “no autosave” rather than a broken page — but a Fold with large embedded assets can exceed the
   ~5 MB origin quota and silently fail to autosave.
-* No undo. `@origami/format` ships a `History` class that is not wired up yet.
 * `Save as…` needs the File System Access API for a true save; elsewhere (Firefox, Safari) it falls
   back to a download of the same bytes. `save_deck` never falls back to a download — a download is
   a user gesture, and an unattended agent has no gesture to give — so on those browsers an agent

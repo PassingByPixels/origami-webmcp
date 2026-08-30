@@ -64,6 +64,7 @@ export function origamiGuide(): Record<string, unknown> {
       get_kind_schema: 'The markup contract for one kind (same as origami_guide(kind)).',
       set_header: 'Deck masthead: subtitle + metadata chips.',
       set_fold_type: 'Set the reading experience (deck | scroll | ledger).',
+      undo: 'Reverse the last change to the open Fold (one tool call = one step; 50 deep, no redo, and it cannot cross a create_deck).',
       save_deck: 'Write the Fold to disk if the page holds a writable handle; otherwise persist the working copy and report that the human must press Save.',
       propose_chunk: 'Stage a chunk edit for review instead of applying it (a "document PR").',
       propose_add: 'Stage a new slide for review (the add equivalent of propose_chunk).',

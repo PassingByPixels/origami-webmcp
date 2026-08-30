@@ -11,7 +11,7 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 21 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 22 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -35,6 +35,7 @@ describe('tool surface', () => {
       'save_deck',
       'set_fold_type',
       'set_header',
+      'undo',
       'write_chunk',
     ]);
     // the filesystem-bound trio stays out
@@ -87,7 +88,7 @@ describe('tool surface', () => {
     const names = new Set(h.registry.list().map((t) => t.name));
     const referenced = new Set<string>();
     for (const t of h.registry.list()) {
-      for (const m of t.description.matchAll(/\b(accept_proposal|reject_proposal|save_deck|list_proposals|define_block|list_block_defs|add_chunk|write_chunk|get_kind_schema|list_chunks|propose_chunk|propose_delete|open_deck|list_decks|refresh_sources)\b/g)) {
+      for (const m of t.description.matchAll(/\b(accept_proposal|reject_proposal|save_deck|list_proposals|define_block|list_block_defs|add_chunk|write_chunk|get_kind_schema|list_chunks|propose_chunk|propose_delete|undo|open_deck|list_decks|refresh_sources)\b/g)) {
         referenced.add(m[1]!);
       }
     }
@@ -566,6 +567,113 @@ describe('content policy is the write gate', () => {
     const res = await h.json('write_chunk', { chunkId: id, html: '<div class="slide-inner"><h2 onclick="x()">Hi</h2></div>' });
     expect(res.applied).toBe(id);
     expect(res.activeContent.length).toBeGreaterThan(0);
+  });
+});
+
+describe('undo reverses the last change to the open Fold', () => {
+  /* The bar is byte-equality, not "the heading is gone": an undo that leaves the deck merely
+     LOOKING right has still corrupted the file for anyone diffing it. Every case below
+     serializes before and after and compares the whole Fold. */
+
+  it('write -> undo returns the Fold to its exact previous bytes', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Undo write' });
+    const id = created.chunks[0].id;
+    const before = h.deck.serialize();
+
+    await h.json('write_chunk', { chunkId: id, html: innerWith('Regrettable', 'Edit') });
+    expect(h.deck.serialize()).not.toBe(before);
+
+    const res = await h.json('undo');
+    expect(res).toMatchObject({ undone: { op: 'slide.inner', targetId: id }, remainingUndoSteps: 0 });
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('undo unwinds one tool call per call, in reverse order', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Undo stack' });
+    const afterCreate = h.deck.serialize();
+    await h.json('add_chunk', { label: 'One' });
+    const afterOne = h.deck.serialize();
+    await h.json('add_chunk', { label: 'Two' });
+    await h.json('set_header', { subtitle: 'Third change' });
+
+    expect((await h.json('undo')).undone.op).toBe('deck.header');
+    expect(h.deck.serialize()).not.toContain('Third change');
+
+    expect((await h.json('undo')).undone.op).toBe('slide.insert');
+    expect(h.deck.serialize()).toBe(afterOne);
+
+    const last = await h.json('undo');
+    expect(last).toMatchObject({ undone: { op: 'slide.insert' }, remainingUndoSteps: 0, chunks: 1 });
+    expect(h.deck.serialize()).toBe(afterCreate);
+  });
+
+  it('undoes a delete, restoring the slide at its original index with its content', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Undo delete' });
+    const a = await h.json('add_chunk', { html: innerWith('Fold A', 'A'), label: 'A' });
+    await h.json('add_chunk', { html: innerWith('Fold B', 'B'), label: 'B' });
+    const before = h.deck.serialize();
+
+    await h.json('delete_chunk', { chunkId: a.chunkId, mode: 'delete' });
+    expect(h.deck.model().slides.has(a.chunkId)).toBe(false);
+
+    await h.json('undo');
+    expect(h.deck.model().order[1]).toBe(a.chunkId); // back where it was, not appended
+    expect(h.deck.model().slides.get(a.chunkId)!.label).toBe('A');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('undoes an ACCEPTED proposal — the agent route and the human card land on the same stack', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Undo accept' });
+    const id = created.chunks[0].id;
+    const before = h.deck.serialize();
+
+    const staged = await h.json('propose_chunk', { chunkId: id, html: innerWith('Accepted then regretted', 'Body'), author: 'agent:test' });
+    expect(h.deck.serialize()).toBe(before); // staging is not a change, so it is not an undo step
+    await h.json('accept_proposal', { proposalId: staged.proposalId });
+    expect(h.deck.serialize()).toContain('Accepted then regretted');
+
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+    expect(h.deck.model().slides.get(id)!.oby).toBe(''); // the provenance stamp is reversed too
+  });
+
+  it('refuses cleanly on an empty history instead of throwing or half-working', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Nothing done' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('undo');
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/nothing to undo/);
+    expect(h.deck.serialize()).toBe(before);
+
+    // and with no Fold open at all it is the standard no-deck refusal, not a crash
+    const empty = harness();
+    const none = await empty.call('undo');
+    expect(none.isError).toBe(true);
+  });
+
+  it('create_deck resets the stack — undo cannot cross a new Fold', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'First deck' });
+    await h.json('add_chunk', { label: 'Doomed' });
+    await h.json('create_deck', { title: 'Second deck', discard: true });
+
+    const res = await h.call('undo');
+    expect(res.isError).toBe(true);
+    expect(h.deck.model().title).toBe('Second deck'); // the old deck is NOT resurrected
+  });
+
+  it('opening a different Fold resets the stack too', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'In memory' });
+    await h.json('add_chunk', {});
+    h.deck.open(await sampleDeck(), 'welcome.origami.html');
+    expect((await h.call('undo')).isError).toBe(true);
   });
 });
 
