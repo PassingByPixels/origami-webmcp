@@ -68,7 +68,15 @@ export class ToolRegistry {
 export type McpSurface = 'document.modelContext' | 'navigator.modelContext' | 'none';
 
 interface ModelContextLike {
+  /** Per the W3C proposal registerTool returns a Promise that settles when registration
+      completes, so a failure can arrive AFTER the call returns. */
   registerTool?: (def: unknown, options?: unknown) => unknown;
+}
+
+export interface McpConnection {
+  surface: McpSurface;
+  registered: number;
+  failed: number;
 }
 
 /**
@@ -80,7 +88,7 @@ interface ModelContextLike {
  * registry is untouched and still fully usable: the in-page test console is the fallback
  * agent, so the app works in plain Chrome with no flags.
  */
-export function connectWebMcp(registry: ToolRegistry): { surface: McpSurface; registered: number } {
+export async function connectWebMcp(registry: ToolRegistry): Promise<McpConnection> {
   const candidates: Array<[McpSurface, ModelContextLike | undefined]> = [
     ['document.modelContext', (globalThis as any).document?.modelContext],
     ['navigator.modelContext', (globalThis as any).navigator?.modelContext],
@@ -88,9 +96,12 @@ export function connectWebMcp(registry: ToolRegistry): { surface: McpSurface; re
   for (const [surface, ctx] of candidates) {
     if (!ctx || typeof ctx.registerTool !== 'function') continue;
     let registered = 0;
+    let failed = 0;
     for (const t of registry.list()) {
+      // awaited one at a time: registerTool can reject asynchronously, and a status line that
+      // claims 14 registered tools when 3 were refused is worse than no status line at all.
       try {
-        ctx.registerTool({
+        await ctx.registerTool({
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
@@ -98,10 +109,10 @@ export function connectWebMcp(registry: ToolRegistry): { surface: McpSurface; re
         });
         registered++;
       } catch {
-        /* one bad tool must not sink the rest — the console still exposes it */
+        failed++; // one bad tool must not sink the rest — the console still exposes it
       }
     }
-    return { surface, registered };
+    return { surface, registered, failed };
   }
-  return { surface: 'none', registered: 0 };
+  return { surface: 'none', registered: 0, failed: 0 };
 }

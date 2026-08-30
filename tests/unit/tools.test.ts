@@ -174,6 +174,37 @@ describe('the real sample deck', () => {
   });
 });
 
+describe('bytes survive the round trip', () => {
+  it('keeps non-ASCII content exact through write -> serialize -> reparse', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Café — 東京 · 🗻' });
+    const id = created.chunks[0].id;
+    const body = 'Naïve résumé — 東京タワー · Ελληνικά · 🗻 «quoted» — ok?';
+
+    await h.json('write_chunk', { chunkId: id, html: innerWith('Café — 東京', body) });
+    const reloaded = buildModel(parseDeck(h.deck.serialize()));
+
+    expect(reloaded.title).toBe('Café — 東京 · 🗻');
+    expect(reloaded.slides.get(id)!.inner).toContain(body);
+    // and it survives a SECOND trip — nothing is double-escaped on the way back out
+    expect(buildModel(parseDeck(h.deck.serialize())).slides.get(id)!.inner).toBe(reloaded.slides.get(id)!.inner);
+  });
+
+  it('preserves a CRLF deck as CRLF (a Windows file must not be rewritten to LF)', async () => {
+    const h = harness();
+    const crlf = (await sampleDeck()).replace(/\r?\n/g, '\r\n');
+    h.deck.open(crlf, 'crlf.origami.html');
+    expect(h.deck.model().base.eol).toBe('\r\n');
+
+    const toc = await h.json('list_chunks');
+    await h.json('write_chunk', { chunkId: toc.chunks[0].id, html: innerWith('CRLF safe', 'Line one') });
+
+    const out = h.deck.serialize();
+    expect(out).not.toMatch(/[^\r]\n/); // every LF still carries its CR
+    expect(out).toContain('CRLF safe');
+  });
+});
+
 describe('content policy is the write gate', () => {
   it('REJECTS a stray <template> in inner content and leaves the model unchanged', async () => {
     const h = harness();

@@ -142,6 +142,29 @@ test('Reject drops a proposal and leaves the Fold alone', async ({ page }) => {
   expect(queue.body.proposals).toHaveLength(0);
 });
 
+test('a refresh mid-edit offers the unsaved work back', async ({ page }) => {
+  await openSample(page);
+  const toc = await invoke(page, 'list_chunks', {});
+  const marker = `Survives a refresh ${Date.now()}`;
+  await invoke(page, 'write_chunk', {
+    chunkId: toc.body.chunks[0].id,
+    html: `<div class="slide-inner"><h2>${marker}</h2></div>`,
+  });
+  // autosave is debounced (700 ms) — wait for the record rather than for a fixed delay
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem('origami-webmcp:autosave/v1') !== null), { timeout: 5000 })
+    .toBe(true);
+
+  await page.reload();
+  await expect(page.getByTestId('empty-state')).toBeVisible();
+  const resume = page.getByTestId('btn-resume');
+  await expect(resume).toBeVisible();
+
+  await resume.click();
+  await expect(preview(page)).toContainText(marker);
+  await expect(page.getByTestId('btn-resume')).toBeHidden();
+});
+
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
   await page.goto('/index.html');
   const created = await invoke(page, 'create_deck', { title: 'Playwright Deck' });

@@ -58,12 +58,14 @@ new TestConsole(registry, {
 
 /* ---------- WebMCP status ---------- */
 
-const mcp = connectWebMcp(registry);
-$('mcp-status').textContent =
-  mcp.surface === 'none'
-    ? `WebMCP: not available (console only) — ${registry.list().length} tools registered locally`
-    : `WebMCP: connected via ${mcp.surface} — ${mcp.registered} tools`;
-$('mcp-status').className = mcp.surface === 'none' ? 'pill' : 'pill live';
+void connectWebMcp(registry).then((mcp) => {
+  const el = $('mcp-status');
+  el.textContent =
+    mcp.surface === 'none'
+      ? `WebMCP: not available (console only) — ${registry.list().length} tools registered locally`
+      : `WebMCP: connected via ${mcp.surface} — ${mcp.registered} tools${mcp.failed ? `, ${mcp.failed} refused` : ''}`;
+  el.className = mcp.surface === 'none' ? 'pill' : mcp.failed ? 'pill dirty' : 'pill live';
+});
 
 /* ---------- deck lifecycle ---------- */
 
