@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FORMAT_BLOCKS, KINDS, buildModel, parseDeck, validateDeck } from '../../vendor/format-dist/index.js';
 import { FLOW_INNER, VENN_INNER } from '../fixtures.js';
 import { DeckStore } from '../../src/core/deck-store.js';
-import { ProposalStore } from '../../src/core/proposal-store.js';
+import { ProposalStore, restorableProposals } from '../../src/core/proposal-store.js';
 import { createRegistry } from '../../src/core/tools.js';
 import { RECIPES } from '../../src/core/recipes.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
@@ -1341,5 +1341,82 @@ describe('an agent can resolve its own proposals — the same path the card uses
     expect(h.deck.model().order).toHaveLength(2);
     expect(h.deck.model().slides.get(staged.newChunkId)!.label).toBe('Agent fold');
     expect(h.deck.serialize()).toContain('Agent added');
+  });
+});
+
+describe('a restored review queue', () => {
+  /* The queue is now written into the autosave record with the deck. The risk that buys is a
+     queue restored from untrusted storage, so the sanitiser and the conflict gate are what these
+     tests are about; tests/e2e/app.spec.ts proves the round trip through a real page reload. */
+
+  it('keeps only entries the conflict gate can actually use', () => {
+    const good = { id: 'p1', author: 'agent', title: 'Fine', op: { t: 'slide.inner', id: 's1', inner: 'x' }, targetId: 's1', baseHash: 'abc' };
+    const kept = restorableProposals([
+      good,
+      { ...good, id: 'p2', baseHash: undefined }, // no base hash: accept could not detect a conflict
+      { ...good, id: 'p3', op: undefined }, // no op: nothing to apply
+      { ...good, id: 'p4', targetId: 42 }, // wrong type
+      null,
+      'not a proposal',
+    ]);
+    expect(kept.map((p) => p.id)).toEqual(['p1']);
+    expect(restorableProposals(undefined)).toEqual([]);
+    expect(restorableProposals({ nope: true })).toEqual([]);
+  });
+
+  it('keeps a proposal whose target is gone — stale is not corrupt', async () => {
+    // dropping it would hide the fact that the human staged something; accept explains it instead
+    const kept = restorableProposals([
+      { id: 'p1', author: 'agent', title: 'Stale', op: { t: 'slide.inner', id: 'sgone', inner: 'x' }, targetId: 'sgone', baseHash: 'abc' },
+    ]);
+    expect(kept).toHaveLength(1);
+
+    const h = harness();
+    await h.json('create_deck', { title: 'Restored stale' });
+    h.proposals.restore(kept);
+    const res = await h.call('accept_proposal', { proposalId: 'p1' });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text)).toMatchObject({ conflicted: true });
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/no longer exists/);
+  });
+
+  it('still refuses a restored proposal whose chunk changed since it was staged', async () => {
+    /* THE point of persisting baseHash rather than re-deriving it on restore: the queue comes
+       back believing the content it was made against, so a change made in between is still a
+       conflict after a reload, not a silent overwrite. */
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Restored conflict' });
+    const id = created.chunks[0].id;
+    const staged = await h.json('propose_chunk', { chunkId: id, html: innerWith('Staged before reload', 'Body') });
+    const persisted = JSON.parse(JSON.stringify(h.proposals.all())); // exactly what localStorage holds
+
+    // the human edits that chunk, then the page reloads and restores the queue
+    await h.json('write_chunk', { chunkId: id, html: innerWith('Changed while away', 'Body') });
+    h.proposals.restore(restorableProposals(persisted));
+    expect(h.proposals.count()).toBe(1);
+
+    const res = await h.call('accept_proposal', { proposalId: staged.proposalId });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body).toMatchObject({ conflicted: true, targetId: id });
+    expect(body.current).toContain('Changed while away');
+    expect(body.proposed).toContain('Staged before reload');
+    expect(h.deck.model().slides.get(id)!.inner).toContain('Changed while away');
+    expect(h.proposals.count()).toBe(1); // still reviewable
+  });
+
+  it('a restored proposal against an UNCHANGED chunk still applies', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Restored clean' });
+    const id = created.chunks[0].id;
+    const staged = await h.json('propose_chunk', { chunkId: id, html: innerWith('Survived the reload', 'Body'), author: 'agent:test' });
+    const persisted = JSON.parse(JSON.stringify(h.proposals.all()));
+
+    h.proposals.clear();
+    h.proposals.restore(restorableProposals(persisted));
+    const res = await h.json('accept_proposal', { proposalId: staged.proposalId });
+    expect(res).toMatchObject({ action: 'edit', applied: id });
+    expect(h.deck.serialize()).toContain('Survived the reload');
+    expect(h.deck.model().slides.get(id)!.oby).toBe('agent:test'); // provenance survives too
   });
 });

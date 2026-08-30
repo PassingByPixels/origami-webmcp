@@ -1,5 +1,5 @@
 import { DeckStore } from '../core/deck-store.js';
-import { ProposalStore } from '../core/proposal-store.js';
+import { ProposalStore, restorableProposals } from '../core/proposal-store.js';
 import { connectWebMcp } from '../core/registry.js';
 import { createRegistry, type SaveOutcomeReport } from '../core/tools.js';
 import { TestConsole } from './console.js';
@@ -115,13 +115,18 @@ deck.subscribe((ev) => {
   if (ev !== 'close') scheduleAutosave();
 });
 
-proposals.subscribe(() => void review.refresh());
+proposals.subscribe(() => {
+  void review.refresh();
+  // Staging a proposal changes nothing in the deck, so the deck's own 'change' event never
+  // fires and the queue would not reach storage until the next edit. Autosave on it directly.
+  if (deck.isOpen()) scheduleAutosave();
+});
 
 function scheduleAutosave(): void {
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     if (!deck.isOpen()) return;
-    writeAutosave(deck.name(), deck.serialize());
+    writeAutosave(deck.name(), deck.serialize(), proposals.all());
   }, 700) as unknown as number;
 }
 
@@ -278,6 +283,8 @@ if (saved) {
   resume.setAttribute('data-testid', 'btn-resume');
   resume.addEventListener('click', () => {
     openText(saved.text, saved.name, null);
+    // AFTER openText: deck.open() emits 'open', and that handler clears the queue.
+    proposals.restore(restorableProposals(saved.proposals));
     resumeSlot.hidden = true;
   });
   const discard = document.createElement('button');

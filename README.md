@@ -268,9 +268,12 @@ do.
 
 ## Known gaps
 
-* Proposals are per-session and in memory. The stdio server persists them to
-  `~/.origami/proposals/` because the proposer and the reviewer are different processes; here they
-  are the same page. A refresh keeps the deck (autosave) but drops the queue.
+* Proposals live in memory, and ride along in the autosave record so a refresh keeps them with
+  the deck. They are still per-origin, not per-file: the queue is restored by the **Resume**
+  button next to the deck it was saved with, and a proposal restored against a chunk that changed
+  in the meantime still refuses with `conflicted` rather than overwriting. The stdio server
+  persists to `~/.origami/proposals/` because its proposer and reviewer are different processes;
+  here they are the same page.
 * Autosave uses `localStorage`. Every call is wrapped, so a private window or a full quota degrades
   to “no autosave” rather than a broken page — but a Fold with large embedded assets can exceed the
   ~5 MB origin quota and silently fail to autosave.

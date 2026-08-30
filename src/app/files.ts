@@ -116,6 +116,10 @@ export interface AutosaveRecord {
   name: string;
   text: string;
   at: number;
+  /** The review queue at the time of the save. A refresh used to drop staged proposals on the
+      floor while keeping the deck, which is the worst of both: the human came back to a Fold
+      whose pending changes had silently vanished. Older records have no field here. */
+  proposals?: readonly unknown[];
 }
 
 export function readAutosave(): AutosaveRecord | null {
@@ -129,9 +133,9 @@ export function readAutosave(): AutosaveRecord | null {
   }
 }
 
-export function writeAutosave(name: string, text: string): boolean {
+export function writeAutosave(name: string, text: string, proposals: readonly unknown[] = []): boolean {
   try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ name, text, at: Date.now() } satisfies AutosaveRecord));
+    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ name, text, at: Date.now(), proposals } satisfies AutosaveRecord));
     return true;
   } catch {
     return false; // private window, quota, or storage blocked — the app keeps working

@@ -343,3 +343,89 @@ test('create_deck mints a blank Fold in the tab and add_chunk extends it', async
   const toc = await invoke(page, 'list_chunks', {});
   expect(toc.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'Second']);
 });
+
+test('a staged proposal survives a real reload, and a conflict survives with it', async ({ page }) => {
+  /* Through an ACTUAL page reload, not a store round trip: stage a proposal, reload, press
+     Resume, and the card is back. Then the sharper half — the chunk is edited BEFORE the
+     reload, so the restored proposal is stale, and accepting it after the reload must still
+     refuse with `conflicted` rather than quietly overwriting the newer content. */
+  await page.goto('/index.html');
+  await invoke(page, 'create_deck', { title: 'Survives Reload', discard: true });
+  const toc = await invoke(page, 'list_chunks', {});
+  const first = toc.body.chunks[0].id;
+
+  await invoke(page, 'propose_chunk', {
+    chunkId: first,
+    html: '<div class="slide-inner"><h2>Staged before the reload</h2></div>',
+    title: 'Rewrite the cover',
+    author: 'agent:reload',
+  });
+  await expect(page.getByTestId('proposal-card')).toHaveCount(1);
+
+  // the human edits the same chunk directly, so the staged proposal is now stale
+  const marker = `Edited while staged ${Date.now()}`;
+  await invoke(page, 'write_chunk', { chunkId: first, html: `<div class="slide-inner"><h2>${marker}</h2></div>` });
+
+  // wait for the debounced autosave to carry BOTH the deck and the queue into storage
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const raw = localStorage.getItem('origami-webmcp:autosave/v1');
+          return raw ? (JSON.parse(raw).proposals ?? []).length : -1;
+        }),
+      { timeout: 5000 }
+    )
+    .toBe(1);
+
+  await page.reload();
+  await page.getByTestId('btn-resume').click();
+
+  // the queue is back, with its author and title intact
+  const card = page.getByTestId('proposal-card');
+  await expect(card).toHaveCount(1);
+  await expect(page.getByTestId('proposal-count')).toHaveText('1');
+  await expect(card).toContainText('Rewrite the cover');
+  await expect(card).toContainText('agent:reload');
+
+  // list_proposals sees it too, and already flags the conflict
+  const queue = await invoke(page, 'list_proposals', {});
+  expect(queue.body.proposals).toHaveLength(1);
+  expect(queue.body.proposals[0].conflicted).toBe(true);
+
+  // and accepting it REFUSES rather than overwriting the newer content
+  const accepted = await invoke(page, 'accept_proposal', { proposalId: queue.body.proposals[0].id });
+  expect(accepted.state).toContain('error');
+  expect(accepted.body.conflicted).toBe(true);
+  await expect(preview(page)).toContainText(marker);
+  await expect(preview(page)).not.toContainText('Staged before the reload');
+  await expect(page.getByTestId('proposal-card')).toHaveCount(1); // still there to re-review
+});
+
+test('a reloaded proposal against an unchanged chunk still applies', async ({ page }) => {
+  await page.goto('/index.html');
+  await invoke(page, 'create_deck', { title: 'Clean Reload', discard: true });
+  const toc = await invoke(page, 'list_chunks', {});
+  const marker = `Applied after the reload ${Date.now()}`;
+  await invoke(page, 'propose_chunk', { chunkId: toc.body.chunks[0].id, html: `<div class="slide-inner"><h2>${marker}</h2></div>` });
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const raw = localStorage.getItem('origami-webmcp:autosave/v1');
+          return raw ? (JSON.parse(raw).proposals ?? []).length : -1;
+        }),
+      { timeout: 5000 }
+    )
+    .toBe(1);
+
+  await page.reload();
+  await page.getByTestId('btn-resume').click();
+  await expect(page.getByTestId('proposal-card')).toHaveCount(1);
+
+  // the human clicks Accept on the restored card — the same code path an agent uses
+  await page.getByTestId('accept-proposal').click();
+  await expect(preview(page)).toContainText(marker);
+  await expect(page.getByTestId('proposal-card')).toHaveCount(0);
+});

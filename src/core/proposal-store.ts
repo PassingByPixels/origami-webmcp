@@ -55,6 +55,13 @@ export class ProposalStore {
     this.emit();
   }
 
+  /** Put a restored queue back (the page reloading its autosave). Replaces, never appends. */
+  restore(list: Proposal[]): void {
+    if (list.length === 0 && this.list.length === 0) return;
+    this.list = [...list];
+    this.emit();
+  }
+
   find(id: string): Proposal | undefined {
     return this.list.find((p) => p.id === id);
   }
@@ -143,4 +150,24 @@ export class ProposalStore {
   private emit(): void {
     for (const l of [...this.listeners]) l();
   }
+}
+
+/**
+ * Rebuild a proposal queue from whatever came back out of browser storage.
+ *
+ * Storage is not a trusted channel: the record may be from an older build, hand-edited, or left
+ * by a different app on the same origin. Anything that does not carry the four fields the
+ * conflict gate depends on (id, op.t, targetId, baseHash) is DROPPED rather than restored into a
+ * shape the accept path would later trip over. A proposal whose target no longer exists is kept
+ * on purpose — that is not corruption, it is a stale proposal, and accept already refuses it
+ * with `conflicted` and a reason the human can read.
+ */
+export function restorableProposals(raw: unknown): Proposal[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((p): p is Proposal => {
+    if (!p || typeof p !== 'object') return false;
+    const q = p as Record<string, unknown>;
+    const op = q.op as Record<string, unknown> | undefined;
+    return typeof q.id === 'string' && typeof q.targetId === 'string' && typeof q.baseHash === 'string' && !!op && typeof op.t === 'string';
+  });
 }
