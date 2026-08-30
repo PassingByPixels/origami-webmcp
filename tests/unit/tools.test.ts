@@ -569,6 +569,107 @@ describe('content policy is the write gate', () => {
   });
 });
 
+describe('dryRun: the whole gate, none of the mutation', () => {
+  /* The requirement is parity, not a second code path: a dry run must produce the SAME verdict
+     and the SAME error body a real write would, while leaving the file byte-identical. Both are
+     asserted by comparing the two calls against each other, not against a hand-written shape. */
+
+  it('write_chunk dryRun validates, applies nothing and leaves the deck byte-identical', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Dry' });
+    const id = created.chunks[0].id;
+    const before = h.deck.serialize();
+    expect(h.deck.peek()!.dirty).toBe(false);
+
+    const res = await h.call('write_chunk', { chunkId: id, html: innerWith('Never lands', 'Dry run'), dryRun: true });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body).toMatchObject({ dryRun: true, wouldApply: id, capabilitiesWouldGrant: [], activeContent: [] });
+    expect(body.note).toMatch(/DRY RUN/);
+
+    expect(h.deck.serialize()).toBe(before);
+    expect(h.deck.serialize()).not.toContain('Never lands');
+    expect(h.deck.peek()!.dirty).toBe(false); // no mutate() ⇒ no dirty flag, no re-render, no autosave
+  });
+
+  it('write_chunk dryRun returns the SAME error body a real write returns', async () => {
+    const bad = '<div class="slide-inner"><h2>Hi</h2><template data-x="1">smuggled</template></div>';
+
+    const dry = harness();
+    await dry.json('create_deck', { title: 'Dry error' });
+    const dryId = dry.deck.model().order[0]!;
+    const dryRes = await dry.call('write_chunk', { chunkId: dryId, html: bad, dryRun: true });
+
+    const wet = harness();
+    await wet.json('create_deck', { title: 'Dry error' });
+    const wetId = wet.deck.model().order[0]!;
+    const wetRes = await wet.call('write_chunk', { chunkId: wetId, html: bad });
+
+    expect(dryRes.isError).toBe(true);
+    expect(wetRes.isError).toBe(true);
+    expect(JSON.parse(dryRes.content[0]!.text)).toEqual(JSON.parse(wetRes.content[0]!.text));
+  });
+
+  it('write_chunk dryRun refuses id drift exactly as the real write does', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Dry drift' });
+    const id = created.chunks[0].id;
+    const res = await h.call('write_chunk', {
+      chunkId: id,
+      html: `<template data-origami-slide="sdeadbeef" data-kind="free">${innerWith('Nope', 'Nope')}</template>`,
+      dryRun: true,
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/slide id drift/);
+  });
+
+  it('add_chunk dryRun builds and bakes the slide but adds nothing', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Dry add' });
+    const before = h.deck.serialize();
+    const orderBefore = [...h.deck.model().order];
+
+    const body = await h.json('add_chunk', { kind: 'table', label: 'Budget', dryRun: true });
+    expect(body).toMatchObject({ dryRun: true, wouldAdd: { kind: 'table', label: 'Budget', index: 1 }, activeContent: [] });
+    expect(body.chunkId).toBeUndefined(); // no id is minted for a slide that does not exist
+
+    expect(h.deck.model().order).toEqual(orderBefore);
+    expect(h.deck.serialize()).toBe(before);
+    expect(h.deck.peek()!.dirty).toBe(false);
+  });
+
+  it('add_chunk dryRun returns the SAME error body a real add returns', async () => {
+    const dry = harness();
+    await dry.json('create_deck', { title: 'Dry add error' });
+    const dryRes = await dry.call('add_chunk', { kind: 'venn', dryRun: true });
+
+    const wet = harness();
+    await wet.json('create_deck', { title: 'Dry add error' });
+    const wetRes = await wet.call('add_chunk', { kind: 'venn' });
+
+    expect(dryRes.isError).toBe(true);
+    expect(JSON.parse(dryRes.content[0]!.text)).toEqual(JSON.parse(wetRes.content[0]!.text));
+    expect(JSON.parse(dryRes.content[0]!.text).error).toMatch(/get_kind_schema\("venn"\)/);
+  });
+
+  it('a dry run with no deck open fails the same way a real one does', async () => {
+    const h = harness();
+    const res = await h.call('add_chunk', { dryRun: true });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/no deck is open/);
+  });
+
+  it('both dryRun tools say so in their description and the guide teaches it', async () => {
+    const h = harness();
+    for (const name of ['write_chunk', 'add_chunk']) {
+      expect(h.registry.get(name)!.description, name).toMatch(/dryRun:true/);
+      expect(h.registry.get(name)!.inputSchema.properties.dryRun, name).toBeDefined();
+    }
+    const guide = await h.json('origami_guide');
+    expect(guide.editProtocol.join(' ')).toMatch(/dryRun:true/);
+  });
+});
+
 describe('proposals: staged, human-applied', () => {
   it('propose_chunk stages without touching the model; accept applies it', async () => {
     const h = harness();

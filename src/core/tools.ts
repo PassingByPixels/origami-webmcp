@@ -254,16 +254,31 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // DEVIATION: "this WRITES THE FILE (atomic)" -> applies to the open Fold. `force` dropped:
       // there is no second writer to race in a tab.
       description:
-        'Apply an edited chunk to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Send the whole <template data-origami-slide=...> element from read_chunk, edited. The slide id and kind are immutable; drift is rejected. The only hard rule is single-file structure (no stray <template> tags, balanced <script>). Scripts, styles, iframes and remote URLs are ALLOWED — they mark the deck "active" (returned as activeContent; recipients open it locked until they trust the sender). Returns errors instead of applying only when the content would break the file structure. Use propose_chunk instead when the change is a judgement call the human should approve.',
+        'Apply an edited chunk to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Send the whole <template data-origami-slide=...> element from read_chunk, edited. The slide id and kind are immutable; drift is rejected. The only hard rule is single-file structure (no stray <template> tags, balanced <script>). Scripts, styles, iframes and remote URLs are ALLOWED — they mark the deck "active" (returned as activeContent; recipients open it locked until they trust the sender). Returns errors instead of applying only when the content would break the file structure. Pass dryRun:true to run the WHOLE gate and apply NOTHING — you get the same verdict, or the same violations, a real write would give, and the Fold stays byte-identical. Use propose_chunk instead when the change is a judgement call the human should approve.',
       inputSchema: {
         type: 'object',
         properties: {
           chunkId: { type: 'string', description: 'The chunk the edit was for' },
           html: { type: 'string', description: 'The edited <template> element (a full chunk reply is fine too)' },
+          dryRun: { type: 'boolean', description: 'Validate only: same verdict/error, nothing applied, deck byte-identical. Default false' },
         },
         required: ['chunkId', 'html'],
       },
-      execute: async ({ chunkId, html }) => {
+      execute: async ({ chunkId, html, dryRun }) => {
+        if (dryRun === true) {
+          // The read-only twin of the write below: the SAME gate (coerceAndValidate refuses
+          // identically), the same capability arithmetic, no mutate() — so no dirty flag, no
+          // re-render, no autosave. Nothing here may touch the model.
+          const m = deck.model();
+          const inner = coerceAndValidate(m, chunkId, html);
+          return ok({
+            dryRun: true,
+            wouldApply: chunkId,
+            capabilitiesWouldGrant: videoCapsNeeded(inner).filter((c) => !m.capabilities.includes(c)),
+            activeContent: activeContentFlags(inner).map((v) => v.rule),
+            note: 'DRY RUN — validated against the open Fold and NOT applied; the deck is byte-identical. Call again without dryRun to apply it.',
+          });
+        }
         const out = deck.mutate((m) => {
           const inner = coerceAndValidate(m, chunkId, html);
           const caps = videoCapsNeeded(inner).filter((c) => !m.capabilities.includes(c));
@@ -286,7 +301,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'add_chunk',
       description:
-        'Add a new slide to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Defaults to a "free" slide with starter content at the end of the deck. For a built-in kind supply html (call get_kind_schema first). For a COMPOSITE block already defined in this Fold, pass block + fields — the block is rendered and baked into a free slide; no html needed.',
+        'Add a new slide to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Defaults to a "free" slide with starter content at the end of the deck. For a built-in kind supply html (call get_kind_schema first). For a COMPOSITE block already defined in this Fold, pass block + fields — the block is rendered and baked into a free slide; no html needed. Pass dryRun:true to build, bake and validate the slide WITHOUT adding it — the same verdict, or the same violations, a real add would give, and the Fold stays byte-identical.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -296,9 +311,26 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           html: { type: 'string', description: 'Slide inner markup; required for kinds other than "free"' },
           block: { type: 'string', description: 'A composite block kind (x.<name>) already defined in this Fold' },
           fields: { type: 'object', description: 'Field values for the composite block (block instance values)' },
+          dryRun: { type: 'boolean', description: 'Validate only: same verdict/error, nothing added, deck byte-identical. Default false' },
         },
       },
       execute: async (args) => {
+        if (args.dryRun === true) {
+          // Read-only twin of the insert below. buildInsert is pure against the model, so the
+          // whole gate (starter pick, composite render, table bake, content policy) runs for
+          // real — only applyOp is skipped. No chunk id is reported: none was minted.
+          const m = deck.model();
+          const b = buildInsert(m, args);
+          if ('error' in b) refuse(b.error, b.extra);
+          const ins = b as Extract<InsertBuild, { id: string }>;
+          return ok({
+            dryRun: true,
+            wouldAdd: { kind: ins.insert.kind, label: ins.insert.label, index: ins.insert.index },
+            capabilitiesWouldGrant: ins.grants,
+            activeContent: activeContentFlags(ins.inner).map((v) => v.rule),
+            note: 'DRY RUN — the slide was built, baked and validated but NOT added; the deck is byte-identical and no chunk id exists yet. Call again without dryRun to add it.',
+          });
+        }
         const out = deck.mutate((m) => {
           const b = buildInsert(m, args);
           if ('error' in b) refuse(b.error, b.extra);

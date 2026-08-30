@@ -30,6 +30,7 @@ export function origamiGuide(): Record<string, unknown> {
       '2. read_chunk(chunkId) — a self-contained payload: deck context + the kind schema + the slide <template>.',
       '3. Edit the <template> inner. The slide id and kind are IMMUTABLE — drift is rejected, not repaired.',
       '4. write_chunk(chunkId, html) to apply, or add_chunk / add_custom_fold / delete_chunk. Each one changes the open Fold and re-renders it immediately.',
+      '4b. Unsure a block will pass the content policy? Call write_chunk / add_chunk with dryRun:true first. It runs the WHOLE gate — coercion, table bake, content policy, capability arithmetic — and applies nothing, so you get the same verdict (or the same violations) without touching the human\'s deck.',
       '5. save_deck() — writes the file when the page holds a writable handle for it; otherwise it persists the working copy in the browser and tells you the human must press Save. Either way it re-validates, so end on it.',
     ],
     reviewProtocol:
