@@ -5,6 +5,7 @@ import { DeckStore } from '../../src/core/deck-store.js';
 import { ProposalStore } from '../../src/core/proposal-store.js';
 import { createRegistry } from '../../src/core/tools.js';
 import { RECIPES } from '../../src/core/recipes.js';
+import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
 import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
@@ -14,7 +15,7 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 23 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 24 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -30,6 +31,7 @@ describe('tool surface', () => {
       'list_block_defs',
       'list_chunks',
       'list_proposals',
+      'list_starters',
       'origami_guide',
       'propose_add',
       'propose_chunk',
@@ -582,6 +584,98 @@ describe('content policy is the write gate', () => {
     const res = await h.json('write_chunk', { chunkId: id, html: '<div class="slide-inner"><h2 onclick="x()">Hi</h2></div>' });
     expect(res.applied).toBe(id);
     expect(res.activeContent.length).toBeGreaterThan(0);
+  });
+});
+
+describe('whole-fold starters, ported from the Studio rail', () => {
+  it('adds EVERY starter to one deck and the Fold stays valid, inert and non-blank', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Starters' });
+
+    for (const s of FOLD_STARTERS) {
+      const res = await h.call('add_chunk', { starter: s.key });
+      expect(res.isError, `${s.key} was refused: ${res.content[0]!.text}`).toBeFalsy();
+      const body = JSON.parse(res.content[0]!.text);
+      expect(body.activeContent, s.key).toEqual([]);
+      const inner = h.deck.model().slides.get(body.chunkId)!.inner;
+      expect(inner, s.key).toContain(`data-odata="${s.block}"`);
+      expect(inner, s.key).toContain('class="slide-inner"'); // every starter is a FREE CARD holding the block
+      expect(h.deck.model().slides.get(body.chunkId)!.kind, s.key).toBe('free');
+      expect(h.deck.model().slides.get(body.chunkId)!.label, s.key).toBe(s.label);
+    }
+
+    // the real validator over the whole file: seeds that fail their kind's data schema would
+    // make save_deck refuse the deck later, which is exactly what a starter must never do
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+    const saved = await h.json('save_deck');
+    expect(saved.validated).toBe(true);
+  });
+
+  it('keeps the data-block carrier invariant: no raw "<" inside any seed', () => {
+    for (const s of FOLD_STARTERS) {
+      const json = /data-odata="[a-z]+">\n([\s\S]*?)\n<\/script>/.exec(s.inner());
+      expect(json, s.key).not.toBeNull();
+      expect(json![1], s.key).not.toContain('<'); // must be <-escaped, or it terminates the block
+    }
+  });
+
+  it('list_starters catalogs them without dumping the markup', async () => {
+    const body = await harness().json('list_starters');
+    expect(body.starters.map((s: any) => s.starter)).toEqual(FOLD_STARTERS.map((s) => s.key));
+    for (const s of body.starters) {
+      expect(s.use.length).toBeGreaterThan(20);
+      expect(s.block).toBeTruthy();
+      expect(s.html).toBeUndefined(); // the catalog is a menu, not a payload
+    }
+  });
+
+  it('refuses an unknown starter and names the real ones', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Bad starter' });
+    const res = await h.call('add_chunk', { starter: 'gantt-chart' });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/unknown starter "gantt-chart" — call list_starters/);
+    expect(body.availableStarters).toEqual(FOLD_STARTERS.map((s) => s.key));
+    expect(h.deck.model().order).toHaveLength(1);
+  });
+
+  it('refuses starter together with html or block instead of silently picking one', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ambiguous' });
+    for (const extra of [{ html: innerWith('A', 'B') }, { block: 'x.kpi' }]) {
+      const res = await h.call('add_chunk', { starter: 'venn', ...extra });
+      expect(res.isError, JSON.stringify(extra)).toBe(true);
+      expect(JSON.parse(res.content[0]!.text).error).toMatch(/starter OR html\/block, not both/);
+    }
+    expect(h.deck.model().order).toHaveLength(1);
+  });
+
+  it('propose_add takes a starter too, and only lands on accept', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Proposed starter' });
+    const staged = await h.json('propose_add', { starter: 'flowchart', author: 'agent:test' });
+    expect(h.deck.model().order).toHaveLength(1);
+
+    await h.json('accept_proposal', { proposalId: staged.proposalId });
+    expect(h.deck.model().order).toHaveLength(2);
+    expect(h.deck.model().slides.get(staged.newChunkId)!.inner).toContain('data-odata="flow"');
+  });
+
+  it('a starter fold is undoable like any other change', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Undo starter' });
+    const before = h.deck.serialize();
+    await h.json('add_chunk', { starter: 'roadmap' });
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('the guide lists them and points at the same catalog', async () => {
+    const guide = await harness().json('origami_guide');
+    expect(guide.starters.folds.map((s: any) => s.starter)).toEqual(FOLD_STARTERS.map((s) => s.key));
+    expect(guide.starters.howToUse).toMatch(/add_chunk\(\{ starter: "<key>" \}\)/);
+    expect(guide.tools.list_starters).toBeTruthy();
   });
 });
 

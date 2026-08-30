@@ -29,6 +29,7 @@ import { analyseRender, unmeasurable, type MeasureFn } from './inspect.js';
 import type { ProposalStore } from './proposal-store.js';
 import { fail, ok, refuse } from './result.js';
 import { ToolRegistry, type ToolDef } from './registry.js';
+import { FOLD_STARTERS, findStarter, starterCatalog } from './fold-starters.js';
 import { FREE_STARTER_INNER, TABLE_STARTER_INNER } from './starters.js';
 import { videoCapsNeeded } from './video-caps.js';
 
@@ -57,13 +58,24 @@ type InsertBuild =
     (starters / supplied html / composite block render+bake) so add and propose-add share one path. */
 function buildInsert(
   m: DeckModel,
-  args: { kind?: string; html?: string; block?: string; fields?: Record<string, unknown>; position?: number; label?: string }
+  args: { kind?: string; html?: string; block?: string; fields?: Record<string, unknown>; position?: number; label?: string; starter?: string }
 ): InsertBuild {
-  const { kind = 'free', html, block, fields, position, label } = args;
+  const { kind = 'free', html, block, fields, position, label, starter } = args;
   let inner = html;
   let slideKind = kind;
   let slideLabel = label;
-  if (block !== undefined) {
+  if (starter !== undefined) {
+    // Ambiguity is an error, not a silent precedence rule: an agent that passes both has a
+    // wrong model of the tool and needs to be told, not quietly given one of the two.
+    if (html !== undefined || block !== undefined) {
+      return { error: 'pass starter OR html/block, not both — a starter already carries its markup' };
+    }
+    const s = findStarter(starter);
+    if (!s) return { error: `unknown starter "${starter}" — call list_starters`, extra: { availableStarters: FOLD_STARTERS.map((x) => x.key) } };
+    inner = s.inner();
+    slideKind = 'free'; // every starter is a free card holding one block
+    slideLabel = slideLabel ?? s.label;
+  } else if (block !== undefined) {
     const def = m.blocks[block];
     if (!def) return { error: `unknown composite block "${block}" — this Fold defines none by that name`, extra: { availableBlocks: Object.keys(m.blocks) } };
     const r = renderComposite(def, fields ?? {});
@@ -313,7 +325,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'add_chunk',
       description:
-        'Add a new slide to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Defaults to a "free" slide with starter content at the end of the deck. For a built-in kind supply html (call get_kind_schema first). For a COMPOSITE block already defined in this Fold, pass block + fields — the block is rendered and baked into a free slide; no html needed. Pass dryRun:true to build, bake and validate the slide WITHOUT adding it — the same verdict, or the same violations, a real add would give, and the Fold stays byte-identical.',
+        'Add a new slide to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Defaults to a "free" slide with starter content at the end of the deck. For a built-in kind supply html (call get_kind_schema first). For a COMPOSITE block already defined in this Fold, pass block + fields — the block is rendered and baked into a free slide; no html needed. For a whole ready-made fold — a roadmap, a flowchart, a ledger — pass starter (see list_starters) and nothing else. Pass dryRun:true to build, bake and validate the slide WITHOUT adding it — the same verdict, or the same violations, a real add would give, and the Fold stays byte-identical.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -323,6 +335,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           html: { type: 'string', description: 'Slide inner markup; required for kinds other than "free"' },
           block: { type: 'string', description: 'A composite block kind (x.<name>) already defined in this Fold' },
           fields: { type: 'object', description: 'Field values for the composite block (block instance values)' },
+          starter: { type: 'string', description: 'A ready-made fold from list_starters (roadmap | flowchart | node-graph | drawing | venn | ledger). Not combinable with html or block' },
           dryRun: { type: 'boolean', description: 'Validate only: same verdict/error, nothing added, deck byte-identical. Default false' },
         },
       },
@@ -486,6 +499,16 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         ok({
           blocks: Object.values(deck.model().blocks).map((d) => ({ kind: d.kind, name: d.name, version: d.version, fields: d.fields })),
         }),
+    },
+
+    {
+      name: 'list_starters',
+      // NOT in the stdio server: its starters are two inner strings chosen by `kind`, with no
+      // catalog to list. These are the Studio rail's whole-fold starters, ported verbatim.
+      description:
+        `The ready-made FOLDS you can add in one call: a roadmap, a flowchart, a node graph, a drawing, a Venn diagram, a ledger. Each is a free card already holding one seeded data block — the exact shape every data kind's schema recommends — copied from the Studio's own palette, so a fold you start from one is what the human would have got by clicking the rail. Add one with add_chunk({starter:"<key>"}), or stage it for review with propose_add({starter:"<key>"}). Use these when a seeded example is a fine starting point; supply html yourself when the content matters more than the shape.`,
+      inputSchema: { type: 'object', properties: {} },
+      execute: async () => ok({ starters: starterCatalog(), note: 'add one with add_chunk({starter:"roadmap"}) — it lands as a free fold holding that block, seeded and ready to edit.' }),
     },
 
     {
@@ -707,7 +730,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'propose_add',
       description:
-        'Propose a NEW slide WITHOUT adding it — staged for review (the add equivalent of propose_chunk). Same content args as add_chunk (kind/html, or block+fields for a composite); the content is rendered, baked and validated now, then a slide.insert is staged. It appears as a review card in the page for a watching human; resolve it yourself with accept_proposal if nobody is. Review with list_proposals; apply with accept_proposal.',
+        'Propose a NEW slide WITHOUT adding it — staged for review (the add equivalent of propose_chunk). Same content args as add_chunk (kind/html, block+fields for a composite, or starter for a ready-made fold); the content is rendered, baked and validated now, then a slide.insert is staged. It appears as a review card in the page for a watching human; resolve it yourself with accept_proposal if nobody is. Review with list_proposals; apply with accept_proposal.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -717,6 +740,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           html: { type: 'string', description: 'Slide inner markup; required for kinds other than "free"' },
           block: { type: 'string', description: 'A composite block kind (x.<name>) already defined in this Fold' },
           fields: { type: 'object', description: 'Field values for the composite block' },
+          starter: { type: 'string', description: 'A ready-made fold from list_starters. Not combinable with html or block' },
           title: { type: 'string', description: 'Short summary (the PR title)' },
           prompt: { type: 'string', description: 'What you were asked to do (optional provenance)' },
           author: { type: 'string', description: 'Who is proposing (default "agent")' },

@@ -32,10 +32,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('23');
+  await expect(page.getByTestId('tool-count')).toHaveText('24');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('23 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('24 tools registered locally');
   // an agent can run the whole loop, review included
   for (const name of ['propose_chunk', 'accept_proposal', 'reject_proposal', 'save_deck', 'define_block', 'add_custom_fold']) {
     await expect(page.getByTestId(`tool-${name}`), name).toBeVisible();

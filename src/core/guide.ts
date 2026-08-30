@@ -1,4 +1,5 @@
 import { FORMAT_BLOCKS, FORMAT_VERSION, KINDS } from '../../vendor/format-dist/index.js';
+import { starterCatalog } from './fold-starters.js';
 import { recipeCatalog } from './recipes.js';
 
 /**
@@ -81,6 +82,11 @@ export function origamiGuide(): Record<string, unknown> {
       studioTreeShakenCss:
         `A Fold saved by the Studio can have unused kind CSS stripped out of it, so a block you add to someone else's Fold may render unstyled even though it validates and saves. See recipes.styleCaveat. inspect_render measures geometry, not styling, and does not catch this.`,
     },
+    starters: {
+      howToUse:
+        `Whole folds you can add in ONE call: add_chunk({ starter: "<key>" }). Each is a free card already holding one seeded data block, copied from the Studio palette's own rail buttons — so it is exactly the "free card holding the block" shape kinds.<k>.howToAdd steers you to, without you assembling the figure. Reach for a starter when a seeded example is a fine base and you will edit it; supply html yourself when the content matters more than the shape. Do not pass starter together with html or block — that is refused rather than silently resolved.`,
+      folds: starterCatalog(),
+    },
     recipes: {
       howToUse:
         'Validated, ready-to-use inners for the free-card idioms the kind schemas NAME but do not spell out. Each `html` below is a complete slide inner: pass it to add_chunk({ kind: "free", html }) as it stands, or edit the text and keep the structure. They are copied from the Folio monorepo\'s own block palette (`source` cites where), so a fold you build from one is the same markup the Studio would have produced.',
@@ -101,6 +107,7 @@ export function origamiGuide(): Record<string, unknown> {
       delete_chunk: 'Hide (recoverable) or delete a slide.',
       define_block: 'Register (or update) a composite block def (a reusable typed, inert, human-editable component).',
       list_block_defs: 'List the composite block defs registered in this deck.',
+      list_starters: 'The ready-made FOLDS (roadmap, flowchart, node graph, drawing, venn, ledger) that add_chunk({starter}) can drop in whole.',
       delete_block: 'Delete a composite block def (its placed instances stay as plain content).',
       get_kind_schema: 'The markup contract for one kind (same as origami_guide(kind)).',
       set_header: 'Deck masthead: subtitle + metadata chips.',
