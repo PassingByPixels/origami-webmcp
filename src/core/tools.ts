@@ -161,6 +161,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
   return [
     {
       name: 'origami_guide',
+      annotations: { readOnlyHint: true },
       description:
         'START HERE. The whole Origami contract in one call — what a Fold is, the read→edit→write chunk protocol, every kind schema, the inert/active rules, the capability model, and the tool catalog. An agent with no prior knowledge of Origami should call this once on connect to learn the format. Pass a kind to get just that kind\'s schema.',
       inputSchema: {
@@ -179,6 +180,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'get_kind_schema',
+      annotations: { readOnlyHint: true },
       description: 'The markup contract for a slide/block kind: what structure and attributes are valid.',
       inputSchema: {
         type: 'object',
@@ -194,6 +196,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'create_deck',
+      annotations: { destructiveHint: true },
       // DEVIATION: no filesystem. The stdio version writes a file into the first served folder
       // and returns its path; this one mints the same bytes into the tab and opens them.
       description:
@@ -237,6 +240,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'list_chunks',
+      annotations: { readOnlyHint: true },
       // DEVIATION: "Read fresh from the file every time" -> the open Fold in this tab.
       description:
         'Table of contents of the open Fold: every editable chunk (slide) with id, kind, label and hidden flag, in order. Always reflects what the human is looking at right now.',
@@ -258,6 +262,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'read_chunk',
+      annotations: { readOnlyHint: true },
       description:
         'Read one chunk for editing: a self-contained payload with the deck context, the kind schema (what markup is valid), and the slide <template>. Edit the template and send the whole element back via write_chunk. Always reflects the Fold open in this tab.',
       inputSchema: {
@@ -418,7 +423,11 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     },
 
     {
+      // destructiveHint does NOT reach a Chrome-hosted agent (Chrome 151 drops it and keeps only
+      // readOnlyHint), so "removes the slide template entirely" in the description below is the
+      // load-bearing warning, not this annotation.
       name: 'delete_chunk',
+      annotations: { destructiveHint: true },
       description:
         'Hide or delete a slide in the open Fold — this CHANGES THE DECK the human is looking at. Default mode "hide" keeps the slide in the file but out of the show (the recoverable path — prefer it); mode "delete" removes the slide template entirely. Use propose_delete when the human should approve first.',
       inputSchema: {
@@ -492,6 +501,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'list_block_defs',
+      annotations: { readOnlyHint: true },
       description:
         'List the composite block definitions registered in this deck (kind, name, version, fields). Use a kind with add_chunk(block, fields).',
       inputSchema: { type: 'object', properties: {} },
@@ -503,6 +513,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'list_starters',
+      annotations: { readOnlyHint: true },
       // NOT in the stdio server: its starters are two inner strings chosen by `kind`, with no
       // catalog to list. These are the Studio rail's whole-fold starters, ported verbatim.
       description:
@@ -513,6 +524,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'delete_block',
+      annotations: { destructiveHint: true },
       description:
         'Delete a composite block definition from the deck. Non-destructive: every placed instance keeps its baked output but loses its data-script, becoming plain inert content — so there is no dangling reference and the deck stays valid. This CHANGES THE OPEN FOLD.',
       inputSchema: {
@@ -594,6 +606,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'inspect_render',
+      annotations: { readOnlyHint: true },
       // NOT in the stdio server: it has no browser, so it cannot lay a deck out. This is the
       // one thing a page can tell an agent that a file-writing process cannot.
       description:
@@ -806,6 +819,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'list_proposals',
+      annotations: { readOnlyHint: true },
       description:
         'The review queue: every staged proposal for the open Fold with author, title, the target chunk, the before/after content, and a conflict flag (true if that chunk changed since the proposal was made). Empty until propose_chunk / propose_add / propose_delete stages something. The human accepts or rejects them by clicking the cards in the page.',
       inputSchema: { type: 'object', properties: {} },

@@ -237,6 +237,29 @@ apply to **all** of them:
 | `accept_proposal` | “write the file immediately (no save_deck needed)” → applies to the open Fold; call `save_deck` when done. Adds a sentence on choosing between resolving it yourself and leaving the card for a watching human. |
 | `reject_proposal` | Adds “The same action the human takes by clicking Reject”. |
 
+### Tool annotations, and what Chrome does with them
+
+Eight tools carry `readOnlyHint` (`origami_guide`, `get_kind_schema`, `list_chunks`, `read_chunk`,
+`list_block_defs`, `list_starters`, `list_proposals`, `inspect_render`) and three carry
+`destructiveHint` (`create_deck`, `delete_chunk`, `delete_block`). A unit test calls every
+read-only tool against a real deck and byte-compares the Fold before and after, so the hint has
+to be true rather than merely declared.
+
+**Measured on Chrome 151.0.7922.174**, annotations survive registration but are normalised into
+Chrome's own vocabulary:
+
+```
+  getTools() per-tool keys: ["annotations","description","inputSchema","name","origin","title","window"]
+  origami_guide.annotations -> {"readOnlyHint":true,"untrustedContentHint":false}
+  delete_chunk.annotations  -> {"readOnlyHint":false,"untrustedContentHint":false}
+```
+
+`readOnlyHint` comes back. **`destructiveHint` is discarded outright**, and an
+`untrustedContentHint` this app never sent is added. So a Chrome-hosted agent is never told by an
+annotation that a tool is destructive — which is why every destructive tool says so in its
+description, and why a unit test asserts that it does. They are still registered as written, for
+hosts with a fuller vocabulary.
+
 ### Two front doors on one code path
 
 A staged proposal can be resolved **either** by a human clicking Accept / Reject on its card

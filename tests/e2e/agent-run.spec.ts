@@ -59,7 +59,7 @@ async function tableData(page: Page): Promise<any> {
 test('an agent builds a scroll Fold with two data kinds and resolves its own proposal', async ({ page }) => {
   await installHost(page);
   await page.goto('/index.html');
-  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 21 tools');
+  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 24 tools');
 
   /* 1. onboard — the guide's kind catalog must agree with get_kind_schema in the SHIPPED bundle */
   const guide = await tool(page, 'origami_guide');

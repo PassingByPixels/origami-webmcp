@@ -22,10 +22,25 @@ export interface JsonSchemaProp {
   maxItems?: number;
 }
 
+/**
+ * MCP tool annotations — the machine-readable half of "what does calling this do to me?".
+ * A host can use readOnlyHint to let a tool run without asking, and destructiveHint to insist
+ * on a confirmation. They are HINTS: untrusted by a careful host, and ignored entirely by one
+ * that does not read them, so nothing here may be the only place a caveat is stated. Every
+ * annotated tool says the same thing in its description too.
+ */
+export interface ToolAnnotations {
+  /** Calls do not change the open Fold. */
+  readOnlyHint?: boolean;
+  /** Calls MAY destroy content — deleting a chunk, a block def, or replacing the open Fold. */
+  destructiveHint?: boolean;
+}
+
 export interface ToolDef {
   name: string;
   description: string;
   inputSchema: JsonSchema;
+  annotations?: ToolAnnotations;
   execute: (args: any) => Promise<ToolResult>;
 }
 
@@ -108,6 +123,12 @@ export async function connectWebMcp(registry: ToolRegistry): Promise<McpConnecti
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
+          // MEASURED on Chrome 151.0.7922.174 (tests/e2e/webmcp-native.spec.ts): Chrome keeps
+          // readOnlyHint, DISCARDS destructiveHint entirely, and normalises what is left into its
+          // own vocabulary {readOnlyHint, untrustedContentHint}. So the destructive warning must
+          // live in the tool's DESCRIPTION to reach a Chrome-hosted agent at all — a unit test
+          // enforces that. They are still sent as written, for hosts with a fuller vocabulary.
+          ...(t.annotations ? { annotations: t.annotations } : {}),
           execute: (args: unknown) => registry.invoke(t.name, args),
         });
         registered++;

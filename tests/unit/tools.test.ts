@@ -1420,3 +1420,71 @@ describe('a restored review queue', () => {
     expect(h.deck.model().slides.get(id)!.oby).toBe('agent:test'); // provenance survives too
   });
 });
+
+describe('tool annotations', () => {
+  /* Annotations are HINTS: a host may honour them, ignore them, or not read them at all
+     (Chrome 151 drops them — measured in tests/e2e/webmcp-native.spec.ts). So the rule enforced
+     here is that they can never be the ONLY place a caveat is stated, and that they match what
+     the tools actually do. */
+  const READ_ONLY = [
+    'get_kind_schema',
+    'inspect_render',
+    'list_block_defs',
+    'list_chunks',
+    'list_proposals',
+    'list_starters',
+    'origami_guide',
+    'read_chunk',
+  ];
+  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk'];
+
+  it('marks exactly the read-only tools readOnlyHint', () => {
+    const h = harness();
+    const marked = h.registry.list().filter((t) => t.annotations?.readOnlyHint).map((t) => t.name).sort();
+    expect(marked).toEqual(READ_ONLY);
+    // the mutating tools must NOT claim to be read-only — the dangerous direction of a wrong hint
+    for (const name of ['write_chunk', 'add_chunk', 'add_custom_fold', 'save_deck', 'undo', 'accept_proposal', 'set_header']) {
+      expect(h.registry.get(name)!.annotations?.readOnlyHint, name).toBeFalsy();
+    }
+  });
+
+  it('marks exactly the tools that can destroy content destructiveHint', () => {
+    const h = harness();
+    expect(h.registry.list().filter((t) => t.annotations?.destructiveHint).map((t) => t.name).sort()).toEqual(DESTRUCTIVE);
+    // and nothing claims both
+    for (const t of h.registry.list()) {
+      expect(t.annotations?.readOnlyHint && t.annotations?.destructiveHint, t.name).toBeFalsy();
+    }
+  });
+
+  it('a read-only tool really does leave the Fold byte-identical', async () => {
+    /* The hint has to be TRUE, not just declared. Every readOnlyHint tool is called against a
+       real deck and the serialized bytes are compared before and after. inspect_render is the
+       one worth the trouble: it renders the deck in a second frame, and a hint that let a host
+       call it unattended would be a lie if that mutated anything. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Read only' });
+    const extra = await h.json('add_chunk', { starter: 'venn' });
+    await h.json('propose_chunk', { chunkId: extra.chunkId, html: innerWith('Staged', 'Body') });
+    const before = h.deck.serialize();
+    const dirtyBefore = h.deck.peek()!.dirty;
+
+    const args: Record<string, unknown> = { kind: 'free', chunkId: extra.chunkId };
+    for (const name of READ_ONLY) {
+      const res = await h.call(name, args);
+      expect(res.isError, `${name}: ${res.content[0]!.text.slice(0, 160)}`).toBeFalsy();
+      expect(h.deck.serialize(), `${name} changed the Fold`).toBe(before);
+      expect(h.deck.peek()!.dirty, `${name} dirtied the Fold`).toBe(dirtyBefore);
+      expect(h.proposals.count(), `${name} touched the queue`).toBe(1);
+    }
+  });
+
+  it('every annotated caveat is also stated in prose, because a host may ignore the hint', () => {
+    const h = harness();
+    // destructive tools must SAY they can destroy something; a dropped annotation must not be
+    // the difference between an agent knowing and not knowing
+    expect(h.registry.get('delete_chunk')!.description).toMatch(/removes the slide template entirely/);
+    expect(h.registry.get('delete_block')!.description).toMatch(/Delete a composite block definition/);
+    expect(h.registry.get('create_deck')!.description).toMatch(/discard:true/);
+  });
+});

@@ -191,6 +191,56 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
     }
   });
 
+  test('does Chrome hand tool ANNOTATIONS back to the agent?', async () => {
+    /* An empirical question, not an assertion about this app. The app registers readOnlyHint /
+       destructiveHint on 11 tools (proved against a recording host in webmcp-shim.spec.ts). What
+       a real host DOES with them is the browser's business, and the honest thing is to measure it
+       and print the answer rather than assume either way. Whatever the result, the annotations
+       stay: a host that reads them gets them, and one that drops them is no worse off. */
+    const launched = await launchChrome(FEATURE_ARGS);
+    if ('skip' in launched) skipLoudly(launched.skip);
+    const c = launched as Chrome;
+    try {
+      await c.page.goto(URL);
+      await expect(c.page.getByTestId('mcp-status')).toContainText('connected');
+
+      const seen = await c.page.evaluate(async () => {
+        const tools = await (document as any).modelContext.getTools();
+        const guide = tools.find((t: any) => t.name === 'origami_guide');
+        const del = tools.find((t: any) => t.name === 'delete_chunk');
+        return {
+          keysOnATool: Object.keys(guide).sort(),
+          annotationsOnReadOnly: guide.annotations ?? null,
+          annotationsOnDestructive: del.annotations ?? null,
+          anyToolHasAnnotations: tools.some((t: any) => t.annotations != null),
+        };
+      });
+
+      console.log(`  Chrome ${c.version} getTools() exposes per-tool keys: ${JSON.stringify(seen.keysOnATool)}`);
+      console.log(`  annotations survive registration? ${seen.anyToolHasAnnotations ? 'YES' : 'NO — Chrome drops them'}`);
+      console.log(`    origami_guide.annotations -> ${JSON.stringify(seen.annotationsOnReadOnly)}`);
+      console.log(`    delete_chunk.annotations  -> ${JSON.stringify(seen.annotationsOnDestructive)}`);
+
+      /* MEASURED on Chrome 151.0.7922.174: annotations DO survive, but Chrome normalises them
+         into its own vocabulary. readOnlyHint comes back; destructiveHint is discarded outright,
+         and an untrustedContentHint this app never sent is added, defaulted to false:
+           origami_guide -> {"readOnlyHint":true,"untrustedContentHint":false}
+           delete_chunk  -> {"readOnlyHint":false,"untrustedContentHint":false}
+         The consequence is the reason this test exists: a Chrome-hosted agent is never told a
+         tool is destructive by the annotation, so that warning has to be in the description. */
+      expect(seen.keysOnATool).toContain('name');
+      expect(seen.keysOnATool).toContain('description');
+      expect(seen.anyToolHasAnnotations, 'Chrome 151 returned annotations; if this flips, re-report it').toBe(true);
+      expect(seen.annotationsOnReadOnly?.readOnlyHint, 'readOnlyHint must survive registration').toBe(true);
+      // destructiveHint is NOT asserted absent: Chrome gaining support for it would be a good
+      // change, and a test that failed on it would be pinning a browser bug in place. The log
+      // line above is the record, and the description carries the warning either way.
+      expect(seen.annotationsOnDestructive?.readOnlyHint, 'a destructive tool must never come back read-only').toBe(false);
+    } finally {
+      await close(c);
+    }
+  });
+
   test('an unattended agent runs the whole job through Chrome\'s executeTool', async () => {
     const launched = await launchChrome(FEATURE_ARGS);
     if ('skip' in launched) skipLoudly(launched.skip);
