@@ -169,6 +169,7 @@ src/core/          the deck + tools; no DOM, so vitest exercises exactly what sh
   guide.ts           origami_guide's payload, built from the live KINDS/FORMAT_VERSION
   blank-deck.ts      create_deck's assembler (dynamic-imports @origami/runtime)
   starters.ts        FREE_STARTER_INNER / TABLE_STARTER_INNER, verbatim from the monorepo
+  recipes.ts         copy-paste free-card idioms for the guide, verbatim from the block palette
   video-caps.ts      videoCapsNeeded, verbatim from the stdio server
   bake.ts            table formulas -> values on write, via the vendored @origami/calc
   ids.ts             Web Crypto ids + sha256 (the stdio server's node:crypto equivalents)
@@ -213,7 +214,7 @@ apply to **all** of them:
 
 | Tool | Further deviation from the stdio server |
 |---|---|
-| `origami_guide` | Description verbatim. Payload adds `host`, `reviewProtocol` and `notAvailableHere`; `editProtocol` step 1 drops the path handle and step 5 explains `save_deck`'s two outcomes. |
+| `origami_guide` | Description verbatim. Payload adds `host`, `reviewProtocol`, `notAvailableHere` and **`recipes`**; `editProtocol` step 1 drops the path handle, step 4b covers `dryRun`, and step 5 explains `save_deck`'s two outcomes. |
 | `get_kind_schema` | None — verbatim. |
 | `create_deck` | Mints the deck **into the tab**, not onto disk: no served folder, no filename-collision loop. Adds a guard that refuses when the open Fold has unsaved changes, plus **`discard: true`** to override it (the stdio version creates a new file and can destroy nothing; this one replaces what is on screen, so an unattended agent has to say so out loud). `foldType` deck / scroll / ledger is unchanged. |
 | `list_chunks` | “Read fresh from the file every time” → “always reflects what the human is looking at”. |

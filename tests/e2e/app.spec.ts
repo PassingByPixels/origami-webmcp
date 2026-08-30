@@ -169,6 +169,33 @@ test('a refresh mid-edit offers the unsaved work back', async ({ page }) => {
   await expect(page.getByTestId('btn-resume')).toBeHidden();
 });
 
+test('a guide recipe, copied verbatim, mounts and runs in the real deck', async ({ page }) => {
+  /* The unit suite proves every recipe validates. This proves the one thing a validator cannot:
+     that the markup actually RENDERS on the deck's own engine. stat-cards is the sharpest probe
+     — its number is written as the literal "0" with the real value in data-count-to, so a .big
+     reading 42 in the frame means the runtime found the block and animated it. An agent that
+     had guessed and put "42" in the text node would see it overwritten with 0. */
+  await page.goto('/index.html');
+  const guide = await invoke(page, 'origami_guide', {});
+  const recipe = guide.body.recipes.cards['stat-cards'];
+  expect(recipe.html).toContain('data-count-to="42"');
+
+  await invoke(page, 'create_deck', { title: 'Recipe Mount' });
+  const added = await invoke(page, 'add_chunk', { kind: 'free', html: recipe.html, label: 'Stats' });
+  expect(added.state).toContain('ok');
+  expect(added.body.activeContent).toEqual([]); // a recipe must never put the deck behind the padlock
+
+  const frame = page.frameLocator('[data-testid="preview"]');
+  await expect(frame.locator('.card-grid .stat-card')).toHaveCount(2);
+  await expect.poll(async () => (await frame.locator('.stat-card .big').first().textContent())?.trim(), { timeout: 5000 }).toBe('42');
+  await expect(preview(page)).toContainText('What success measures');
+
+  // and the multi-column recipe carries the attribute the schema never spells out
+  const cols = guide.body.recipes.cards['text-columns-3'];
+  await invoke(page, 'add_chunk', { kind: 'free', html: cols.html, label: 'Columns' });
+  await expect(frame.locator('.o-tcols[data-ocols="3"] > .o-text')).toHaveCount(3);
+});
+
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
   await page.goto('/index.html');
   const created = await invoke(page, 'create_deck', { title: 'Playwright Deck' });

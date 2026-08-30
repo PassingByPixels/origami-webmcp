@@ -1,4 +1,5 @@
 import { FORMAT_VERSION, KINDS } from '../../vendor/format-dist/index.js';
+import { recipeCatalog } from './recipes.js';
 
 /**
  * The whole Origami contract, assembled from the live constants (KINDS, FORMAT_VERSION) so it
@@ -49,6 +50,15 @@ export function origamiGuide(): Record<string, unknown> {
     capabilities:
       'Embeds (video, dashboards) need a manifest capability "embed:<host>". write_chunk and add_chunk auto-grant it for recognised video blocks; otherwise the deck is flagged for the missing capability.',
     kinds: Object.fromEntries(Object.values(KINDS).map((k) => [k.key, { name: k.name, schema: k.schemaComment }])),
+    recipes: {
+      howToUse:
+        'Validated, ready-to-use inners for the free-card idioms the kind schemas NAME but do not spell out. Each `html` below is a complete slide inner: pass it to add_chunk({ kind: "free", html }) as it stands, or edit the text and keep the structure. They are copied from the Folio monorepo\'s own block palette (`source` cites where), so a fold you build from one is the same markup the Studio would have produced.',
+      whyTheyExist:
+        'The free schema lists its vocabulary in one line and stops. It does not tell you that a stat card\'s number lives in a `.big` with data-count-to and the literal text "0", that the column count is the ATTRIBUTE data-ocols rather than a class, or that a footnote is an inline span inside the paragraph. Guessing those produces markup that validates and then renders wrong.',
+      styleCaveat:
+        'A Fold created here with create_deck carries the FULL base stylesheet, so every recipe styles correctly. A Fold the human OPENED may have been saved by the Studio with unused kind CSS tree-shaken out of it — the sample deck shipped with this app, for instance, has no rule for .o-callout, .o-code, .o-footnote or .o-tcols. Those blocks still validate and still save; they just render unstyled in that deck. Nothing reports this, so prefer the plainer recipes when you are editing a Fold you did not create.',
+      cards: recipeCatalog(),
+    },
     tools: {
       origami_guide: 'This — the whole contract (optionally one kind).',
       create_deck: 'Create a new blank Fold and open it in this tab — call this first when building something new, then author it.',

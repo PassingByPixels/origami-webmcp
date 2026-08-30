@@ -4,6 +4,7 @@ import { FLOW_INNER, VENN_INNER } from '../fixtures.js';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { ProposalStore } from '../../src/core/proposal-store.js';
 import { createRegistry } from '../../src/core/tools.js';
+import { RECIPES } from '../../src/core/recipes.js';
 import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
 
 /* These run against the REAL vendored @origami/format + @origami/runtime — no mocks, no
@@ -93,6 +94,17 @@ describe('tool surface', () => {
       }
     }
     expect([...referenced].filter((n) => !names.has(n))).toEqual([]);
+
+    /* The same rule for the GUIDE payload, which is now much larger than the descriptions and
+       is the first thing an agent reads. notAvailableHere is excluded: naming an absent tool is
+       the entire point of that section. */
+    const guide = await h.json('origami_guide');
+    delete guide.notAvailableHere;
+    const inGuide = new Set<string>();
+    for (const m of JSON.stringify(guide).matchAll(/\b([a-z_]+_(?:chunk|deck|proposal|proposals|block|defs|schema|fold|type|header|starters|render))\b|\b(undo|origami_guide|add_custom_fold)\b/g)) {
+      inGuide.add((m[1] ?? m[2])!);
+    }
+    expect([...inGuide].filter((n) => !names.has(n)).sort()).toEqual([]);
   });
 
   it('origami_guide answers with the live format constants and one kind on request', async () => {
@@ -567,6 +579,79 @@ describe('content policy is the write gate', () => {
     const res = await h.json('write_chunk', { chunkId: id, html: '<div class="slide-inner"><h2 onclick="x()">Hi</h2></div>' });
     expect(res.applied).toBe(id);
     expect(res.activeContent.length).toBeGreaterThan(0);
+  });
+});
+
+describe('guide recipes: every one is real markup that really lands', () => {
+  /* A recipe an agent copies and gets a refusal from is worse than no recipe. The bar is not
+     "validateSlideContent likes it" — it is: added to a real deck through the real tool, the
+     WHOLE Fold still passes validateDeck, and the deck did not go active (a recipe that put the
+     human's Fold behind the padlock would be a trap). The cover recipe would fail this today if
+     it had kept the monorepo's <img data-oasset="brand-logo">: nothing here writes the asset
+     table, so the reference would dangle and validateDeck would return assets.ref. */
+
+  it('adds EVERY recipe to one deck and the Fold stays valid and inert', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Recipe book' });
+
+    for (const r of RECIPES) {
+      const added = await h.call('add_chunk', { kind: 'free', html: r.inner, label: r.title });
+      expect(added.isError, `${r.key} was refused: ${added.content[0]!.text}`).toBeFalsy();
+      const body = JSON.parse(added.content[0]!.text);
+      expect(body.activeContent, `${r.key} flags the deck active`).toEqual([]);
+      expect(body.capabilitiesGranted, `${r.key} demands a capability`).toEqual([]);
+    }
+
+    const parsed = parseDeck(h.deck.serialize());
+    expect(validateDeck(parsed), 'the whole Fold must still validate').toEqual([]);
+    expect(h.deck.model().order).toHaveLength(RECIPES.length + 1);
+  });
+
+  it('every recipe survives serialize -> reparse with its markup intact', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Recipe round trip' });
+    const ids: Record<string, string> = {};
+    for (const r of RECIPES) ids[r.key] = (await h.json('add_chunk', { kind: 'free', html: r.inner })).chunkId;
+
+    const reloaded = buildModel(parseDeck(h.deck.serialize()));
+    for (const r of RECIPES) {
+      // the distinctive class of each recipe has to still be there after a full file round trip
+      const marker = /class="([a-z0-9 -]*?)(anim)?"/.exec(r.inner.split('\n')[1] ?? '')?.[0] ?? '';
+      expect(reloaded.slides.get(ids[r.key]!)!.inner, r.key).toContain(marker.split('"')[1]!.replace(' anim', '').trim() || 'slide-inner');
+    }
+  });
+
+  it('exposes them through origami_guide with provenance an auditor can follow', async () => {
+    const guide = await harness().json('origami_guide');
+    expect(Object.keys(guide.recipes.cards).sort()).toEqual(RECIPES.map((r) => r.key).sort());
+    for (const r of RECIPES) {
+      const card = guide.recipes.cards[r.key];
+      expect(card.html, r.key).toBe(r.inner);
+      expect(card.source, r.key).toMatch(/\.(ts|mjs|html)\b|RECONSTRUCTED/); // a real file, or an explicit admission
+      expect(card.use.length, r.key).toBeGreaterThan(20);
+    }
+    // the two idioms the free schema names but never demonstrates, and the one it forbids
+    expect(guide.recipes.cards['text-columns-2'].caveat).toMatch(/data-ocols/);
+    expect(guide.recipes.cards['stat-cards'].caveat).toMatch(/data-count-to/);
+    expect(guide.recipes.cards['image-figure'].caveat).toMatch(/DEVIATION/);
+  });
+
+  it('the two multi-column recipes carry the attribute, not an invented class', async () => {
+    // .o-tcols-2 / .cols-3 do not exist in the monorepo; an agent that guesses them gets an
+    // unstyled stack. The recipes are the only place this is stated.
+    for (const key of ['text-columns-2', 'text-columns-3']) {
+      const r = RECIPES.find((x) => x.key === key)!;
+      expect(r.inner, key).toMatch(/class="o-tcols anim" data-ocols="[23]"/);
+      expect(r.inner, key).not.toMatch(/o-tcols-\d/);
+      expect(r.inner.match(/class="o-text"/g)!.length, key).toBe(Number(key.slice(-1)));
+      expect(r.source, key).toMatch(/RECONSTRUCTED/); // no rendered example exists to copy
+    }
+  });
+
+  it('no recipe references an asset the deck does not carry', async () => {
+    // data-oasset is the Studio's image route and there is no tool here to fill the asset table,
+    // so a recipe using it would fail validateDeck the moment save_deck ran.
+    for (const r of RECIPES) expect(r.inner, r.key).not.toContain('data-oasset');
   });
 });
 
