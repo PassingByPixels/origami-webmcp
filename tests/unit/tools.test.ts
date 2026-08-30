@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { KINDS, buildModel, parseDeck } from '../../vendor/format-dist/index.js';
+import { KINDS, buildModel, parseDeck, validateDeck } from '../../vendor/format-dist/index.js';
+import { FLOW_INNER, VENN_INNER } from '../fixtures.js';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { ProposalStore } from '../../src/core/proposal-store.js';
 import { createRegistry } from '../../src/core/tools.js';
@@ -361,6 +362,40 @@ ${JSON.stringify(
     const plain = '<div class="o-table-shell">\n<script type="application/json" data-odata="table">\n{"columns":[{"label":"A"}],"rows":[["x"]]}\n</script>\n<div class="o-table" data-table-mount></div>\n</div>';
     const added = await h.json('add_chunk', { kind: 'table', html: plain });
     expect(tableJson(h.deck.serialize(), added.chunkId).rows).toEqual([['x']]);
+  });
+});
+
+describe('data-driven kinds an agent has to build by hand', () => {
+  it('adds a venn and a flow from get_kind_schema shapes, and the Fold stays valid', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Kinds', foldType: 'scroll' });
+
+    // the agent's actual first move
+    const schema = await h.json('get_kind_schema', { kind: 'venn' });
+    expect(schema.kind).toBe('venn');
+    expect(schema.schema.join(' ')).toMatch(/data-odata="venn"/);
+
+    const venn = await h.json('add_chunk', { kind: 'venn', html: VENN_INNER, label: 'Venn' });
+    const flow = await h.json('add_chunk', { kind: 'flow', html: FLOW_INNER, label: 'Flow' });
+
+    const text = h.deck.serialize();
+    const parsed = parseDeck(text);
+    // the real validator, not a shape guess: manifest/DOM bijection, kind data, capabilities
+    expect(validateDeck(parsed)).toEqual([]);
+    expect(parsed.manifest.kinds).toEqual(expect.arrayContaining(['venn', 'flow']));
+    expect(parsed.manifest.slides[venn.chunkId]!.kind).toBe('venn');
+    expect(parsed.manifest.slides[flow.chunkId]!.kind).toBe('flow');
+    expect(text).toContain('data-odata="venn"');
+    expect(text).toContain('A Fold');
+    expect(text).toContain('Human or agent reviews');
+  });
+
+  it('refuses a data kind with no starter and tells the agent to fetch the schema', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'No starter' });
+    const r = await h.call('add_chunk', { kind: 'venn' });
+    expect(r.isError).toBe(true);
+    expect(JSON.parse(r.content[0]!.text).error).toMatch(/get_kind_schema\("venn"\)/);
   });
 });
 

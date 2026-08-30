@@ -32,14 +32,18 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('14');
+  await expect(page.getByTestId('tool-count')).toHaveText('21');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('14 tools registered locally');
-  // the deliberate design change is visible in the tool list
-  await expect(page.getByTestId('tool-propose_chunk')).toBeVisible();
-  await expect(page.getByTestId('tool-accept_proposal')).toHaveCount(0);
-  await expect(page.getByTestId('tool-reject_proposal')).toHaveCount(0);
+  await expect(page.getByTestId('mcp-status')).toContainText('21 tools registered locally');
+  // an agent can run the whole loop, review included
+  for (const name of ['propose_chunk', 'accept_proposal', 'reject_proposal', 'save_deck', 'define_block', 'add_custom_fold']) {
+    await expect(page.getByTestId(`tool-${name}`), name).toBeVisible();
+  }
+  // the filesystem-bound trio stays out
+  for (const name of ['list_decks', 'open_deck', 'refresh_sources']) {
+    await expect(page.getByTestId(`tool-${name}`), name).toHaveCount(0);
+  }
 });
 
 test('opens the sample Fold and renders it in the sandboxed iframe', async ({ page }) => {

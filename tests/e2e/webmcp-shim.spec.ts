@@ -36,7 +36,7 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
   await installFakeHost(page, ['document']);
   await page.goto('/index.html');
 
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 14 tools');
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 21 tools');
 
   const defs = await page.evaluate(() =>
     (window as any).__mcp.registered.map((d: any) => ({
@@ -46,25 +46,29 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
       executable: typeof d.execute === 'function',
     }))
   );
-  expect(defs).toHaveLength(14);
-  expect(defs.map((d: any) => d.name)).toContain('propose_chunk');
-  expect(defs.map((d: any) => d.name)).not.toContain('accept_proposal');
+  expect(defs).toHaveLength(21);
+  const names = defs.map((d: any) => d.name);
+  // the whole loop is reachable from the host — propose, review, resolve, save
+  expect(names).toEqual(
+    expect.arrayContaining(['propose_chunk', 'list_proposals', 'accept_proposal', 'reject_proposal', 'save_deck', 'define_block', 'add_custom_fold'])
+  );
+  expect(names).not.toContain('open_deck'); // filesystem-bound, deliberately absent
   expect(defs.every((d: any) => d.hasDescription && d.schemaType === 'object' && d.executable)).toBe(true);
 });
 
 test('falls back to navigator.modelContext when document has none', async ({ page }) => {
   await installFakeHost(page, ['navigator']);
   await page.goto('/index.html');
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 14 tools');
-  expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(14);
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 21 tools');
+  expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(21);
 });
 
 test('prefers document.modelContext when BOTH surfaces exist', async ({ page }) => {
   await installFakeHost(page, ['document', 'navigator']);
   await page.goto('/index.html');
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 14 tools');
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 21 tools');
   // registered once, on the spec surface only — never double-registered across both
-  expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(14);
+  expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(21);
   expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(0);
 });
 
@@ -99,33 +103,72 @@ test('a tool called through the host edits the deck the human is watching', asyn
   expect(JSON.parse(bad.content[0].text).error).toContain('would break the deck structure');
 });
 
-test('a proposal from the host still needs a human click', async ({ page }) => {
+/* A proposal has two front doors. Both are exercised here, because both must keep working:
+   the human's card for when someone is watching, and the tool for when nobody is. */
+
+test('a HUMAN can resolve a proposal an agent staged, by clicking the card', async ({ page }) => {
   await installFakeHost(page, ['document']);
   await page.goto('/index.html');
   await expect(page.getByTestId('mcp-status')).toContainText('connected');
 
-  const call = (name: string, args: unknown) =>
-    page.evaluate(
-      ([n, a]) => (window as any).__mcp.registered.find((d: any) => d.name === n).execute(a),
-      [name, args] as const
-    );
-
+  const call = agentCaller(page);
   const created = JSON.parse((await call('create_deck', { title: 'Agent PR' })).content[0].text);
-  const marker = `Only after a click ${Date.now()}`;
+  const marker = `Applied by a click ${Date.now()}`;
   await call('propose_chunk', {
     chunkId: created.chunks[0].id,
     html: `<div class="slide-inner"><h2>${marker}</h2></div>`,
     title: 'Agent proposal',
+    author: 'agent:shim',
   });
 
   await expect(page.getByTestId('proposal-card')).toHaveCount(1);
+  await expect(page.getByTestId('proposal-card')).toContainText('agent:shim');
   await expect(page.frameLocator('[data-testid="preview"]').locator('body')).not.toContainText(marker);
-
-  // there is no tool the agent could have used to do this itself
-  const names = await page.evaluate(() => (window as any).__mcp.registered.map((d: any) => d.name));
-  expect(names).not.toContain('accept_proposal');
-  expect(names).not.toContain('reject_proposal');
 
   await page.getByTestId('accept-proposal').click();
   await expect(page.frameLocator('[data-testid="preview"]').locator('body')).toContainText(marker);
+  await expect(page.getByTestId('proposal-card')).toHaveCount(0);
 });
+
+test('an AGENT can resolve its own proposal with accept_proposal — no click anywhere', async ({ page }) => {
+  await installFakeHost(page, ['document']);
+  await page.goto('/index.html');
+  await expect(page.getByTestId('mcp-status')).toContainText('connected');
+
+  const call = agentCaller(page);
+  const created = JSON.parse((await call('create_deck', { title: 'Unattended PR' })).content[0].text);
+  const marker = `Applied by the agent ${Date.now()}`;
+  const staged = JSON.parse(
+    (
+      await call('propose_chunk', {
+        chunkId: created.chunks[0].id,
+        html: `<div class="slide-inner"><h2>${marker}</h2></div>`,
+        author: 'agent:shim',
+      })
+    ).content[0].text
+  );
+  await expect(page.getByTestId('proposal-card')).toHaveCount(1);
+
+  const accepted = JSON.parse((await call('accept_proposal', { proposalId: staged.proposalId })).content[0].text);
+  expect(accepted).toMatchObject({ accepted: staged.proposalId, action: 'edit', remainingProposals: 0 });
+
+  // the card clears and the deck updates — the same outcome the click produces
+  await expect(page.getByTestId('proposal-card')).toHaveCount(0);
+  await expect(page.frameLocator('[data-testid="preview"]').locator('body')).toContainText(marker);
+
+  // reject is reachable too
+  const second = JSON.parse(
+    (await call('propose_chunk', { chunkId: created.chunks[0].id, html: '<div class="slide-inner"><h2>Dropped</h2></div>' })).content[0].text
+  );
+  await call('reject_proposal', { proposalId: second.proposalId });
+  await expect(page.getByTestId('proposal-card')).toHaveCount(0);
+  await expect(page.frameLocator('[data-testid="preview"]').locator('body')).not.toContainText('Dropped');
+});
+
+function agentCaller(page: Page) {
+  return (name: string, args: unknown): Promise<any> =>
+    page.evaluate(
+      ([n, a]) => (window as any).__mcp.registered.find((d: any) => d.name === n).execute(a),
+      [name, args] as const
+    );
+}
