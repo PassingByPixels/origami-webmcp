@@ -1,4 +1,9 @@
-# Origami Folio Web
+# Origami Crane (working title) — Origami Folio for the open web
+
+> **Goal:** turn **origami.gratis** into a serving station for making Origami files — for
+> agents and humans alike — a second vehicle to experience Origami Folio with no Chrome
+> extension and no install. For all intents and purposes a fork of Folio: same format, same
+> embedded runtime, same calc engine, different shell. The full story: [docs/VISION.md](docs/VISION.md).
 
 Open an Origami **Fold** (`.origami.html`) in the browser, hand Origami's authoring tools to an
 in-page AI agent over **WebMCP**, and save the result back to disk. No server, no account, no
