@@ -55,7 +55,7 @@ A walk-through that touches every moving part:
    { "chunkId": "PASTE_ID_HERE",
      "html": "<div class=\"slide-inner\"><h2>Written by hand</h2><p class=\"lede\">No agent involved.</p></div>" }
    ```
-   The preview re-renders immediately and the status bar turns to *Unsaved changes*.
+   The preview re-renders immediately, the change lands in the Activity rail, and the Save button picks up its unsaved-changes pip.
 4. Try to smuggle a `<template>` in — the content policy must refuse it:
    ```json
    { "chunkId": "PASTE_ID_HERE",
@@ -69,7 +69,7 @@ A walk-through that touches every moving part:
      "title": "Tighten the opening fold",
      "author": "agent:you" }
    ```
-   Nothing changes in the deck. A card appears in the **Review queue** on the right.
+   Nothing changes in the deck. A card appears at the top of the **Activity rail** on the right.
 6. Click **Accept** on that card. *Now* the deck changes. Click **Reject** on the next one and it
    does not. An agent reaches the same two outcomes with `accept_proposal` / `reject_proposal` —
    run `list_proposals`, then `accept_proposal` with the id, and watch the card clear itself.
@@ -80,7 +80,7 @@ A walk-through that touches every moving part:
    `.origami.html` onto the page. Now invoke **`save_deck`**: because the page holds a writable
    handle, it writes that file. Invoke it on a Fold you created in the tab instead and it reports
    `saved: false` and tells you to press Save.
-9. Reload the page mid-edit. A *Resume* button appears in the status bar with your unsaved work.
+9. Reload the page mid-edit. A resume card appears on the landing with your unsaved work.
 
 Keyboard: **Ctrl/Cmd+Enter** in the arguments box invokes the selected tool.
 
@@ -121,7 +121,7 @@ npm run test:e2e      # playwright — 32 smokes: 24 in bundled Chromium, 8 in y
 The app registers its tools on whichever WebMCP surface the browser exposes. It probes
 `document.modelContext` first (the surface in the [W3C
 proposal](https://github.com/webmachinelearning/webmcp)), then `navigator.modelContext` (what much
-of the ecosystem and the earlier Chrome previews expose). The status bar says which one it found,
+of the ecosystem and the earlier Chrome previews expose). The status dot's popover says which one it found,
 or *not available (console only)* — it never claims a connection it does not have.
 
 **No Canary needed.** WebMCP ships behind a flag in **ordinary stable Chrome from version 146**

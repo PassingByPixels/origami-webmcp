@@ -284,7 +284,7 @@ main {
   overflow-y: auto;
 }
 .empty h1 { font-family: var(--font-display); font-weight: 600; font-size: 34px; margin: 0 0 12px; letter-spacing: -0.015em; }
-.empty p { max-width: 560px; color: var(--ink-soft); line-height: 1.6; margin: 0; }
+.empty p { max-width: 52ch; color: var(--ink-soft); line-height: 1.6; margin: 0; }
 .empty code { font-family: var(--font-mono); font-size: 12px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 5px; }
 .empty-actions {
   display: flex;

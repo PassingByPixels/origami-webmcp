@@ -29,7 +29,7 @@ const CHIPS: Record<string, string> = {
   save_deck: 'SAVE',
   export_deck: 'EXPORT',
   undo: 'UNDO',
-  create_deck: 'OPEN',
+  create_deck: 'NEW',
   propose_chunk: 'STAGE',
   propose_add: 'STAGE',
   propose_delete: 'STAGE',
