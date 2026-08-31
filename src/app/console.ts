@@ -96,7 +96,8 @@ export class TestConsole {
     this.els.state.textContent = 'running…';
     this.els.state.className = 'run-state';
     const started = performance.now();
-    const res = await this.registry.invoke(this.selected.name, args);
+    // 'console' — a human drove this, and the Activity feed must not label it an agent call.
+    const res = await this.registry.invoke(this.selected.name, args, 'console');
     const ms = Math.round(performance.now() - started);
     this.els.invoke.disabled = false;
     this.els.state.textContent = res.isError ? `error · ${ms} ms` : `ok · ${ms} ms`;

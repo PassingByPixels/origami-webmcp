@@ -19,22 +19,31 @@
   <div class="deck-title" data-testid="deck-name" id="deck-name">No Fold open</div>
 
   <nav class="actions">
-    <button type="button" data-testid="btn-open" id="btn-open">Open&hellip;</button>
-    <button type="button" data-testid="btn-sample" id="btn-sample">Sample Fold</button>
+    <!-- Agent access. The DOT is the whole visible control; the technical sentence (surface +
+         tool count) is the button's accessible name, so a screen reader, an automated check and
+         the popover all read the SAME measured string. -->
+    <span class="popwrap">
+      <button type="button" class="statusdot" data-testid="mcp-status" id="mcp-status" aria-haspopup="dialog" aria-expanded="false"><span class="dot" aria-hidden="true"></span><span class="sr-only" id="mcp-status-text">WebMCP: checking&hellip;</span></button>
+      <div class="popover" data-testid="mcp-popover" id="mcp-popover" role="dialog" aria-label="Agent access" hidden></div>
+    </span>
+
     <button type="button" data-testid="btn-new" id="btn-new">New</button>
-    <button type="button" data-testid="btn-save" id="btn-save" class="primary" disabled>Save</button>
-    <button type="button" data-testid="btn-saveas" id="btn-saveas" disabled>Save as&hellip;</button>
-    <button type="button" data-testid="btn-lastsave" id="btn-lastsave" hidden>Download last save</button>
+    <button type="button" data-testid="btn-open" id="btn-open">Open&hellip;</button>
+
+    <span class="popwrap savegroup">
+      <button type="button" data-testid="btn-save" id="btn-save" class="primary" disabled>Save<i class="statepip" id="save-pip" aria-hidden="true" hidden></i></button>
+      <!-- The chevron is its own button and is NEVER disabled: the menu carries the way back out
+           of browser storage, which must stay reachable when no Fold is open. -->
+      <button type="button" class="chev" data-testid="btn-savemenu" id="btn-savemenu" aria-haspopup="menu" aria-expanded="false" aria-label="Save options">&#9662;</button>
+      <div class="popover savemenu" id="save-popover" role="menu" aria-label="Save options" hidden>
+        <div class="pop-file" data-testid="save-file" id="save-file">No Fold open</div>
+        <div class="pop-state" data-testid="save-status" id="save-status">No Fold open</div>
+        <button type="button" data-testid="btn-saveas" id="btn-saveas" disabled>Save as&hellip;</button>
+        <button type="button" data-testid="btn-lastsave" id="btn-lastsave" hidden>Download last save</button>
+      </div>
+    </span>
   </nav>
 </header>
-
-<div class="statusbar">
-  <span class="pill" data-testid="mcp-status" id="mcp-status">WebMCP: checking&hellip;</span>
-  <span class="pill quiet" data-testid="save-status" id="save-status">No Fold open</span>
-  <span class="pill" data-testid="app-message" id="app-message" hidden></span>
-  <span class="grow"></span>
-  <span class="pill quiet" data-testid="resume-slot" id="resume-slot" hidden></span>
-</div>
 
 <main>
   <section class="stage" id="stage">
@@ -42,25 +51,40 @@
       <svg class="mark big" viewBox="0 0 64 64" aria-hidden="true"><g fill="#557A4E"><polygon points="30,40 47,40 52,11" opacity="0.45"/><polygon points="26,40 48,40 43,7" opacity="0.92"/><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>
       <h1>Open a Fold</h1>
       <p>Drop an <code>.origami.html</code> file here, or use <strong>Open</strong>. Nothing leaves this machine &mdash; the Fold is parsed, edited and saved in your browser.</p>
+      <div class="empty-actions">
+        <button type="button" data-testid="btn-sample" id="btn-sample">Sample Fold</button>
+      </div>
+      <div class="resumecard" data-testid="resume-slot" id="resume-slot" hidden></div>
     </div>
     <iframe class="preview" data-testid="preview" id="preview" sandbox="allow-scripts" title="Fold preview" hidden></iframe>
     <div class="dropveil" id="dropveil" hidden><span>Drop the Fold to open it</span></div>
+    <div class="toasts" data-testid="toasts" id="toasts" aria-live="polite"></div>
   </section>
 
-  <aside class="review" data-testid="review-panel">
-    <h2>Review queue <span class="count" data-testid="proposal-count" id="proposal-count">0</span></h2>
-    <p class="review-note">Agents stage changes here for you to apply. An agent working unattended can resolve its own.</p>
-    <div class="proposal-list" data-testid="proposal-list" id="proposal-list"></div>
+  <aside class="rail" data-testid="review-panel">
+    <header class="rail-head">
+      <h2>Activity</h2>
+      <span class="count" data-testid="proposal-count" id="proposal-count" hidden>0</span>
+      <span class="grow"></span>
+      <span class="rail-live" data-testid="rail-live" id="rail-live" hidden><i class="pulse" aria-hidden="true"></i><span id="rail-live-tool"></span></span>
+    </header>
+    <div class="feed" id="feed">
+      <!-- Staged proposals sit at the head of the same feed. They are NOT rendered at the
+           position of their propose_* entry: a reload restores the queue but never the log, so
+           a card anchored to an activity row would vanish on exactly the reload that matters. -->
+      <div class="proposal-list" data-testid="proposal-list" id="proposal-list"></div>
+      <ol class="activity-list" data-testid="activity-list" id="activity-list"></ol>
+    </div>
   </aside>
 </main>
 
 <section class="console" id="console" data-testid="console">
-  <button type="button" class="console-toggle" data-testid="console-toggle" id="console-toggle" aria-expanded="true">
-    <span class="chev" aria-hidden="true">&#9662;</span> Test console
+  <button type="button" class="console-toggle" data-testid="console-toggle" id="console-toggle" aria-expanded="false">
+    <span class="chev" aria-hidden="true">&#9662;</span> Tool console
     <span class="count" data-testid="tool-count" id="tool-count">0</span> tools
     <span class="hint">Drive every tool by hand &mdash; no agent needed</span>
   </button>
-  <div class="console-body" id="console-body">
+  <div class="console-body" id="console-body" hidden>
     <ol class="tool-list" data-testid="tool-list" id="tool-list"></ol>
     <div class="tool-run">
       <h3 data-testid="tool-name" id="tool-name">Pick a tool</h3>

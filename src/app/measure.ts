@@ -13,10 +13,10 @@ import type { MeasureResult } from '../core/inspect.js';
    the LAST </body>, not the first: the deck carries its whole runtime inline and that bundle
    contains the string "</body>" in its own source.
 
-   WHY THE VISIBLE PREVIEW IS NOT REUSED. The preview must never carry an injected script — it is
-   what the human is looking at, and the measurer navigates the deck (clicking tabs) to reach
-   every fold, which would yank the human's view around. This frame is display:none, off in the
-   corner, and removed the moment it has answered.
+   WHY THE VISIBLE PREVIEW IS NOT REUSED. The measurer navigates the deck (clicking tabs) to
+   reach every fold, which would yank the human's view around; this frame is off-screen and
+   removed the moment it has answered. The preview carries only the small navigation bridge
+   (preview.ts), which appends through the SAME injectMeasurer seam and never measures.
 
    SANDBOX. Same as the preview: `allow-scripts`, never `allow-same-origin`. The measurer talks
    back through postMessage, which crosses an opaque origin fine; a nonce matches the reply to

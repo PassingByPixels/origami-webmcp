@@ -3,8 +3,17 @@ import { expect, test, type Page } from '@playwright/test';
 /* Real Chromium, the real dist/ build, the real sample Fold. Nothing is stubbed: the tools
    run in the page, the preview is the deck rendering itself on its own embedded engine. */
 
+/** The tool console is collapsed on load now (design spec: it is a surface, not the furniture),
+    so every console-driven step opens it first. Idempotent — a reload re-collapses it. */
+async function openConsole(page: Page): Promise<void> {
+  const toggle = page.getByTestId('console-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(page.getByTestId('tool-list')).toBeVisible();
+}
+
 /** Drive one tool through the test console exactly as a human would, and return its result. */
 async function invoke(page: Page, tool: string, args: unknown): Promise<any> {
+  await openConsole(page);
   await page.getByTestId(`tool-${tool}`).click();
   await expect(page.getByTestId('tool-name')).toHaveText(tool);
   await page.getByTestId('tool-args').fill(JSON.stringify(args, null, 2));
@@ -21,7 +30,10 @@ async function openSample(page: Page) {
   await expect(page.getByTestId('empty-state')).toBeVisible();
   await page.getByTestId('btn-sample').click();
   await expect(page.getByTestId('preview')).toBeVisible();
-  await expect(page.getByTestId('deck-name')).toContainText('welcome.origami.html');
+  // The topbar centre now carries the DECK's title; the filename it would be written to moved
+  // into the Save menu, next to the state that decides whether writing it is needed.
+  await expect(page.getByTestId('deck-name')).toHaveText('Welcome to Origami');
+  await expect(page.getByTestId('save-file')).toHaveText('welcome.origami.html');
 }
 
 test.beforeEach(async ({ page }) => {
@@ -36,7 +48,9 @@ test('boots with the tools registered and reports the WebMCP surface honestly', 
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
   await expect(page.getByTestId('mcp-status')).toContainText('29 tools registered locally');
-  // an agent can run the whole loop, review included
+  // an agent can run the whole loop, review included — and so can a human, once the console is
+  // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
+  await openConsole(page);
   for (const name of ['propose_chunk', 'accept_proposal', 'reject_proposal', 'save_deck', 'define_block', 'add_custom_fold']) {
     await expect(page.getByTestId(`tool-${name}`), name).toBeVisible();
   }
@@ -331,7 +345,8 @@ test('create_deck mints a blank Fold in the tab and add_chunk extends it', async
   const created = await invoke(page, 'create_deck', { title: 'Playwright Deck' });
   expect(created.state).toContain('ok');
   expect(created.body.title).toBe('Playwright Deck');
-  await expect(page.getByTestId('deck-name')).toContainText('playwright-deck.origami.html');
+  await expect(page.getByTestId('deck-name')).toHaveText('Playwright Deck');
+  await expect(page.getByTestId('save-file')).toHaveText('playwright-deck.origami.html');
   await expect(preview(page)).toContainText('New fold');
 
   const marker = `Second fold ${Date.now()}`;
@@ -436,7 +451,13 @@ test('save_deck banks the Fold in browser storage, and the human can get it back
      file system, which is real storage but INVISIBLE — nothing outside this page can read it. So
      "it is saved in the browser" would be true and useless without this button. */
   await page.goto('/index.html');
+  /* The affordance moved into the Save menu, whose chevron is never disabled — so this opens
+     the menu to look, exactly as a human would, rather than asserting the trivial truth that a
+     closed menu hides everything in it. */
+  await page.getByTestId('btn-savemenu').click();
+  await expect(page.locator('#save-popover')).toBeVisible();
   await expect(page.getByTestId('btn-lastsave')).toBeHidden(); // nothing banked yet
+  await page.keyboard.press('Escape');
 
   await invoke(page, 'create_deck', { title: 'Banked Deck', discard: true });
   await invoke(page, 'add_chunk', { starter: 'flowchart' });
@@ -449,7 +470,8 @@ test('save_deck banks the Fold in browser storage, and the human can get it back
   expect(saved.body.opfs.bytes).toBe(saved.body.bytes);
   expect(saved.body.durability).toMatch(/in this browser only/);
 
-  // the affordance appears, named with the real size
+  // the affordance appears in the Save menu, named with the real size
+  await page.getByTestId('btn-savemenu').click();
   const btn = page.getByTestId('btn-lastsave');
   await expect(btn).toBeVisible();
   await expect(btn).toContainText('Download last save');

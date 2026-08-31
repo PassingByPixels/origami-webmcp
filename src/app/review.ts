@@ -1,11 +1,18 @@
 import type { ProposalView } from '../../vendor/format-dist/index.js';
 import type { DeckStore } from '../core/deck-store.js';
 import type { ProposalStore } from '../core/proposal-store.js';
+import type { ToolResult } from '../core/result.js';
+
+/** What the panel needs of the registry: run a tool AS THE HUMAN and hand back the result. */
+export type HumanInvoke = (name: string, args: unknown) => Promise<ToolResult>;
 
 /**
  * The human's half of propose-review-accept. Agents can stage; only a click here applies.
- * Accept runs ProposalStore.accept, which goes through the SAME model ops a direct
- * write_chunk uses — a reviewed change and a trusted change land identically.
+ *
+ * Accept and Reject go through registry.invoke('accept_proposal' | 'reject_proposal', …,
+ * 'human') rather than calling ProposalStore directly. The store would do the same work — but
+ * only the registry route records the click, so a human resolving a card and an agent
+ * resolving the same card leave the same trail in the Activity feed, differing in one field.
  */
 export class ReviewPanel {
   /* refresh() awaits a hash per proposal, so two refreshes can be in flight at once — an
@@ -20,20 +27,22 @@ export class ReviewPanel {
     private readonly countEl: HTMLElement,
     private readonly deck: DeckStore,
     private readonly proposals: ProposalStore,
-    private readonly onApplied: (message: string, bad?: boolean) => void
+    private readonly onApplied: (message: string, bad?: boolean) => void,
+    private readonly invoke: HumanInvoke
   ) {
     this.list.addEventListener('click', (ev) => void this.onClick(ev));
   }
 
   async refresh(): Promise<void> {
     const mine = ++this.generation;
-    this.countEl.textContent = String(this.proposals.count());
-    if (!this.deck.isOpen() || this.proposals.count() === 0) {
-      this.list.replaceChildren(
-        el('div', 'queue-empty', this.deck.isOpen()
-          ? 'Nothing staged. When an agent calls propose_chunk, propose_add or propose_delete, the change waits here for you.'
-          : 'Open a Fold to review changes against it.')
-      );
+    const count = this.proposals.count();
+    // The badge keeps its "0" so anything reading the count still gets a number, but a zero
+    // badge in the rail header is noise — the feed's own empty line says what the rail is for.
+    this.countEl.textContent = String(count);
+    this.countEl.hidden = count === 0;
+    this.countEl.title = count === 1 ? '1 staged change waiting for you' : `${count} staged changes waiting for you`;
+    if (!this.deck.isOpen() || count === 0) {
+      this.list.replaceChildren();
       return;
     }
     const views = await this.proposals.views(this.deck.model());
@@ -98,14 +107,24 @@ export class ReviewPanel {
     if (!id) return;
 
     if (btn.dataset.act === 'reject') {
-      this.proposals.reject(id);
-      this.onApplied('Proposal rejected — the Fold is unchanged.');
+      const res = await this.invoke('reject_proposal', { proposalId: id });
+      this.onApplied(res.isError ? String(body(res).error) : 'Proposal rejected — the Fold is unchanged.', res.isError);
       return;
     }
-    const res = await this.proposals.accept(this.deck, id);
-    if (res.ok) this.onApplied(`Accepted: ${res.action} on ${res.targetId}.`);
-    else this.onApplied(res.error, true);
+    const res = await this.invoke('accept_proposal', { proposalId: id });
+    const out = body(res);
+    if (res.isError) this.onApplied(String(out.error), true);
+    else this.onApplied(`Accepted: ${out.action} on ${out.applied}.`);
     await this.refresh();
+  }
+}
+
+/** Every tool answers with one JSON text block; the tools' own results are the panel's data. */
+function body(res: ToolResult): Record<string, unknown> {
+  try {
+    return JSON.parse(res.content[0]?.text ?? '{}') as Record<string, unknown>;
+  } catch {
+    return { error: res.content[0]?.text ?? 'the tool answered with something unreadable' };
   }
 }
 

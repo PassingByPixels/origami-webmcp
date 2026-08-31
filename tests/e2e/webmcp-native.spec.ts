@@ -415,8 +415,11 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
       expect(readBack.hasVenn, 'the OPFS copy is the WHOLE Fold, blocks included').toBe(true);
       expect(readBack.hasManifest).toBe(true);
 
-      // and the human has a way back to those bytes
+      // and the human has a way back to those bytes — one click into the Save menu, whose
+      // chevron stays enabled precisely so these bytes are reachable with no Fold open
+      await c.page.getByTestId('btn-savemenu').click();
       await expect(c.page.getByTestId('btn-lastsave')).toBeVisible();
+      await expect(c.page.getByTestId('btn-lastsave')).toContainText('Download last save');
     } finally {
       await close(c);
     }
