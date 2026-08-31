@@ -47,16 +47,27 @@
 
 <main>
   <section class="stage" id="stage">
+    <!-- The empty state IS the product page: the one screen a first-time visitor is guaranteed
+         to see, so it says what a Fold is and offers the three ways in. -->
     <div class="empty" data-testid="empty-state" id="empty-state">
       <svg class="mark big" viewBox="0 0 64 64" aria-hidden="true"><g fill="#557A4E"><polygon points="30,40 47,40 52,11" opacity="0.45"/><polygon points="26,40 48,40 43,7" opacity="0.92"/><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>
-      <h1>Open a Fold</h1>
-      <p>Drop an <code>.origami.html</code> file here, or use <strong>Open</strong>. Nothing leaves this machine &mdash; the Fold is parsed, edited and saved in your browser.</p>
+      <h1>Open a Fold.</h1>
+      <p class="lede">Origami decks and documents are single <code>.origami.html</code> files that play anywhere. Drop one here to read or edit it &mdash; or connect an agent and watch it author one for you. Nothing leaves this machine.</p>
       <div class="empty-actions">
+        <button type="button" class="primary" data-testid="btn-replay" id="btn-replay"><span class="play" aria-hidden="true">&#9654;</span> Watch an agent build a deck</button>
         <button type="button" data-testid="btn-sample" id="btn-sample">Sample Fold</button>
+        <button type="button" data-testid="btn-blank" id="btn-blank">New blank Fold</button>
       </div>
+      <button type="button" class="linky connect" data-testid="btn-connect" id="btn-connect">Connect your agent</button>
       <div class="resumecard" data-testid="resume-slot" id="resume-slot" hidden></div>
     </div>
     <iframe class="preview" data-testid="preview" id="preview" sandbox="allow-scripts" title="Fold preview" hidden></iframe>
+    <!-- Shown only while the recorded run is playing. Stop keeps everything already built. -->
+    <div class="replaybar" data-testid="replaybar" id="replaybar" hidden>
+      <i class="pulse" aria-hidden="true"></i>
+      <span class="replay-step" data-testid="replay-step" id="replay-step"></span>
+      <button type="button" data-testid="btn-stop-replay" id="btn-stop-replay">Stop</button>
+    </div>
     <div class="dropveil" id="dropveil" hidden><span>Drop the Fold to open it</span></div>
     <div class="toasts" data-testid="toasts" id="toasts" aria-live="polite"></div>
   </section>
@@ -93,8 +104,17 @@
         <summary>Input schema</summary>
         <pre data-testid="tool-schema" id="tool-schema"></pre>
       </details>
-      <label class="args-label" for="tool-args">Arguments (JSON)</label>
-      <textarea data-testid="tool-args" id="tool-args" spellcheck="false" rows="6">{}</textarea>
+      <!-- Two ways to fill the same call. The FORM is generated from the tool's inputSchema and
+           writes straight into the textarea below; the textarea is what gets sent, always. -->
+      <div class="args-head">
+        <span class="args-label">Arguments</span>
+        <span class="modes" role="group" aria-label="Argument entry mode">
+          <button type="button" data-testid="btn-mode-form" id="btn-mode-form" aria-pressed="true">Form</button>
+          <button type="button" data-testid="btn-mode-json" id="btn-mode-json" aria-pressed="false">JSON</button>
+        </span>
+      </div>
+      <div class="tool-form" data-testid="tool-form" id="tool-form"></div>
+      <textarea data-testid="tool-args" id="tool-args" spellcheck="false" rows="6" hidden>{}</textarea>
       <div class="run-row">
         <button type="button" class="primary" data-testid="btn-invoke" id="btn-invoke" disabled>Invoke</button>
         <span class="run-state" data-testid="run-state" id="run-state"></span>

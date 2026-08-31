@@ -72,19 +72,13 @@ export class ReviewPanel {
       );
     }
 
-    // The proposed text is what the decision turns on, so it is open; the current text is
-    // one click away. Two tall blocks pushed Accept/Reject off the panel.
-    if (v.after !== undefined) {
-      card.append(el('div', 'diff-label', v.action === 'add' ? 'New chunk' : 'Proposed'), el('pre', '', trim(v.after)));
-    }
-    if (v.before !== undefined && v.action !== 'add') {
-      const details = document.createElement('details');
-      details.className = 'before';
-      const summary = document.createElement('summary');
-      summary.textContent = v.action === 'edit' ? 'Current text' : 'The chunk as it stands';
-      details.append(summary, el('pre', '', trim(v.before)));
-      card.append(details);
-    }
+    /* The markup is EVIDENCE, not the decision. A card leads with what the change is for — the
+       title, who proposed it, and why — and the decision is made on that; a screenful of raw
+       html in between pushed Accept and Reject off the rail, so the buttons could not be reached
+       without scrolling past the very text they act on. Both blocks now live behind one
+       disclosure, closed by default, and the whole card fits. */
+    const markup = markupBlock(v);
+    if (markup) card.append(markup);
 
     const actions = el('div', 'card-actions');
     const accept = el('button', 'primary', 'Accept') as HTMLButtonElement;
@@ -117,6 +111,27 @@ export class ReviewPanel {
     else this.onApplied(`Accepted: ${out.action} on ${out.applied}.`);
     await this.refresh();
   }
+}
+
+/** The proposed text and the text it replaces, behind one "Show markup" disclosure. */
+function markupBlock(v: ProposalView): HTMLElement | null {
+  const hasBefore = v.before !== undefined && v.action !== 'add';
+  if (v.after === undefined && !hasBefore) return null;
+
+  const details = document.createElement('details');
+  details.className = 'markup';
+  details.setAttribute('data-testid', 'proposal-markup');
+  const summary = document.createElement('summary');
+  summary.textContent = 'Show markup';
+  details.append(summary);
+
+  if (v.after !== undefined) {
+    details.append(el('div', 'diff-label', v.action === 'add' ? 'New chunk' : 'Proposed'), el('pre', '', trim(v.after)));
+  }
+  if (hasBefore) {
+    details.append(el('div', 'diff-label', v.action === 'edit' ? 'Current text' : 'The chunk as it stands'), el('pre', '', trim(v.before!)));
+  }
+  return details;
 }
 
 /** Every tool answers with one JSON text block; the tools' own results are the panel's data. */

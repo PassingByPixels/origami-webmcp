@@ -5,6 +5,7 @@ import { connectWebMcp, type McpConnection } from '../core/registry.js';
 import { createRegistry, type SaveOutcomeReport } from '../core/tools.js';
 import { ActivityRail } from './activity.js';
 import { TestConsole } from './console.js';
+import { DEMO_CALLS, bindRefs, learnRefs } from './demo-script.js';
 import { Popover } from './popover.js';
 import { Toasts } from './toast.js';
 import {
@@ -154,6 +155,9 @@ new TestConsole(registry, {
   name: $('tool-name'),
   desc: $('tool-desc'),
   schema: $('tool-schema'),
+  form: $('tool-form'),
+  modeForm: $<HTMLButtonElement>('btn-mode-form'),
+  modeJson: $<HTMLButtonElement>('btn-mode-json'),
   args: $<HTMLTextAreaElement>('tool-args'),
   invoke: $<HTMLButtonElement>('btn-invoke'),
   state: $('run-state'),
@@ -223,7 +227,11 @@ deck.subscribe((ev) => {
 /* ---------- the page's own events ----------
    Tools record themselves at ToolRegistry.invoke. Opening a file, pressing Save and answering
    the resume card have no tool behind them, so the page pushes them into the SAME log — a feed
-   that showed only what agents did would read as if the human were not there. */
+   that showed only what agents did would read as if the human were not there.
+
+   The summary must NOT restate the verb: the rail draws a chip (OPEN, SAVE, DELETE) from the
+   tool name already, and "OPEN open — welcome.origami.html" says the same word twice before it
+   says anything. Every summary here starts at the thing acted on. */
 function pushHuman(tool: string, summary: string, opts: { ok?: boolean; error?: string; ms?: number } = {}): void {
   registry.activity.push({
     source: 'human',
@@ -236,10 +244,12 @@ function pushHuman(tool: string, summary: string, opts: { ok?: boolean; error?: 
 }
 
 /* An agent that just changed a fold should not have to say "look at fold 3" — the preview
-   follows the newest agent write. Console and human calls do NOT move the view: the person who
-   made them is already looking where they meant to. */
+   follows the newest agent write, and the replay is an agent's recorded run, so it follows that
+   too (a demo that builds fold 6 while the viewer stares at the cover shows nothing). Console
+   and human calls do NOT move the view: the person who made them is already looking where they
+   meant to. */
 registry.activity.subscribe((entry) => {
-  if (entry.source === 'agent' && entry.ok && entry.targetId) preview.goto(entry.targetId);
+  if ((entry.source === 'agent' || entry.source === 'replay') && entry.ok && entry.targetId) preview.goto(entry.targetId);
 });
 
 proposals.subscribe(() => {
@@ -259,15 +269,16 @@ function scheduleAutosave(): void {
 
 function openText(text: string, name: string, from: FsaFileHandle | null, how = 'open'): void {
   const started = Date.now();
+  const where = how === 'resume' ? ' — from browser storage' : '';
   try {
     deck.open(text, name);
     handle = from;
     say(`Opened ${name}`);
-    pushHuman(how, `${how} — "${name}"`, { ms: Date.now() - started });
+    pushHuman(how, `"${name}"${where}`, { ms: Date.now() - started });
   } catch (e) {
     const why = (e as Error).message;
     say(`Not a readable Origami Fold: ${why}`, true);
-    pushHuman(how, `${how} — "${name}"`, { ok: false, error: why, ms: Date.now() - started });
+    pushHuman(how, `"${name}"${where}`, { ok: false, error: why, ms: Date.now() - started });
   }
 }
 
@@ -296,7 +307,7 @@ $('btn-sample').addEventListener('click', async () => {
   }
 });
 
-$('btn-new').addEventListener('click', async () => {
+async function newBlankFold(): Promise<void> {
   if (!confirmDiscard()) return;
   deck.close(); // clears the dirty guard create_deck enforces for agents
   handle = null;
@@ -305,6 +316,107 @@ $('btn-new').addEventListener('click', async () => {
   const res = await asHuman('create_deck', { title: 'Untitled deck' });
   if (res.isError) say(JSON.parse(res.content[0]!.text).error, true);
   else say('New Fold created — it is not on disk until you save it.');
+}
+
+// Two buttons, one Fold: the toolbar's New and the landing's "New blank Fold" are the same act,
+// so they are the same function rather than two paths that could drift apart.
+$('btn-new').addEventListener('click', () => void newBlankFold());
+$('btn-blank').addEventListener('click', () => void newBlankFold());
+
+/* The landing's quiet line opens the SAME agent-access card the status dot does — one
+   explanation of WebMCP in the app, reachable from the screen a newcomer is actually on. */
+$('btn-connect').addEventListener('click', () => statusPopover.show());
+
+/* ---------- the replay ----------
+   "Watch an agent build a deck" plays the RECORDED run in src/app/demo-script.ts — the same
+   ordered tool calls `npm run demo` drives through Chrome's own WebMCP surface — one call at a
+   time, through registry.invoke with source 'replay'. Nothing is faked: every fold is built by
+   the tools an agent would call, the rail narrates each one, and the preview follows.
+
+   It ends at list_chunks. There is deliberately no save_deck: a page that started a download
+   because someone pressed play would be the app taking a liberty. */
+
+const REPLAY_STEP_MS = 900;
+const btnReplay = $<HTMLButtonElement>('btn-replay');
+const replayBar = $('replaybar');
+const replayStep = $('replay-step');
+
+let replaying = false;
+let stopReplay = false;
+/** Cuts the current wait short so Stop lands on the click, not up to a step later. */
+let wake: (() => void) | null = null;
+
+/** How long to wait between calls. `?replayDelay=<ms>` is a TEST HOOK: an e2e must not sit
+    through eleven seconds of pacing to prove the replay builds a deck. */
+function replayDelayMs(): number {
+  const raw = new URLSearchParams(location.search).get('replayDelay');
+  const ms = raw === null ? Number.NaN : Number(raw);
+  return Number.isFinite(ms) && ms >= 0 ? ms : REPLAY_STEP_MS;
+}
+
+const beat = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    if (ms <= 0) return resolve();
+    const timer = setTimeout(resolve, ms);
+    wake = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+  });
+
+async function runReplay(): Promise<void> {
+  if (replaying) return;
+  // The landing only shows with no Fold open, so this normally passes — it is here so the
+  // button can never be the one control in the app that throws work away without asking.
+  if (!confirmDiscard()) return;
+
+  replaying = true;
+  stopReplay = false;
+  btnReplay.disabled = true;
+  replayBar.hidden = false;
+  const delay = replayDelayMs();
+  const refs: Record<string, string> = {};
+  let done = 0;
+  let failed = '';
+
+  try {
+    for (const [i, call] of DEMO_CALLS.entries()) {
+      if (stopReplay) break;
+      replayStep.textContent = `Replaying ${i + 1} of ${DEMO_CALLS.length} — ${call.tool}`;
+      const res = await registry.invoke(call.tool, bindRefs(call.args, refs), 'replay');
+      done++;
+      // Every tool here answers with one JSON block, but a tool that ever answered with a raw
+      // string must stop the run with a message — not with an exception nobody sees.
+      let body: any = {};
+      try {
+        body = JSON.parse(res.content[0]?.text ?? '{}');
+      } catch {
+        body = { error: res.content[0]?.text ?? 'the tool answered with something unreadable' };
+      }
+      if (res.isError) {
+        failed = `${call.tool}: ${body.error ?? 'the call failed'}`;
+        break;
+      }
+      learnRefs(call.tool, body, refs);
+      if (stopReplay) break;
+      await beat(delay);
+    }
+  } finally {
+    wake = null;
+    replaying = false;
+    replayBar.hidden = true;
+    btnReplay.disabled = false;
+  }
+
+  if (failed) say(`The replay stopped at ${failed} — what it built is still here.`, true);
+  else if (stopReplay) say(`Replay stopped after ${done} of ${DEMO_CALLS.length} calls — what it built is still here.`);
+  else say(`Built by replaying ${done} recorded tool calls — every step is in the Activity feed.`);
+}
+
+btnReplay.addEventListener('click', () => void runReplay());
+$('btn-stop-replay').addEventListener('click', () => {
+  stopReplay = true;
+  wake?.();
 });
 
 btnSave.addEventListener('click', async () => {
@@ -318,10 +430,10 @@ btnSave.addEventListener('click', async () => {
       deck.markSaved();
       clearAutosave();
       say(`Saved to ${out.name}`);
-      pushHuman('save', `save — "${out.name}" (${out.bytes ?? text.length} bytes)`, { ms: Date.now() - started });
+      pushHuman('save', `"${out.name}" — ${out.bytes ?? text.length} bytes`, { ms: Date.now() - started });
     } else {
       say(`Save failed: ${out.reason}`, true);
-      pushHuman('save', `save — "${deck.name()}"`, { ok: false, error: out.reason, ms: Date.now() - started });
+      pushHuman('save', `"${deck.name()}"`, { ok: false, error: out.reason, ms: Date.now() - started });
     }
     refreshChrome();
     return;
@@ -411,10 +523,10 @@ async function doSaveAs(text: string): Promise<void> {
     deck.markSaved();
     clearAutosave();
     say(res.outcome.how === 'download' ? `Downloaded ${res.outcome.name}` : `Saved to ${res.outcome.name}`);
-    pushHuman('save_as', `save as — "${res.outcome.name}" (${res.outcome.how})`, { ms });
+    pushHuman('save_as', `"${res.outcome.name}" — ${res.outcome.how}`, { ms });
   } else if (res.outcome.reason !== 'cancelled') {
     say(`Save failed: ${res.outcome.reason}`, true);
-    pushHuman('save_as', `save as — "${deck.name()}"`, { ok: false, error: res.outcome.reason, ms });
+    pushHuman('save_as', `"${deck.name()}"`, { ok: false, error: res.outcome.reason, ms });
   }
   refreshChrome();
 }
@@ -445,13 +557,13 @@ btnLastSave.addEventListener('click', async () => {
   const last = await readLastOpfs();
   if (!last) {
     say('The last save is no longer in browser storage — the browser evicted it.', true);
-    pushHuman('download_last_save', 'download last save', { ok: false, error: 'the browser evicted it' });
+    pushHuman('download_last_save', 'the last save', { ok: false, error: 'the browser evicted it' });
     refreshLastSave();
     return;
   }
   downloadBlob(last.text, last.name);
   say(`Downloading ${last.name} from browser storage.`);
-  pushHuman('download_last_save', `download last save — "${last.name}"`);
+  pushHuman('download_last_save', `"${last.name}" — out of browser storage`);
 });
 
 refreshLastSave();
@@ -523,7 +635,7 @@ if (saved) {
     clearAutosave();
     resumeSlot.hidden = true;
     say(`Discarded the unsaved work from ${when}.`);
-    pushHuman('discard', `discard — "${saved.name}" from ${when}`);
+    pushHuman('discard', `"${saved.name}" — unsaved work from ${when}`);
   });
 
   row.append(resume, discard);

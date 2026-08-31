@@ -11,11 +11,14 @@ async function openConsole(page: Page): Promise<void> {
   await expect(page.getByTestId('tool-list')).toBeVisible();
 }
 
-/** Drive one tool through the test console exactly as a human would, and return its result. */
+/** Drive one tool through the test console exactly as a human would, and return its result.
+    The console opens in Form mode, so this switches to JSON first — the same click a human
+    makes to type a call by hand. The textarea is what gets sent in either mode. */
 async function invoke(page: Page, tool: string, args: unknown): Promise<any> {
   await openConsole(page);
   await page.getByTestId(`tool-${tool}`).click();
   await expect(page.getByTestId('tool-name')).toHaveText(tool);
+  await page.getByTestId('btn-mode-json').click();
   await page.getByTestId('tool-args').fill(JSON.stringify(args, null, 2));
   await page.getByTestId('btn-invoke').click();
   await expect(page.getByTestId('run-state')).toContainText(/ok|error/);

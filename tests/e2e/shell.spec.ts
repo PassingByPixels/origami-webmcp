@@ -18,6 +18,8 @@ async function invoke(page: Page, tool: string, args: unknown = {}): Promise<any
   await openConsole(page);
   await page.getByTestId(`tool-${tool}`).click();
   await expect(page.getByTestId('tool-name')).toHaveText(tool);
+  // the console opens in Form mode; JSON is the mode that takes a call typed by hand
+  await page.getByTestId('btn-mode-json').click();
   await page.getByTestId('tool-args').fill(JSON.stringify(args, null, 2));
   await page.getByTestId('btn-invoke').click();
   await expect(page.getByTestId('run-state')).toContainText(/ok|error/);
@@ -70,7 +72,10 @@ test('every route into the tools lands in ONE feed, with the chip and the source
   const rows = page.getByTestId('activity-row');
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText('OPEN');
-  await expect(rows.first()).toContainText('open — "welcome.origami.html"');
+  await expect(rows.first()).toContainText('"welcome.origami.html"');
+  // the chip already says OPEN — a summary that then says "open" again wastes the only line
+  // the row has, and reads as a stutter
+  await expect(rows.first()).not.toContainText('open —');
   await expect(rows.first()).toHaveAttribute('data-source', 'human');
 
   // a read-only tool from the console
@@ -304,6 +309,7 @@ test('a tool call in flight lights the rail, and settling puts it out', async ({
 
   // inspect_render lays the whole deck out in its own frame — a real call with a real duration
   await page.getByTestId('tool-inspect_render').click();
+  await page.getByTestId('btn-mode-json').click();
   await page.getByTestId('tool-args').fill('{}');
   await page.getByTestId('btn-invoke').click();
 

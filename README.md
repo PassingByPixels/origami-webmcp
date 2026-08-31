@@ -41,6 +41,10 @@ The **Test console** at the bottom of the page is the point of the build, not a 
 drives the exact same tool registry the WebMCP shim hands to an agent, so plain Chrome with no
 flags and nothing connected exercises the whole app.
 
+The tool list is grouped (Learn / Author / Review / File) and the arguments have two modes:
+**Form**, generated from the tool's own inputSchema, and **JSON**. The form writes into the JSON
+box, and the JSON box is what gets sent — so switch to **JSON** for the pasted calls below.
+
 A walk-through that touches every moving part:
 
 1. Click **Sample Fold**. The deck renders in the preview — that is the real file playing on its
