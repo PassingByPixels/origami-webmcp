@@ -59,15 +59,17 @@ async function tableData(page: Page): Promise<any> {
 test('an agent builds a scroll Fold with two data kinds and resolves its own proposal', async ({ page }) => {
   await installHost(page);
   await page.goto('/index.html');
-  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 24 tools');
+  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 29 tools');
 
-  /* 1. onboard — the guide's kind catalog must agree with get_kind_schema in the SHIPPED bundle */
+  /* 1. onboard — the default guide indexes the kinds; the schema itself lives behind the
+     topic call and get_kind_schema, and both routes must agree in the SHIPPED bundle */
   const guide = await tool(page, 'origami_guide');
   expect(guide.body.formatVersion).toBe('1');
   const vennSchema = await tool(page, 'get_kind_schema', { kind: 'venn' });
   expect(vennSchema.isError).toBe(false);
   expect(vennSchema.body.name).toBe(guide.body.kinds.venn.name);
-  expect(vennSchema.body.schema).toEqual(guide.body.kinds.venn.schema);
+  const kindsTopic = await tool(page, 'origami_guide', { topic: 'kinds' });
+  expect(vennSchema.body.schema).toEqual(kindsTopic.body.kinds.venn.schema);
   expect(vennSchema.body.schema.join(' ')).toMatch(/data-odata="venn"/);
   expect(Object.keys(guide.body.kinds)).toEqual(expect.arrayContaining(['venn', 'flow', 'table', 'document', 'chart']));
 

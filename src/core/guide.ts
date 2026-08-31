@@ -19,12 +19,52 @@ import { recipeCatalog } from './recipes.js';
    right advice with no edit here. */
 const PLACEMENT = new Map(FORMAT_BLOCKS.map((b) => [b.key as string, b.data?.placement]));
 
+const placementOf = (key: string): string => (PLACEMENT.get(key) === 'block' ? 'in-slide block' : 'whole fold');
+
 const howToAdd = (key: string): string =>
   PLACEMENT.get(key) === 'block'
     ? `IN-SLIDE BLOCK, not a slide kind — any number of these may sit on any fold. PREFER a FREE CARD holding one: add_chunk({ kind: "free", html: '<div class="slide-inner"><p class="eyebrow">Section</p><h2>A title</h2>' + <the ${key} figure> + '</div>' }). That is what this kind's own schema recommends, and it gives the block a heading and room for a second block beside it. add_chunk({ kind: "${key}", html: <the figure> }) is also valid and is what the stdio server does, but it makes a fold whose entire body is one untitled figure.`
     : "A WHOLE FOLD: add_chunk({ kind, html }) with the fold's inner markup.";
 
-export function origamiGuide(): Record<string, unknown> {
+/* The same advice howToAdd gives PER KIND, said ONCE. In the default answer the kind entries
+   are an index (name + placement) and this carries the steer for both placements, so an agent
+   reads it one time instead of paying for the same paragraph on every block kind. The per-kind
+   wording is unchanged and still ships with origami_guide({topic:"kinds"}). */
+const KINDS_HOW_TO = {
+  index:
+    'The `kinds` map above is an INDEX: every kind this Fold format knows, with its display name and its placement. It tells you WHAT exists; it deliberately does not carry the markup schemas.',
+  schemas:
+    'For the markup contract of a kind — what structure and attributes are valid — call get_kind_schema(kind) (or origami_guide({kind})) for one, or origami_guide({topic:"kinds"}) for every kind at once with its schema and its own how-to-add line. Fetch the two or three you are about to use; do not fetch all of them.',
+  placementWholeFold:
+    'placement "whole fold": the kind IS a slide kind. add_chunk({ kind, html }) with the fold\'s inner markup.',
+  placementInSlideBlock:
+    'placement "in-slide block": the kind is NOT a slide kind — any number of these may sit on any fold. PREFER a FREE CARD holding one: add_chunk({ kind: "free", html: \'<div class="slide-inner"><p class="eyebrow">Section</p><h2>A title</h2>\' + <the figure> + \'</div>\' }). That is what each of those kinds\' own schema recommends, and it gives the block a heading and room for a second block beside it. add_chunk({ kind: "<that kind>", html: <the figure> }) is also valid and is what the stdio server does, but it makes a fold whose entire body is one untitled figure.',
+};
+
+/** The sections `origami_guide({topic})` can return. Every byte of the full guide is
+    reachable through exactly one of them, so the default answer can point instead of paste. */
+export const GUIDE_TOPICS = ['contract', 'kinds', 'recipes', 'starters', 'issues', 'tools'] as const;
+export type GuideTopic = (typeof GUIDE_TOPICS)[number];
+
+/** The keys that make up the `contract` topic: the protocol prose an agent needs before it
+    can act at all. Everything NOT listed here belongs to one of the other five topics. */
+const CONTRACT_KEYS = [
+  'formatVersion',
+  'host',
+  'whatIsOrigami',
+  'foldTypes',
+  'contentModel',
+  'editProtocol',
+  'reviewProtocol',
+  'inertRules',
+  'capabilities',
+  'notAvailableHere',
+] as const;
+
+const pointer = (what: string, count: number, topic: GuideTopic): string =>
+  `${count} ${what} — omitted here to keep this answer small. Call origami_guide({ topic: "${topic}" }) for them in full.`;
+
+function fullGuide(): Record<string, unknown> {
   return {
     formatVersion: FORMAT_VERSION,
     host: 'Origami Folio Web — the deck is open IN THIS BROWSER TAB. Changes are applied to the in-memory Fold and re-rendered live. Finish with save_deck: it writes the real file when the page holds a writable handle for it, and otherwise keeps the working copy in the browser and reports that the human must press Save.',
@@ -69,7 +109,7 @@ export function origamiGuide(): Record<string, unknown> {
         {
           name: k.name,
           schema: k.schemaComment,
-          placement: PLACEMENT.get(k.key) === 'block' ? 'in-slide block' : 'whole fold',
+          placement: placementOf(k.key),
           howToAdd: howToAdd(k.key),
         },
       ])
@@ -97,7 +137,7 @@ export function origamiGuide(): Record<string, unknown> {
       cards: recipeCatalog(),
     },
     tools: {
-      origami_guide: 'This — the whole contract (optionally one kind).',
+      origami_guide: 'This — the whole contract (optionally one kind, or one topic: contract | kinds | recipes | starters | issues | tools).',
       create_deck: 'Create a new blank Fold and open it in this tab — call this first when building something new, then author it.',
       list_chunks: 'Table of contents of the open Fold.',
       read_chunk: 'Read one chunk to edit (payload + schema + template).',
@@ -114,7 +154,12 @@ export function origamiGuide(): Record<string, unknown> {
       set_fold_type: 'Set the reading experience (deck | scroll | ledger).',
       inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here.',
       undo: 'Reverse the last change to the open Fold (one tool call = one step; 50 deep, no redo, and it cannot cross a create_deck).',
+      move_chunk: 'Reorder the folds: move one chunk to a 0-based position. Order only — no content is touched.',
+      set_chunk_meta: 'Set one chunk\'s label / notes / hidden flag. hidden:false is the ONLY way to un-hide a fold that delete_chunk hid.',
+      set_deck_meta: 'Deck title and theme (theme name + CSS custom-property tokens).',
+      list_activity: 'The feed: what has been done to this Fold, newest first — one entry per tool call, with source, outcome and timing.',
       save_deck: 'Write the Fold to disk if the page holds a writable handle; otherwise persist the working copy and report that the human must press Save.',
+      export_deck: 'Hand YOURSELF the whole .origami.html text (the agent\'s copy). It saves nothing — save_deck is still the human\'s route to disk.',
       propose_chunk: 'Stage a chunk edit for review instead of applying it (a "document PR").',
       propose_add: 'Stage a new slide for review (the add equivalent of propose_chunk).',
       propose_delete: 'Stage a hide/delete for review.',
@@ -128,4 +173,61 @@ export function origamiGuide(): Record<string, unknown> {
       refresh_sources: 'Absent: connector credentials live in a trusted process, and a browser tab is not one.',
     },
   };
+}
+
+/** Every kind, with WHAT it is and WHERE it belongs — and no schema. The schemas are 70% of
+    the whole guide, and an agent that reads them all reads a dozen it will never use. */
+const kindIndex = (): Record<string, unknown> =>
+  Object.fromEntries(Object.values(KINDS).map((k) => [k.key, { name: k.name, placement: placementOf(k.key) }]));
+
+/**
+ * The guide, whole or by topic.
+ *
+ * With no topic this returns EVERY section, with three substitutions that cost an agent
+ * nothing it cannot fetch in one more call:
+ *   - `kinds` becomes an INDEX (name + placement per kind), with `kindsHowTo` carrying the
+ *     free-card steer once instead of once per kind, and naming the two routes to a schema;
+ *   - the recipe cards' html and the starter catalog become one-line pointers.
+ * Nothing is dropped: every one of them comes back in full from its own topic, and a cold
+ * agent still learns from the default answer what exists and how to ask for the rest.
+ */
+export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
+  const g = fullGuide();
+  if (topic === 'kinds') return { topic, kinds: g.kinds };
+  if (topic === 'issues') return { topic, knownIssues: g.knownIssues };
+  if (topic === 'tools') return { topic, tools: g.tools, notAvailableHere: g.notAvailableHere };
+  if (topic === 'recipes') return { topic, recipes: g.recipes };
+  if (topic === 'starters') return { topic, starters: g.starters };
+  if (topic === 'contract') {
+    const out: Record<string, unknown> = { topic };
+    for (const k of CONTRACT_KEYS) out[k] = g[k];
+    return out;
+  }
+  const recipes = g.recipes as { cards: Record<string, unknown> } & Record<string, unknown>;
+  const starters = g.starters as { folds: unknown[] } & Record<string, unknown>;
+  // built key by key rather than by spread-and-override, so kindsHowTo sits with the index it
+  // explains instead of at the far end of the answer
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(g)) {
+    if (key === 'kinds') {
+      out.kinds = kindIndex();
+      out.kindsHowTo = KINDS_HOW_TO;
+    } else if (key === 'starters') {
+      out.starters = { ...starters, folds: pointer('ready-made folds', starters.folds.length, 'starters') };
+    } else if (key === 'recipes') {
+      out.recipes = { ...recipes, cards: pointer('recipe cards', Object.keys(recipes.cards).length, 'recipes') };
+    } else {
+      out[key] = value;
+    }
+  }
+  out.topics = {
+    howToUse: 'Every section below is also available on its own: origami_guide({ topic }). Ask for one when you need the part this answer only points at.',
+    contract: 'The protocol: what a Fold is, the read→edit→write loop, the inert/active rules, the capability model.',
+    kinds: 'Every slide/block kind with its FULL markup schema and its own how-to-add line — the bodies behind the index above.',
+    recipes: 'Ready-to-paste free-card inners for the idioms the kind schemas name but do not spell out.',
+    starters: 'The whole-fold starters add_chunk({starter}) can drop in.',
+    issues: 'Defects and traps that were measured, with what was actually observed.',
+    tools: 'The tool catalog, plus the tools that exist in the stdio server and NOT here.',
+  };
+  return out;
 }

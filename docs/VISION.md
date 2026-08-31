@@ -46,13 +46,15 @@ one call). Origami stops being a thing you install and becomes a thing an agent 
 
 ## Where it stands (2026-08-31)
 
-- 24 tools registered; proven end-to-end on the **native** WebMCP surface of installed
-  stable Chrome 151 (no mocks, no Canary — `--enable-features=WebMCP` or
-  `chrome://flags/#enable-webmcp-testing`).
+- 29 tools registered. The 24 of them that existed on 2026-08-31 are proven end-to-end on
+  the **native** WebMCP surface of installed stable Chrome 151 (no mocks, no Canary —
+  `--enable-features=WebMCP` or `chrome://flags/#enable-webmcp-testing`); the five added
+  since (`move_chunk`, `set_chunk_meta`, `set_deck_meta`, `list_activity`, `export_deck`)
+  are unit-proven only, and the e2e suite's hard-coded tool counts still read 24.
 - An unattended agent has authored a 6-fold demo deck (venn, draw, swim-lane flow, chart,
   multi-column scroll) through Chrome's own `executeTool`; the artifact passes a hostile
   standalone audit.
-- 95 unit tests, 32 e2e (24 bundled Chromium + 8 installed Chrome), typecheck clean.
+- 125 unit tests, 32 e2e (24 bundled Chromium + 8 installed Chrome), typecheck clean.
 - Save semantics measured, not assumed — see "What a page can really save" in the README.
 
 ## Roadmap

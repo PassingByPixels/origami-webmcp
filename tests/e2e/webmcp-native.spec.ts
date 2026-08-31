@@ -162,7 +162,7 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
     expect(withFlag.navigator).toBe(true);
   });
 
-  test('the app registers all 24 tools on Chrome\'s own modelContext', async () => {
+  test('the app registers all 29 tools on Chrome\'s own modelContext', async () => {
     const launched = await launchChrome(FEATURE_ARGS);
     if ('skip' in launched) skipLoudly(launched.skip);
     const c = launched as Chrome;
@@ -170,19 +170,19 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
       await c.page.goto(URL);
 
       // the app's own status line, read from the real browser
-      await expect(c.page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 24 tools');
+      await expect(c.page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 29 tools');
 
       // and Chrome agrees: its registry holds them
       const tools = await c.page.evaluate(async () => {
         const t = await (document as any).modelContext.getTools();
         return t.map((x: any) => ({ name: x.name, hasDescription: typeof x.description === 'string' && x.description.length > 40, schema: typeof x.inputSchema }));
       });
-      expect(tools).toHaveLength(24);
+      expect(tools).toHaveLength(29);
       expect(tools.map((t: any) => t.name).sort()).toEqual([
         'accept_proposal', 'add_chunk', 'add_custom_fold', 'create_deck', 'define_block', 'delete_block',
-        'delete_chunk', 'get_kind_schema', 'inspect_render', 'list_block_defs', 'list_chunks', 'list_proposals', 'list_starters', 'origami_guide',
-        'propose_add', 'propose_chunk', 'propose_delete', 'read_chunk', 'reject_proposal', 'save_deck',
-        'set_fold_type', 'set_header', 'undo', 'write_chunk',
+        'delete_chunk', 'export_deck', 'get_kind_schema', 'inspect_render', 'list_activity', 'list_block_defs', 'list_chunks', 'list_proposals', 'list_starters',
+        'move_chunk', 'origami_guide', 'propose_add', 'propose_chunk', 'propose_delete', 'read_chunk', 'reject_proposal', 'save_deck',
+        'set_chunk_meta', 'set_deck_meta', 'set_fold_type', 'set_header', 'undo', 'write_chunk',
       ]);
       expect(tools.every((t: any) => t.hasDescription)).toBe(true);
       console.log(`  Chrome ${c.version} getTools() -> ${tools.length} tools; inputSchema arrives as "${tools[0].schema}"`);

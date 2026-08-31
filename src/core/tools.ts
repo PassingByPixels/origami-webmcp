@@ -14,17 +14,19 @@ import {
   validateBlockDef,
   validateDeck,
   validateSlideContent,
+  validateThemeTokens,
   type CompositeBlockDef,
   type DeckModel,
   type FoldType,
   type Op,
   type Proposal,
 } from '../../vendor/format-dist/index.js';
+import { ActivityLog } from './activity.js';
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
 import { bakeTableInner } from './bake.js';
 import type { DeckStore } from './deck-store.js';
 import { newDeckId, newProposalId, newSlideId, sha256Hex } from './ids.js';
-import { origamiGuide } from './guide.js';
+import { GUIDE_TOPICS, origamiGuide, type GuideTopic } from './guide.js';
 import { analyseRender, unmeasurable, type MeasureFn } from './inspect.js';
 import type { ProposalStore } from './proposal-store.js';
 import { fail, ok, refuse } from './result.js';
@@ -147,9 +149,35 @@ export interface ToolDeps {
   /** Injected by the page. Absent === this host cannot lay a deck out, so inspect_render
       reports that instead of guessing (see src/core/inspect.ts). */
   measure?: MeasureFn;
+  /** The log ToolRegistry.invoke writes into. createRegistry passes the registry's OWN log
+      here, so list_activity reads exactly what the hook recorded — never a second list. */
+  activity?: ActivityLog;
 }
 
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
+
+/** export_deck's ceiling. A Fold with embedded images runs to megabytes, and a tool result
+    that big is a context-window accident, not an export. */
+const EXPORT_MAX_BYTES = 4 * 1024 * 1024;
+
+/* The theme block the deck actually renders from. serializeModel re-projects
+   <style id="origami-theme-css"> from model.theme.tokens WHENEVER the theme op changed it
+   (vendor/format-dist/model.js, themeChanged -> replaceThemeCss(themeCssFromTokens(...))),
+   and it projects those tokens ALONE. Both a Fold this app mints and the shipped sample
+   carry manifest.theme = {name:'origami-default', tokens:{}} while their style block holds
+   the full 14-token :root — so a deck.theme op built on the model's empty token map would
+   wipe every custom property out of the file. These two read the tokens actually in force
+   so a patch (or a bare rename) merges onto them instead of erasing them. */
+const THEME_BLOCK_RE = /<style id="origami-theme-css"[^>]*>([\s\S]*?)<\/style>/;
+
+function themeTokensInForce(m: DeckModel): Record<string, string> | null {
+  if (Object.keys(m.theme.tokens).length > 0) return { ...m.theme.tokens };
+  const block = THEME_BLOCK_RE.exec(m.base.text);
+  if (!block) return null;
+  const tokens: Record<string, string> = {};
+  for (const decl of block[1]!.matchAll(/--([a-z][a-z0-9-]*)\s*:\s*([^;]+);/g)) tokens[decl[1]!] = decl[2]!.trim();
+  return Object.keys(tokens).length > 0 ? tokens : null;
+}
 
 /** A short, honest description of an op for the undo report: what kind of change it was and
     which chunk it touched. A batch names its parts (e.g. an edit that also granted a capability). */
@@ -163,24 +191,33 @@ function describeOp(op: Op): Record<string, unknown> {
 export function buildTools(deps: ToolDeps): ToolDef[] {
   const { deck, proposals } = deps;
   const runtimeJs = deps.runtimeJs ?? (() => loadRuntimeJs());
+  // createRegistry always passes the registry's log; the fallback only exists so buildTools
+  // stays callable on its own (nothing in the app does that).
+  const activity = deps.activity ?? new ActivityLog();
 
   return [
     {
       name: 'origami_guide',
       annotations: { readOnlyHint: true },
       description:
-        'START HERE. The whole Origami contract in one call — what a Fold is, the read→edit→write chunk protocol, every kind schema, the inert/active rules, the capability model, and the tool catalog. An agent with no prior knowledge of Origami should call this once on connect to learn the format. Pass a kind to get just that kind\'s schema.',
+        'START HERE. The whole Origami contract in one call — what a Fold is, the read→edit→write chunk protocol, every kind schema, the inert/active rules, the capability model, and the tool catalog. An agent with no prior knowledge of Origami should call this once on connect to learn the format. The default answer is COMPLETE except for two bulk payloads it points at instead of pasting: the recipe cards\' html and the starter catalog. Pass topic to get one section on its own — contract (the protocol) | kinds | recipes | starters | issues | tools — which is also how you fetch either of those two. Pass kind for just one kind\'s schema.',
       inputSchema: {
         type: 'object',
-        properties: { kind: { type: 'string', description: 'Optional: one kind to detail (else the whole contract)' } },
+        properties: {
+          kind: { type: 'string', description: 'Optional: one kind to detail (else the whole contract)' },
+          topic: { type: 'string', enum: GUIDE_TOPICS, description: 'Optional: one section only — contract | kinds | recipes | starters | issues | tools' },
+        },
       },
-      execute: async ({ kind }) => {
+      execute: async ({ kind, topic }) => {
         if (kind) {
           const spec = KINDS[kind];
           if (!spec) return fail(`unknown kind "${kind}"`, { availableKinds: Object.keys(KINDS) });
           return ok({ kind: spec.key, name: spec.name, schema: kindSchemaComment(kind) });
         }
-        return ok(origamiGuide());
+        if (topic !== undefined && !GUIDE_TOPICS.includes(topic)) {
+          return fail(`unknown topic "${topic}"`, { availableTopics: [...GUIDE_TOPICS] });
+        }
+        return ok(origamiGuide(topic as GuideTopic | undefined));
       },
     },
 
@@ -429,13 +466,99 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     },
 
     {
+      // NOT in the stdio server: its ops carry no reorder, so a deck's order was whatever the
+      // inserts made it. slide.move is in @origami/format and History inverts it, so a page can
+      // offer the reorder a human gets by dragging the rail.
+      name: 'move_chunk',
+      description:
+        'Move one chunk to a different place in the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. `position` is the 0-based index the chunk ENDS UP at, counting hidden folds, and the folds it passes shift by one to make room. Order only: no content, label or kind is touched, nothing is added and nothing is removed. A position outside the deck is refused rather than clamped, so a wrong index never silently means "last". Returns the whole new order. undo reverses it in one step.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
+          position: { type: 'integer', minimum: 0, description: '0-based index to move it to (0 = first)' },
+        },
+        required: ['chunkId', 'position'],
+      },
+      execute: async ({ chunkId, position }) => {
+        const listOrder = (m: DeckModel) => m.order.map((id) => ({ id, label: m.slides.get(id)!.label }));
+        // gated BEFORE mutate: mutate() dirties the Fold and re-renders it the moment it returns,
+        // so a refusal or a no-op that ran inside it would flip the Save button for no change
+        const before = deck.model();
+        if (!before.slides.has(chunkId)) return fail(`unknown chunk "${chunkId}" — call list_chunks`);
+        const from = before.order.indexOf(chunkId);
+        const last = before.order.length - 1;
+        // applyOp CLAMPS an out-of-range `to` (vendor/format-dist/model.js slide.move), which
+        // would answer "moved to 9" for a 3-fold deck. Refuse instead: an agent that miscounted
+        // needs to be told, not quietly obeyed.
+        if (!Number.isInteger(position) || position < 0 || position > last) {
+          return fail(`position ${position} is outside this Fold — it has ${before.order.length} chunk(s), so the valid range is 0 to ${last}`);
+        }
+        if (from === position) {
+          return ok({
+            from,
+            to: from,
+            order: listOrder(before),
+            note: `that chunk was already at index ${from} — nothing was changed, nothing was re-rendered, and there is nothing to undo.`,
+          });
+        }
+        const out = deck.mutate((m) => {
+          deck.apply(m, { t: 'slide.move', id: chunkId, to: position });
+          return { to: m.order.indexOf(chunkId), order: listOrder(m) };
+        });
+        return ok({
+          moved: chunkId,
+          from,
+          to: out.to,
+          order: out.order,
+          note: 'reordered in the open Fold and re-rendered — not yet on disk (the human saves).',
+        });
+      },
+    },
+
+    {
+      // NOT in the stdio server: it exposes slide.meta only through delete_chunk's hide. The
+      // patch op is the same one; this is the rest of it, and the only route back from hidden.
+      name: 'set_chunk_meta',
+      description:
+        'Set one chunk\'s label, speaker notes or hidden flag in the open Fold — this CHANGES THE DECK the human is looking at. `label` is the name in the sidebar and the tabs; `notes` is the presenter text that never renders on the fold; `hidden:true` takes the fold out of the show without deleting it, and `hidden:false` puts it back — that is the ONLY way to un-hide a fold that delete_chunk hid. Fields you do not pass are left alone (pass "" to clear a label or notes). The chunk\'s CONTENT and kind are not touched — use write_chunk for those. Supply at least one field. One call is one undo step.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
+          label: { type: 'string', maxLength: 200, description: 'Sidebar/tab label ("" clears it)' },
+          hidden: { type: 'boolean', description: 'true takes the fold out of the show; false puts it back' },
+          notes: { type: 'string', description: 'Speaker notes — never rendered on the fold ("" clears them)' },
+        },
+        required: ['chunkId'],
+      },
+      execute: async ({ chunkId, label, hidden, notes }) => {
+        if (label === undefined && hidden === undefined && notes === undefined) {
+          return fail('nothing to set — supply at least one of label, hidden or notes');
+        }
+        const out = deck.mutate((m) => {
+          const slide = m.slides.get(chunkId);
+          if (!slide) refuse(`unknown chunk "${chunkId}" — call list_chunks`);
+          const patch: Extract<Op, { t: 'slide.meta' }>['patch'] = {};
+          if (label !== undefined) patch.label = label;
+          if (hidden !== undefined) patch.hidden = hidden;
+          if (notes !== undefined) patch.notes = notes;
+          deck.apply(m, { t: 'slide.meta', id: chunkId, patch });
+          const after = m.slides.get(chunkId)!;
+          return { label: after.label, hidden: after.hidden, notes: after.notes };
+        });
+        return ok({ chunkId, ...out, note: 'applied to the open Fold and re-rendered — not yet on disk (the human saves).' });
+      },
+    },
+
+    {
       // destructiveHint does NOT reach a Chrome-hosted agent (Chrome 151 drops it and keeps only
       // readOnlyHint), so "removes the slide template entirely" in the description below is the
       // load-bearing warning, not this annotation.
       name: 'delete_chunk',
       annotations: { destructiveHint: true },
       description:
-        'Hide or delete a slide in the open Fold — this CHANGES THE DECK the human is looking at. Default mode "hide" keeps the slide in the file but out of the show (the recoverable path — prefer it); mode "delete" removes the slide template entirely. Use propose_delete when the human should approve first.',
+        'Hide or delete a slide in the open Fold — this CHANGES THE DECK the human is looking at. Default mode "hide" keeps the slide in the file but out of the show (the recoverable path — prefer it); mode "delete" removes the slide template entirely. A hidden fold comes back with set_chunk_meta({chunkId, hidden:false}); a deleted one only comes back through undo. Use propose_delete when the human should approve first.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -585,6 +708,57 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     },
 
     {
+      // NOT in the stdio server: it takes the title at create_deck and never revisits it, and it
+      // exposes no theme control at all.
+      name: 'set_deck_meta',
+      description:
+        'Set the deck-level title and/or theme of the open Fold — this CHANGES THE DECK the human is looking at and re-renders it. `title` is the name in the manifest and the header bar; it does NOT rename the file (the suggested filename was fixed when the Fold was created, and only the human choosing "Save as…" changes where bytes land). `themeName` renames the theme; on its own it changes the label, NOT the colours — pass themeTokens for those. `themeTokens` patches CSS custom properties: the tokens you name are merged onto the ones the deck is already using, so the rest survive. The tokens the deck stylesheet actually reads are bg, paper, ink, ink-soft, rule, rule-soft, accent, tint-a, tint-b, chrome, chrome-ink, chrome-soft, font-display and font-body, plus chrome-mark, chrome-mark-h and chrome-pad for the masthead bar; a name outside that set is stored and simply never read. Values are colours or font stacks — braces, semicolons, angle brackets, @ and url() are rejected, and nothing is applied when they are. Supply at least one of the three. One call is one undo step.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', maxLength: 200, description: 'Deck title (manifest + header bar); does not rename the file' },
+          themeName: { type: 'string', maxLength: 60, description: 'Theme name, e.g. "origami-default" — a label, not a restyle' },
+          themeTokens: { type: 'object', description: 'CSS custom properties to patch, e.g. {"accent":"#3F7268"} — merged onto the theme in force' },
+        },
+      },
+      execute: async ({ title, themeName, themeTokens }) => {
+        if (title === undefined && themeName === undefined && themeTokens === undefined) {
+          return fail('nothing to set — supply title, themeName and/or themeTokens');
+        }
+        // gate the tokens BEFORE mutate: applyOp validates them too, but it would throw halfway
+        // through a batch whose deck.title had already landed
+        if (themeTokens !== undefined) {
+          const violations = validateThemeTokens(themeTokens);
+          if (violations.length > 0) return fail('invalid theme tokens — nothing was changed', { violations });
+        }
+        const out = deck.mutate((m) => {
+          const ops: Op[] = [];
+          if (title !== undefined) {
+            const next = String(title).trim();
+            if (!next) refuse('title must not be empty — nothing was changed');
+            ops.push({ t: 'deck.title', title: next });
+          }
+          if (themeName !== undefined || themeTokens !== undefined) {
+            const base = themeTokensInForce(m);
+            if (!base) {
+              refuse(
+                'this Fold carries no readable theme tokens (no <style id="origami-theme-css"> block to read them from), so a theme change would leave it with only the tokens named here — nothing was changed. Pass the COMPLETE token set if that is what you intend.'
+              );
+            }
+            ops.push({ t: 'deck.theme', name: themeName ?? m.theme.name, tokens: { ...base, ...(themeTokens ?? {}) } });
+          }
+          deck.apply(m, ops.length > 1 ? { t: 'batch', ops } : ops[0]!);
+          return { title: m.title, theme: { name: m.theme.name, tokens: m.theme.tokens } };
+        });
+        return ok({
+          title: out.title,
+          theme: { name: out.theme.name, tokens: out.theme.tokens },
+          note: 'applied to the open Fold and re-rendered — not yet on disk (the human saves).',
+        });
+      },
+    },
+
+    {
       name: 'set_fold_type',
       description:
         'Set the deck\'s reading experience (foldType). "deck" (default) = the card-stage — one fold at a time with tabs/pips, presentable. "scroll" = a continuous-reading document — every fold stacked and read top to bottom (pair it with document-kind folds for a long-form report). "ledger" is reserved. This CHANGES THE OPEN FOLD. "deck" is the default and writes no key, so the file stays byte-stable.',
@@ -667,6 +841,57 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           remainingUndoSteps: deck.undoDepth(),
           chunks: deck.model().order.length,
           note: 'reversed in the open Fold and re-rendered — the file on disk is unchanged until save_deck runs again. There is no redo.',
+        });
+      },
+    },
+
+    {
+      name: 'list_activity',
+      annotations: { readOnlyHint: true },
+      // NOT in the stdio server: a process that exits between calls has no session to keep a
+      // feed for. One entry is recorded per call at ToolRegistry.invoke, so this is every route
+      // into the tools, not just yours.
+      description:
+        'What has been DONE in this tab, newest first — one entry per tool call, whoever made it. Each entry carries seq, at (ISO), source (agent | human | console | replay), tool, ok plus the error when it failed, the chunk or proposal it targeted, ms, and a one-line summary. The summary is deliberately thin: it names the tool and its scalar arguments and NEVER carries slide html, so reading the feed can never cost what reading the deck costs — use read_chunk or export_deck for content. Use it to see what a human did while you were working, to find the call that broke something, or to check your own trail. It is NOT the undo stack (undo keeps its own 50 steps and this cannot drive it) and it is not part of the Fold: nothing here is saved to disk, and a page reload starts an empty log. Only the 500 most recent entries are held; a gap in seq means older entries were dropped. Your own call is recorded after this answer is built, so it never appears in its own result.',
+      inputSchema: {
+        type: 'object',
+        properties: { limit: { type: 'integer', minimum: 1, description: 'How many of the newest entries to return (default 50, capped at the 500 held)' } },
+      },
+      execute: async ({ limit }) => {
+        if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+          return fail(`limit must be a positive integer — got ${JSON.stringify(limit)}`);
+        }
+        const entries = activity.recent(limit ?? 50);
+        return ok({ held: activity.count(), returned: entries.length, entries });
+      },
+    },
+
+    {
+      name: 'export_deck',
+      annotations: { readOnlyHint: true },
+      // NOT in the stdio server: there, the file on disk WAS the deck, so an agent could read it
+      // back itself. In a tab the bytes exist nowhere the agent can reach, and save_deck reports
+      // an outcome rather than content.
+      description:
+        'Hand YOURSELF the complete .origami.html text of the open Fold — every byte, as a string in the result. This is the AGENT\'s copy: use it to hash the file, diff it, quote a fragment, or pass it on to something else. It writes NOTHING, saves NOTHING and changes NOTHING; the human still has no file until save_deck runs, so calling this INSTEAD of save_deck ends the job with the work stranded in your context. The bytes are the deck exactly as it stands, byte-identical to what the page renders; save_deck stamps a fresh manifest.modified and this does not, so the two differ by that one field after a save. A Fold over 4 MB (embedded images will do it) is refused with its size rather than returned — that is a context-window accident, not an export; use save_deck.',
+      inputSchema: { type: 'object', properties: {} },
+      execute: async () => {
+        const text = deck.serialize();
+        const bytes = utf8Bytes(text);
+        if (bytes > EXPORT_MAX_BYTES) {
+          return fail(
+            `this Fold is ${bytes} bytes, over the ${EXPORT_MAX_BYTES}-byte export limit — nothing was returned. Call save_deck instead: it writes the same bytes without putting them through your context.`,
+            { bytes, limit: EXPORT_MAX_BYTES }
+          );
+        }
+        const m = deck.model();
+        return ok({
+          name: deck.name(),
+          title: m.title,
+          slides: m.order.length,
+          bytes,
+          text,
+          note: 'this is YOUR copy — nothing was written. The human still needs save_deck.',
         });
       },
     },
@@ -889,9 +1114,10 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
   ];
 }
 
-/** Build the registry with every tool registered. */
+/** Build the registry with every tool registered. The registry's activity log is handed to
+    the tools, so list_activity reads the very list `invoke` writes — one log, not two. */
 export function createRegistry(deps: ToolDeps): ToolRegistry {
-  const registry = new ToolRegistry();
-  for (const t of buildTools(deps)) registry.register(t);
+  const registry = new ToolRegistry(deps.activity);
+  for (const t of buildTools({ ...deps, activity: registry.activity })) registry.register(t);
   return registry;
 }

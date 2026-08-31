@@ -1,3 +1,4 @@
+import { ActivityLog, type ActivitySource } from './activity.js';
 import { guard, type ToolResult } from './result.js';
 
 /** The subset of JSON Schema the ported tools use. WebMCP takes JSON Schema directly, so the
@@ -53,6 +54,17 @@ export class ToolRegistry {
   private readonly tools = new Map<string, ToolDef>();
   private readonly listeners = new Set<() => void>();
 
+  /**
+   * Every call through `invoke` lands here — the ONE hook, at the ONE call path, so a tool
+   * driven from the console records exactly as the same tool driven by a WebMCP agent does.
+   * The page pushes its own events (open, save, a card accepted by hand) into the same log.
+   */
+  readonly activity: ActivityLog;
+
+  constructor(activity: ActivityLog = new ActivityLog()) {
+    this.activity = activity;
+  }
+
   register(def: ToolDef): void {
     this.tools.set(def.name, { ...def, execute: guard(def.execute) });
     for (const l of this.listeners) l();
@@ -66,15 +78,24 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
-  async invoke(name: string, args: unknown): Promise<ToolResult> {
+  /**
+   * Run one tool and record the call. `source` says who is driving: an MCP host passes
+   * nothing (a tool invocation with no stated source IS an agent call), while the page
+   * passes 'console' or 'replay' for calls a human started. A call to a tool that does not
+   * exist is recorded too — an agent guessing at names is exactly what the feed is for.
+   */
+  async invoke(name: string, args: unknown, source: ActivitySource = 'agent'): Promise<ToolResult> {
+    const started = Date.now();
     const tool = this.tools.get(name);
-    if (!tool) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: `unknown tool "${name}"`, availableTools: [...this.tools.keys()] }, null, 2) }],
-        isError: true,
-      };
-    }
-    return tool.execute(args);
+    const result = tool
+      ? await tool.execute(args)
+      : {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: `unknown tool "${name}"`, availableTools: [...this.tools.keys()] }, null, 2) }],
+          isError: true,
+        };
+    // recorded AFTER the answer is built, so list_activity never appears in its own result
+    this.activity.record({ tool: name, args, result, source, ms: Date.now() - started });
+    return result;
   }
 
   subscribe(fn: () => void): () => void {

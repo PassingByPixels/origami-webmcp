@@ -32,10 +32,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('24');
+  await expect(page.getByTestId('tool-count')).toHaveText('29');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('24 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('29 tools registered locally');
   // an agent can run the whole loop, review included
   for (const name of ['propose_chunk', 'accept_proposal', 'reject_proposal', 'save_deck', 'define_block', 'add_custom_fold']) {
     await expect(page.getByTestId(`tool-${name}`), name).toBeVisible();
@@ -176,7 +176,8 @@ test('a guide recipe, copied verbatim, mounts and runs in the real deck', async 
      reading 42 in the frame means the runtime found the block and animated it. An agent that
      had guessed and put "42" in the text node would see it overwritten with 0. */
   await page.goto('/index.html');
-  const guide = await invoke(page, 'origami_guide', {});
+  // the default guide only points at the recipe cards; an agent fetches them by topic
+  const guide = await invoke(page, 'origami_guide', { topic: 'recipes' });
   const recipe = guide.body.recipes.cards['stat-cards'];
   expect(recipe.html).toContain('data-count-to="42"');
 

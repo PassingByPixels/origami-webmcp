@@ -9,7 +9,7 @@ Open an Origami **Fold** (`.origami.html`) in the browser, hand Origami's author
 in-page AI agent over **WebMCP**, and save the result back to disk. No server, no account, no
 upload — the Fold is parsed, edited, rendered and saved entirely in the tab.
 
-**An agent can run the whole job unattended.** All 22 tools are on the WebMCP surface: an agent
+**An agent can run the whole job unattended.** All 29 tools are on the WebMCP surface: an agent
 creates the deck, authors every kind, stages proposals, resolves them, and calls `save_deck`
 without a human ever clicking anything. When a human *is* watching, staged proposals also render
 as review cards they can Accept or Reject — the same code path, a second front door.
@@ -128,7 +128,7 @@ or *not available (console only)* — it never claims a connection it does not h
    and relaunch. (Flag confirmed at
    [developer.chrome.com/docs/ai/webmcp](https://developer.chrome.com/docs/ai/webmcp).)
 3. Load `http://127.0.0.1:5173`. The status pill now reads
-   **“WebMCP: connected via document.modelContext — 22 tools”**.
+   **“WebMCP: connected via document.modelContext — 29 tools”**.
 4. To call the tools, install the **WebMCP – Model Context Tool Inspector** extension
    ([Chrome Web Store](https://chromewebstore.google.com/detail/gbpdfapgefenggkahomfgkhfehlcenpd),
    [source](https://github.com/beaufortfrancois/model-context-tool-inspector)). Its side panel lists
@@ -139,7 +139,7 @@ or *not available (console only)* — it never claims a connection it does not h
 Or drive them straight from DevTools — this is the real API, no extension required:
 
 ```js
-const tools = await document.modelContext.getTools();          // 22 of them
+const tools = await document.modelContext.getTools();          // 29 of them
 const t = tools.find((x) => x.name === 'create_deck');
 await document.modelContext.executeTool(t, JSON.stringify({ title: 'Hello' }));
 ```
@@ -152,7 +152,9 @@ you do not need HTTPS.
 `tests/e2e/webmcp-native.spec.ts` proves it on a real browser: it launches the **installed stable
 Chrome** (`channel: 'chrome'`) in a throwaway profile with WebMCP enabled from the command line,
 and drives the app through Chrome's own `document.modelContext.getTools()` / `.executeTool()` —
-no mock host anywhere in that file. Last run, on **Chrome 151.0.7922.174**:
+no mock host anywhere in that file. Last run, on **Chrome 151.0.7922.174** — taken before
+`move_chunk`, `set_chunk_meta`, `set_deck_meta`, `list_activity` and `export_deck` were added, so
+the tool count below reads 24 and not 29; it is left as measured rather than edited to match:
 
 ```
   no flags                  -> {"document":false,"navigator":false,"secureContext":true}
@@ -187,8 +189,9 @@ nothing is lost: the test console does everything.
 src/core/          the deck + tools; no DOM, so vitest exercises exactly what ships
   deck-store.ts      the ONE in-memory DeckModel; mutate() applies ops and notifies views
   proposal-store.ts  the review queue + accept/reject, shared by the cards and the tools
-  tools.ts           the 22 tool defs: 21 ported from vendor/mcp-reference/server.ts, plus undo
+  tools.ts           the 29 tool defs: 21 ported from vendor/mcp-reference/server.ts, 8 web-only
   registry.ts        ToolRegistry + the document/navigator.modelContext feature-detect shim
+  activity.ts        the ActivityLog every registry.invoke writes one entry into
   guide.ts           origami_guide's payload, built from the live KINDS/FORMAT_VERSION
   blank-deck.ts      create_deck's assembler (dynamic-imports @origami/runtime)
   starters.ts        FREE_STARTER_INNER / TABLE_STARTER_INNER, verbatim from the monorepo
@@ -231,8 +234,8 @@ this page, no storage, and no way to read the file you opened.
 
 ## The tools
 
-Every name, description and schema is ported from `vendor/mcp-reference/server.ts`. Two deviations
-apply to **all** of them:
+Every name, description and schema is ported from `vendor/mcp-reference/server.ts`, bar the eight
+web-only tools marked below. Two deviations apply to **all** of them:
 
 * **No `deck` path argument.** One Fold is open in the tab. There is no served folder and no path
   handle, so the parameter would be unanswerable.
@@ -241,7 +244,7 @@ apply to **all** of them:
 
 | Tool | Further deviation from the stdio server |
 |---|---|
-| `origami_guide` | Description verbatim. Payload adds `host`, `reviewProtocol`, `notAvailableHere` and **`recipes`**; `editProtocol` step 1 drops the path handle, step 4b covers `dryRun`, and step 5 explains `save_deck`'s two outcomes. |
+| `origami_guide` | Description verbatim. Payload adds `host`, `reviewProtocol`, `notAvailableHere` and **`recipes`**; `editProtocol` step 1 drops the path handle, step 4b covers `dryRun`, and step 5 explains `save_deck`'s two outcomes. Adds a **`topic`** argument (`contract` \| `kinds` \| `recipes` \| `starters` \| `issues` \| `tools`) that returns one section on its own. The default answer is the whole guide with three abridgements: `kinds` becomes an INDEX (name + placement per kind, no schemas) with `kindsHowTo` stating the free-card steer **once** instead of once per kind and naming the two routes to a schema, and the recipe cards' html and the starter catalog become one-line pointers. Nothing is dropped — each comes back in full from its own topic — and the default costs **15,310 bytes against 56,265** for everything inlined (measured by a unit test, which prints all eight figures on every run). |
 | `get_kind_schema` | None — verbatim. |
 | `create_deck` | Mints the deck **into the tab**, not onto disk: no served folder, no filename-collision loop. Adds a guard that refuses when the open Fold has unsaved changes, plus **`discard: true`** to override it (the stdio version creates a new file and can destroy nothing; this one replaces what is on screen, so an unattended agent has to say so out loud). `foldType` deck / scroll / ledger is unchanged. |
 | `list_chunks` | “Read fresh from the file every time” → “always reflects what the human is looking at”. |
@@ -249,7 +252,12 @@ apply to **all** of them:
 | `write_chunk` | `force` dropped — there is no second writer to race in a tab. Adds one sentence pointing at `propose_chunk`. Result drops `written`/`bytes`, adds `note`. |
 | `add_chunk` | None beyond the two global ones. |
 | `add_custom_fold` | Description verbatim bar the write clause. |
-| `delete_chunk` | Adds one sentence pointing at `propose_delete`. |
+| `delete_chunk` | Adds one sentence pointing at `propose_delete`, and one naming `set_chunk_meta({hidden:false})` as the way back from a hide. |
+| `move_chunk` | **Not in the stdio server at all.** Its op set carries no reorder, so a deck's order was whatever the inserts made it. `slide.move` is in `@origami/format` and `History` inverts it, so a page can offer the reorder a human gets by dragging the rail. `applyOp` **clamps** an out-of-range index; this refuses instead, because "moved to 9" on a 3-fold deck is an answer that lies. A move to the index the chunk is already at is reported, not applied — no dirty flag, no phantom undo step. |
+| `set_chunk_meta` | **Not in the stdio server at all.** It reaches `slide.meta` only through `delete_chunk`'s hide. This is the rest of that op — label, notes, hidden — and `hidden:false` is the **only** route back from a hidden fold on this surface. Content and kind stay `write_chunk`'s job. |
+| `set_deck_meta` | **Not in the stdio server at all.** Title (after creation) and theme. The trap it exists to avoid: `deck.theme` carries name **and** tokens together, `serializeModel` re-projects `<style id="origami-theme-css">` from those tokens **alone**, and both a Fold this app mints and the shipped sample carry `manifest.theme.tokens = {}` while their `:root` block holds the full set — so a naive patch (or even a bare rename) would strip every custom property out of the file. The tool reads the tokens actually in force out of that block and merges onto them. Token names are read from the vendored runtime, never invented: the four presets in `vendor/runtime-dist/themes.d.ts` set `bg`, `paper`, `ink`, `ink-soft`, `rule`, `rule-soft`, `accent`, `tint-a`, `tint-b`, `chrome`, `chrome-ink`, `chrome-soft`, `font-display`, `font-body`, and the deck CSS additionally reads `--chrome-mark`, `--chrome-mark-h` and `--chrome-pad`. |
+| `list_activity` | **Not in the stdio server at all.** A process that exits between calls has no session to keep a feed for. `ToolRegistry.invoke` records one entry per call — so the console, the WebMCP shim and a replay all land in one list — with `seq`, `at`, `source` (`agent` \| `human` \| `console` \| `replay`), `tool`, `ok`/`error`, `targetId`, `ms` and a one-line summary built from the **scalar arguments only**: no slide html ever reaches the feed. 500 entries, oldest dropped; a gap in `seq` says so. Not persisted, and not the undo stack. |
+| `export_deck` | **Not in the stdio server at all.** There the file on disk *was* the deck, so an agent could read it back itself; in a tab the bytes exist nowhere it can reach, and `save_deck` reports an outcome rather than content. Returns the complete `.origami.html` text — byte-identical to what the page renders — plus its size. It is the **agent's** copy and saves nothing: `save_deck` is still the only route to the human's disk, and the description says so, because an agent that ended on this one would leave the work stranded in its own context. Over 4 MB it refuses with the size instead of returning the payload. |
 | `define_block` · `list_block_defs` · `delete_block` | Descriptions verbatim bar the write clause. |
 | `set_header` · `set_fold_type` | None beyond the two global ones. |
 | `list_starters` + `add_chunk(starter)` | **Not in the stdio server at all.** Its starters are two inner strings picked by `kind`, with no catalog. These are the Studio rail's whole-fold starters — roadmap, flowchart, node graph, drawing, venn, ledger — each a free card holding one seeded data block, ported verbatim from `packages/studio-core/src/lib/palette.ts`. `starter` also works on `propose_add`, and is refused alongside `html`/`block` rather than silently winning. |
@@ -263,8 +271,9 @@ apply to **all** of them:
 
 ### Tool annotations, and what Chrome does with them
 
-Eight tools carry `readOnlyHint` (`origami_guide`, `get_kind_schema`, `list_chunks`, `read_chunk`,
-`list_block_defs`, `list_starters`, `list_proposals`, `inspect_render`) and three carry
+Ten tools carry `readOnlyHint` (`origami_guide`, `get_kind_schema`, `list_chunks`, `read_chunk`,
+`list_block_defs`, `list_starters`, `list_proposals`, `list_activity`, `inspect_render`,
+`export_deck`) and three carry
 `destructiveHint` (`create_deck`, `delete_chunk`, `delete_block`). A unit test calls every
 read-only tool against a real deck and byte-compares the Fold before and after, so the hint has
 to be true rather than merely declared.
