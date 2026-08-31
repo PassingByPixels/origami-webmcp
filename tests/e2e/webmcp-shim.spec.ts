@@ -34,7 +34,7 @@ function installFakeHost(page: Page, where: Array<'document' | 'navigator'>) {
 
 test('registers every tool on document.modelContext and reports it', async ({ page }) => {
   await installFakeHost(page, ['document']);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
 
   await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 29 tools');
 
@@ -72,14 +72,14 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
 
 test('falls back to navigator.modelContext when document has none', async ({ page }) => {
   await installFakeHost(page, ['navigator']);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 29 tools');
   expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(29);
 });
 
 test('prefers document.modelContext when BOTH surfaces exist', async ({ page }) => {
   await installFakeHost(page, ['document', 'navigator']);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 29 tools');
   // registered once, on the spec surface only — never double-registered across both
   expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(29);
@@ -88,7 +88,7 @@ test('prefers document.modelContext when BOTH surfaces exist', async ({ page }) 
 
 test('a tool called through the host edits the deck the human is watching', async ({ page }) => {
   await installFakeHost(page, ['document']);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('mcp-status')).toContainText('connected');
 
   // the "agent" drives the registered execute() callbacks — never the page's own UI
@@ -122,7 +122,7 @@ test('a tool called through the host edits the deck the human is watching', asyn
 
 test('a HUMAN can resolve a proposal an agent staged, by clicking the card', async ({ page }) => {
   await installFakeHost(page, ['document']);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('mcp-status')).toContainText('connected');
 
   const call = agentCaller(page);
@@ -146,7 +146,7 @@ test('a HUMAN can resolve a proposal an agent staged, by clicking the card', asy
 
 test('an AGENT can resolve its own proposal with accept_proposal — no click anywhere', async ({ page }) => {
   await installFakeHost(page, ['document']);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('mcp-status')).toContainText('connected');
 
   const call = agentCaller(page);

@@ -16,12 +16,12 @@ const foldIndex = (page: Page) => page.getByTestId('preview').getAttribute('data
 const replayRows = (page: Page) => page.locator('[data-testid="activity-row"][data-source="replay"]');
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.evaluate(() => localStorage.clear());
 });
 
 test('the landing says what a Fold is and offers the three ways in', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   const empty = page.getByTestId('empty-state');
   await expect(empty).toBeVisible();
   await expect(empty.locator('h1')).toHaveText('Open a Fold.');
@@ -45,7 +45,7 @@ test('the landing fits its column at 1440 and at 860, with no sideways scroll', 
      column it has to fit in is ~500px — the row must WRAP rather than push the page sideways. */
   for (const width of [1440, 860]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto('/index.html');
+    await page.goto('/folio/index.html');
     await expect(page.getByTestId('empty-state')).toBeVisible();
 
     const overflow = await page.evaluate(() => ({
@@ -72,7 +72,7 @@ test('the landing never grows over the tool console', async ({ page }) => {
      pushed itself down over the console — and, being position:relative, painted on top of the
      tool list and ate every click on it. A short window with the console open is where it bit. */
   await page.setViewportSize({ width: 1280, height: 700 });
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.getByTestId('console-toggle').click();
   await expect(page.getByTestId('tool-list')).toBeVisible();
 
@@ -86,7 +86,7 @@ test('the landing never grows over the tool console', async ({ page }) => {
 });
 
 test('the replay builds the recorded deck, and every call lands in the feed as a replay', async ({ page }) => {
-  await page.goto('/index.html?replayDelay=0');
+  await page.goto('/folio/index.html?replayDelay=0');
   await page.getByTestId('btn-replay').click();
 
   await expect(page.getByTestId('app-message')).toContainText(
@@ -116,7 +116,7 @@ test('the preview follows the replay to the fold each call touched', async ({ pa
      srcdoc swaps land faster than the frame can load and report its position, so the follow
      has nothing to answer. That is the pre-existing bridge behaviour, not the replay's, and
      0 ms is not a pace anyone watches — so the follow is proven here at a real one. */
-  await page.goto('/index.html?replayDelay=120');
+  await page.goto('/folio/index.html?replayDelay=120');
   await page.getByTestId('btn-replay').click();
 
   // it leaves the cover while the deck is still being written
@@ -127,7 +127,7 @@ test('the preview follows the replay to the fold each call touched', async ({ pa
 });
 
 test('Stop ends the replay where it stands and keeps what it built', async ({ page }) => {
-  await page.goto('/index.html?replayDelay=400');
+  await page.goto('/folio/index.html?replayDelay=400');
   await expect(page.getByTestId('replaybar')).toBeHidden();
   await page.getByTestId('btn-replay').click();
 

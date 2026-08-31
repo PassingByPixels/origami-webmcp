@@ -124,7 +124,7 @@ async function nativeTool(page: Page, name: string, args: unknown = {}): Promise
 const preview = (page: Page) => page.frameLocator('[data-testid="preview"]').locator('body');
 const deckTextNow = async (page: Page): Promise<string> => (await page.getByTestId('preview').getAttribute('srcdoc')) ?? '';
 
-const URL = 'http://127.0.0.1:5174/index.html';
+const URL = 'http://127.0.0.1:5174/folio/index.html';
 // A page with no app on it: proves the surface is the BROWSER's, not something this app defines.
 const BLANK = 'http://127.0.0.1:5174/favicon.svg';
 

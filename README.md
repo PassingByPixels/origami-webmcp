@@ -14,12 +14,19 @@ creates the deck, authors every kind, stages proposals, resolves them, and calls
 without a human ever clicking anything. When a human *is* watching, staged proposals also render
 as review cards they can Accept or Reject — the same code path, a second front door.
 
-It is a static site: `npm run build` produces a `dist/` you can drop on any static host
-(origami.gratis included). Zero runtime npm dependencies, no framework, and nothing is fetched
-from a CDN. `npm run build` prints every external URL string it finds in the bundle; the ones it
-lists are the SVG namespace (`http://www.w3.org/2000/svg`), the video-embed URL TEMPLATES the
-deck runtime builds when a Fold carries a video block, and one `origamilabs.nl` link. None of
-them loads app code, and none is fetched unless a deck asks for it.
+It is a static site: `npm run build` produces the whole of **origami.gratis** in one `dist/` you
+can drop on any static host — the flower home page at the root, `privacy/`, `design/`, and the
+Folio app under `folio/` ([docs/SITE.md](docs/SITE.md)). Every path is relative, so the same zip
+hosts at a domain root or a subpath.
+
+Zero runtime npm dependencies, no framework, and nothing is fetched from a CDN — the build FAILS
+if that changes. `src/site/guard.mjs` holds the rule: in app code (`.js`/`.css`) any `https://` is
+an offence; on a page an external URL is allowed only as an `<a href>` a human clicks, and a
+`src=`, `<link href>` or `@import` to the network is an offence wherever it appears. The only
+exceptions are an exact allowlist of strings that arrive inside the vendored `@origami` bundles:
+the SVG namespace (`http://www.w3.org/2000/svg`), the video-embed URL TEMPLATES the deck runtime
+builds when a Fold carries a video block, and one `origamilabs.nl` link. None of them loads app
+code, and none is fetched unless a deck asks for it.
 
 ---
 
@@ -31,7 +38,8 @@ npm run build
 npm run serve
 ```
 
-Then open **http://127.0.0.1:5173** in any modern browser. `npm run serve` rebuilds on save and
+Then open **http://127.0.0.1:5173** in any modern browser for the site, or
+**http://127.0.0.1:5173/folio/** to go straight to the app. `npm run serve` rebuilds on save and
 serves `dist/`; if you only want to serve an existing build, `node tests/e2e/static-server.mjs 5174`
 does that with no watcher.
 
@@ -218,7 +226,14 @@ src/app/           the page
   index.html         the shell
   styles.css         the brand
 
-build.mjs          esbuild -> dist/ (+ a dist size and external-URL report)
+src/site/          the site around the tools (docs/SITE.md) — build-time only, never shipped
+  parts.mjs          the ONE petal config + the flower SVG, the tool cards, header, footer
+  guard.mjs          the no-external-URL rule, shared by build.mjs and its unit test
+  index.html         home; privacy.html; design.html — markers filled by parts.mjs
+  site.css           the site's own sheet (the :root tokens are spliced in from styles.css)
+
+build.mjs          esbuild -> dist/folio/ + the static pages -> dist/
+                   (dist size report; FAILS the build on an external URL reference)
 tests/fixtures.ts  venn + flow slide markup shared by both suites
 tests/unit/        vitest, against the real vendored format + calc
 tests/e2e/         playwright + a 40-line static server over dist/

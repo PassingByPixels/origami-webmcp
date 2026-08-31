@@ -69,7 +69,7 @@ async function main() {
   page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()));
 
   try {
-    await page.goto(`http://127.0.0.1:${PORT}/index.html`);
+    await page.goto(`http://127.0.0.1:${PORT}/folio/index.html`);
 
     const pill = await page.getByTestId('mcp-status').textContent();
     if (!/connected via/.test(pill ?? '')) {

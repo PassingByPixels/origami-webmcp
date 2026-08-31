@@ -24,9 +24,11 @@ createServer(async (req, res) => {
     return;
   }
   try {
-    if ((await stat(file)).isDirectory()) throw new Error('dir');
-    res.writeHead(200, { 'content-type': TYPES[extname(file)] ?? 'application/octet-stream' });
-    res.end(await readFile(file));
+    // A directory serves its index.html, the way every static host does — the site links to
+    // `folio/`, `privacy/` and `design/`, not to the file inside them.
+    const target = (await stat(file)).isDirectory() ? join(file, 'index.html') : file;
+    res.writeHead(200, { 'content-type': TYPES[extname(target)] ?? 'application/octet-stream' });
+    res.end(await readFile(target));
   } catch {
     res.writeHead(404, { 'content-type': 'text/plain' }).end('not found');
   }

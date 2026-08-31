@@ -54,14 +54,14 @@ const asAgent = (page: Page, name: string, args: unknown = {}) =>
 const foldIndex = (page: Page) => page.getByTestId('preview').getAttribute('data-fold-index');
 
 async function openSample(page: Page) {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.getByTestId('btn-sample').click();
   await expect(page.getByTestId('preview')).toBeVisible();
   await expect.poll(() => foldIndex(page), { timeout: 10_000 }).toBe('0');
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.evaluate(() => localStorage.clear());
 });
 
@@ -181,7 +181,7 @@ test('clicking a feed entry that names a fold takes the preview there', async ({
 });
 
 test('the popovers open, close on a second click, on Escape, and on a click outside', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   const dot = page.getByTestId('mcp-status');
   const card = page.getByTestId('mcp-popover');
   const menu = page.locator('#save-popover');
@@ -229,7 +229,7 @@ test('the preview keeps the reader on their fold across a re-render', async ({ p
 
 test('an AGENT write carries the preview to the fold it changed', async ({ page }) => {
   await installHost(page);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.getByTestId('btn-sample').click();
   await expect.poll(() => foldIndex(page), { timeout: 10_000 }).toBe('0');
 
@@ -247,7 +247,7 @@ test('the preview bridge is in the srcdoc and in NOTHING that gets saved', async
   /* The bridge is a script this app injects. If a byte of it ever reached a saved Fold, the app
      would be shipping its own scaffolding inside the human's document. The srcdoc and the save
      path serialize separately, and this is the assertion that keeps them apart. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Bridge Separation', discard: true });
   await invoke(page, 'add_chunk', { starter: 'flowchart' });
 
@@ -320,7 +320,7 @@ test('a tool call in flight lights the rail, and settling puts it out', async ({
 });
 
 test('a file that is not a Fold gets a toast that stays until it is dismissed', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
 
   const dt = await page.evaluateHandle(() => {
     const t = new DataTransfer();

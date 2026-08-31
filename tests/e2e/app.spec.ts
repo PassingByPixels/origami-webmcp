@@ -29,7 +29,7 @@ async function invoke(page: Page, tool: string, args: unknown): Promise<any> {
 const preview = (page: Page) => page.frameLocator('[data-testid="preview"]').locator('body');
 
 async function openSample(page: Page) {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('empty-state')).toBeVisible();
   await page.getByTestId('btn-sample').click();
   await expect(page.getByTestId('preview')).toBeVisible();
@@ -41,12 +41,12 @@ async function openSample(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   // a leftover autosave from a previous spec must not change what the next one opens
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.evaluate(() => localStorage.clear());
 });
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('tool-count')).toHaveText('29');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
@@ -192,7 +192,7 @@ test('a guide recipe, copied verbatim, mounts and runs in the real deck', async 
      — its number is written as the literal "0" with the real value in data-count-to, so a .big
      reading 42 in the frame means the runtime found the block and animated it. An agent that
      had guessed and put "42" in the text node would see it overwritten with 0. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   // the default guide only points at the recipe cards; an agent fetches them by topic
   const guide = await invoke(page, 'origami_guide', { topic: 'recipes' });
   const recipe = guide.body.recipes.cards['stat-cards'];
@@ -223,7 +223,7 @@ test('inspect_render measures a REAL layout and names two real defects', async (
      (nodes: []) passes the content policy and add_chunk accepts it, so the agent gets an "ok"
      and a fold that draws NOTHING. save_deck does eventually refuse it — asserted below — but
      only at the very end, with a schema violation rather than "this fold is blank". */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Inspect Me', discard: true });
   await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
 
@@ -300,7 +300,7 @@ test('inspect_render is viewport-dependent, and says which viewport it used', as
      across every viewport height from 240 to 720, always below the bar. So no ink is hidden, and
      inspect_render correctly declines to warn. What is real is that geometry moves a lot with the
      screen, which is why the viewport is a parameter and is named in every result. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Viewport', discard: true });
   await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
   await invoke(page, 'add_chunk', {
@@ -330,7 +330,7 @@ test('inspect_render is viewport-dependent, and says which viewport it used', as
 });
 
 test('inspect_render reports a clean deck as clean, and never touches the preview', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Tidy', discard: true });
   const before = await page.getByTestId('preview').getAttribute('srcdoc');
 
@@ -344,7 +344,7 @@ test('inspect_render reports a clean deck as clean, and never touches the previe
 });
 
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   const created = await invoke(page, 'create_deck', { title: 'Playwright Deck' });
   expect(created.state).toContain('ok');
   expect(created.body.title).toBe('Playwright Deck');
@@ -368,7 +368,7 @@ test('a staged proposal survives a real reload, and a conflict survives with it'
      Resume, and the card is back. Then the sharper half — the chunk is edited BEFORE the
      reload, so the restored proposal is stale, and accepting it after the reload must still
      refuse with `conflicted` rather than quietly overwriting the newer content. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Survives Reload', discard: true });
   const toc = await invoke(page, 'list_chunks', {});
   const first = toc.body.chunks[0].id;
@@ -422,7 +422,7 @@ test('a staged proposal survives a real reload, and a conflict survives with it'
 });
 
 test('a reloaded proposal against an unchanged chunk still applies', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Clean Reload', discard: true });
   const toc = await invoke(page, 'list_chunks', {});
   const marker = `Applied after the reload ${Date.now()}`;
@@ -453,7 +453,7 @@ test('save_deck banks the Fold in browser storage, and the human can get it back
   /* The route back out of OPFS. save_deck always writes the whole Fold into the origin's private
      file system, which is real storage but INVISIBLE — nothing outside this page can read it. So
      "it is saved in the browser" would be true and useless without this button. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   /* The affordance moved into the Save menu, whose chevron is never disabled — so this opens
      the menu to look, exactly as a human would, rather than asserting the trivial truth that a
      closed menu hides everything in it. */

@@ -34,12 +34,12 @@ async function roundTrip(page: Page, tool: string, args: Record<string, unknown>
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await page.evaluate(() => localStorage.clear());
 });
 
 test('the tool list is grouped by what a call is for, and a grouped tool still invokes', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await openConsole(page);
 
   // the four headers from the design spec, in order, in the same list as the tools
@@ -68,7 +68,7 @@ test('a call typed as JSON survives a trip through the form unchanged', async ({
   /* No registered tool carries a string, an integer AND an enum at once, so the three tools
      below cover every control the spec names: text, textarea (html), number, checkbox, select
      and a nested-JSON box. Each must come back byte-for-byte as the call that went in. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
 
   const created = { title: 'Round Trip', foldType: 'scroll', discard: true }; // string + enum + boolean
   expect(await roundTrip(page, 'create_deck', created)).toEqual(created);
@@ -97,7 +97,7 @@ test('a call typed as JSON survives a trip through the form unchanged', async ({
 });
 
 test('what the form is edited to is what gets sent', async ({ page }) => {
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await pick(page, 'create_deck');
 
   // Form mode is the default, so this is the plain path: fill a control, press Invoke
@@ -117,7 +117,7 @@ test('a half-typed JSON field blocks Invoke instead of sending the last good arg
   /* The nested boxes (object/array properties) are the one place the form can hold something it
      cannot serialize. The JSON box then still holds the PREVIOUS call — so Invoke has to be
      shut, or pressing it would send args the screen no longer shows. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await pick(page, 'set_header');
   await page.getByTestId('field-subtitle').fill('A masthead line');
   await expect(page.getByTestId('btn-invoke')).toBeEnabled();
@@ -135,7 +135,7 @@ test('a half-typed JSON field blocks Invoke instead of sending the last good arg
 test('a call the form cannot show keeps the console in JSON rather than dropping it', async ({ page }) => {
   /* The form is generated from the schema, so an argument the schema does not name has nowhere
      to go. Silently dropping it would send a different call than the one on screen. */
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await pick(page, 'create_deck');
   await page.getByTestId('btn-mode-json').click();
   await page.getByTestId('tool-args').fill('{"title":"Keep me","unknownKey":42}');

@@ -58,7 +58,7 @@ async function tableData(page: Page): Promise<any> {
 
 test('an agent builds a scroll Fold with two data kinds and resolves its own proposal', async ({ page }) => {
   await installHost(page);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 29 tools');
 
   /* 1. onboard — the default guide indexes the kinds; the schema itself lives behind the
@@ -136,7 +136,7 @@ test('an agent builds a scroll Fold with two data kinds and resolves its own pro
 
 test('an agent bakes a table through the real calc engine, in the browser', async ({ page }) => {
   await installHost(page);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await tool(page, 'create_deck', { title: 'Agent Ledger', discard: true });
 
   const inner = `<div class="o-table-shell">
@@ -169,7 +169,7 @@ ${JSON.stringify({
 
 test('an agent defines a composite block and places an instance', async ({ page }) => {
   await installHost(page);
-  await page.goto('/index.html');
+  await page.goto('/folio/index.html');
   await tool(page, 'create_deck', { title: 'Agent Blocks', discard: true });
 
   const defined = await tool(page, 'define_block', {
