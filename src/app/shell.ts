@@ -4,6 +4,7 @@ import { ProposalStore, restorableProposals } from '../core/proposal-store.js';
 import { connectWebMcp, type McpConnection } from '../core/registry.js';
 import type { SaveOutcomeReport } from '../core/tools.js';
 import { createModeDoc, createModeRegistry } from '../core/mode-registry.js';
+import { warmDeckAssembly } from '../core/blank-deck.js';
 import type { ToolMode } from '../core/modes.js';
 import { ActivityRail } from './activity.js';
 import { TestConsole } from './console.js';
@@ -719,6 +720,8 @@ export function bootShell(mode: ToolMode): void {
   refreshChrome();
   void review.refresh();
   preview.render(deck);
+  // warm the lazy deck-assembly chunk so a mid-session deploy cannot strand create_deck
+  setTimeout(warmDeckAssembly, 1500);
 
   /* ---------- the mini page's document ----------
      Last, so every surface above is already wired when the Fold lands: the rail records the open,
