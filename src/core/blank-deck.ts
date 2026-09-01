@@ -33,6 +33,19 @@ export interface BlankDeckOpts {
   label?: string;
 }
 
+/* The dynamic import below code-splits the 440 KB runtime-dist chunk out of the first paint —
+   but a LAZY chunk is a live grenade on a static host: replace the files mid-session (a zip
+   upload is not atomic) and the first create_deck fetches a chunk that is gone, and the
+   browser CACHES that failure in the module map for the life of the page (measured in the
+   wild: a ChatGPT agent stranded an hour into a session, 2026-09-01). warmDeckAssembly()
+   defuses it: the shell calls it once after first paint, so the chunk and the runtime text
+   are in this session before any deploy can swap them. Failures are swallowed here —
+   create_deck still reports honestly if the warm never landed. */
+export function warmDeckAssembly(): void {
+  void import('../../vendor/runtime-dist/index.js').catch(() => {});
+  void loadRuntimeJs().catch(() => {});
+}
+
 export async function assembleBlankDeck(opts: BlankDeckOpts): Promise<string> {
   const { assembleDeck } = await import('../../vendor/runtime-dist/index.js');
   const { title, foldType, now, id, slideId, runtimeJs, inner = FREE_STARTER_INNER, label = 'Cover' } = opts;
