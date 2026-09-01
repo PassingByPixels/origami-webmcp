@@ -91,7 +91,8 @@ function buildInsert(
     else if (kind === 'table') inner = TABLE_STARTER_INNER;
     else return { error: `no built-in starter for kind "${kind}" — call get_kind_schema("${kind}") and supply html (or use block + fields for a composite)` };
   }
-  if (slideKind === 'table') inner = bakeTableInner(inner, Date.now());
+  // every table block bakes, whatever the slide kind: a ledger is a free card holding one
+  inner = bakeTableInner(inner, Date.now());
   const violations = validateSlideContent(inner);
   if (violations.length > 0) return { error: 'the slide would break the deck structure', extra: { violations } };
   const id = newSlideId();
@@ -121,7 +122,7 @@ export function coerceAndValidate(m: DeckModel, chunkId: string, html: string): 
   if (violations.length > 0) {
     refuse('the edit would break the deck structure — nothing was applied', { violations });
   }
-  return slide!.kind === 'table' ? bakeTableInner(reply.inner, Date.now()) : reply.inner;
+  return bakeTableInner(reply.inner, Date.now());
 }
 
 /**
