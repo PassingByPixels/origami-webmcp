@@ -42,6 +42,7 @@ export const PETALS = [
   },
   {
     name: 'Draw',
+    chip: 'live',
     href: 'draw/',
     angle: 45,
     blurb: 'Hand-drawn sketches and diagrams.',
@@ -52,6 +53,7 @@ export const PETALS = [
   { ...BLANK, angle: 90 },
   {
     name: 'Charts',
+    chip: 'live',
     href: 'charts/',
     angle: 135,
     blurb: 'Twelve chart types and a Venn.',
@@ -62,6 +64,7 @@ export const PETALS = [
   { ...BLANK, angle: 180 },
   {
     name: 'Gantt',
+    chip: 'live',
     href: 'gantt/',
     angle: 225,
     blurb: 'Roadmaps on a real calendar.',

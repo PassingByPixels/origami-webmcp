@@ -219,7 +219,9 @@ test('every card names its action, and Design offers only a look', async ({ page
   const actions = await page.locator('[data-testid="tool-card"] .tool-go').allTextContents();
   expect(actions).toEqual(['Open →', 'Open →', 'Open →', 'Open →', 'Take a look →']);
   // the status chips come off the same config row as the petal colours
-  await expect(page.locator('[data-testid="tool-card"][href="folio/"] .tool-chip')).toHaveText('live');
+  for (const href of ['folio/', 'draw/', 'charts/', 'gantt/']) {
+    await expect(page.locator(`[data-testid="tool-card"][href="${href}"] .tool-chip`), href).toHaveText('live');
+  }
   await expect(page.locator('[data-testid="tool-card"][href="design/"] .tool-chip')).toHaveText('soon');
   // and every card carries its petal's own colour, so a card can never mislabel a tool
   const swatches = await page
