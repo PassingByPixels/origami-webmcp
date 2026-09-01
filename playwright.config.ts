@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 /* Real Chromium against the REAL static build — the same dist/ a human would upload.
    The web server is esbuild's, the one `npm run serve` starts, so the test drives exactly
-   the surface the README tells Passing to open. */
+   the surface the README tells the maintainer to open. */
 export default defineConfig({
   testDir: './tests/e2e',
   fullyParallel: false,

@@ -412,7 +412,7 @@ describe('gantt: set_roadmap', () => {
       totalWeeks: 8,
       startDate: '2026-09-07',
       lenses: [{ name: 'Build', color: '#4a8cc4' }],
-      swimlanes: [{ name: 'Platform', owner: 'Passing' }],
+      swimlanes: [{ name: 'Platform', owner: 'Origami' }],
       cards: [
         {
           id: 'C01', title: 'Ship the mini tools', swimlane: 'Platform', start: 'W2', durationWeeks: 3,

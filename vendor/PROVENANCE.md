@@ -1,6 +1,6 @@
 # Vendored artifacts — provenance
 
-Source repo: C:\Repos\Origami Folio\origami (gitea GitAdmin/origami)
+Source repo: the Origami Folio monorepo (private)
 Source state: master @ fc7cece — "0.4.3 UAT close-out: origamilabs.nl link sweep, swim-lane
               invariant, Venn label gestures, What's New" (the venn/lane/wrap arc, committed)
 Copied: 2026-08-30 (refresh; the first copy was 7b94bad + an uncommitted working tree)

@@ -242,7 +242,7 @@ test('/gantt/ — set_roadmap puts real lanes and cards in the file', async ({ p
       totalWeeks: 10,
       startDate: '2026-09-07',
       lenses: [{ name: 'Build', color: '#4a8cc4' }, { name: 'Launch', color: '#3d8b5a' }],
-      swimlanes: [{ name: 'Mini tools', owner: 'Passing' }],
+      swimlanes: [{ name: 'Mini tools', owner: 'Origami' }],
       cards: [
         { id: 'C01', title: 'Ship draw, charts, gantt', swimlane: 'Mini tools', start: 'W1', durationWeeks: 4, lens: 'Build', type: 'Technical', effort: 'MED', what: '', needs: '', caveat: '', deliverable: '', sources: '', completed: false },
         { id: 'C02', title: 'Cut the zip', swimlane: 'Mini tools', start: 'W6', durationWeeks: 1, lens: 'Launch', type: 'Process', effort: 'EASY', what: '', needs: '', caveat: '', deliverable: '', sources: '', completed: false },

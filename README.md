@@ -9,6 +9,17 @@ Open an Origami **Fold** (`.origami.html`) in the browser, hand Origami's author
 in-page AI agent over **WebMCP**, and save the result back to disk. No server, no account, no
 upload — the Fold is parsed, edited, rendered and saved entirely in the tab.
 
+Every tool is registered the way the [WebMCP draft](https://webmachinelearning.github.io/webmcp/) specifies — the page hands the agent its tools:
+
+```js
+document.modelContext.registerTool({
+  name: "add_chunk",
+  description: "Add a new fold to the open document",
+  inputSchema: { type: "object", properties: { /* ... */ }, additionalProperties: false },
+  execute: async (input) => { /* one validated write gate */ },
+});
+```
+
 **An agent can run the whole job unattended.** All 29 tools are on the WebMCP surface: an agent
 creates the deck, authors every kind, stages proposals, resolves them, and calls `save_deck`
 without a human ever clicking anything. When a human *is* watching, staged proposals also render

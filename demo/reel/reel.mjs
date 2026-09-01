@@ -36,7 +36,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -57,7 +57,7 @@ import { IMAGE_BYTES } from './paper-image.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '../..');
-const SCRATCH = 'C:/Users/Dunwo/AppData/Local/Temp/claude/c--Users-Dunwo-Desktop-Cortex/52dc62a0-bd36-4b1c-b4e8-10b48fa6eb1c/scratchpad';
+const SCRATCH = join(tmpdir(), 'origami-reel');
 const WORK = join(SCRATCH, 'reel-work');
 
 const arg = (k, d) => {
