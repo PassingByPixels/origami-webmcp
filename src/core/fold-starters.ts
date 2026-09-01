@@ -16,7 +16,9 @@
 
 /** palette.ts dataFigure — verbatim. JSON is pretty-printed at 2 spaces and every "<" is
     escaped as \u003c, which is the data block's carrier invariant. */
-function dataFigure(kind: string, figClass: string, mountClass: string, seed: unknown, caption: string): string {
+/* Exported so the mini tools' block writers build the SAME figure the Studio's rail does —
+   there is one figure builder in this app, not one per page. */
+export function dataFigure(kind: string, figClass: string, mountClass: string, seed: unknown, caption: string): string {
   const json = JSON.stringify(seed, null, 2).replace(/</g, '\\u003c');
   return `<figure class="${figClass} anim"><script type="application/json" data-odata="${kind}">
 ${json}

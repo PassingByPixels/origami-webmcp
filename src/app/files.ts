@@ -138,7 +138,11 @@ export function downloadBlob(text: string, name: string): void {
 
 /* ---------- autosave ---------- */
 
-const AUTOSAVE_KEY = 'origami-webmcp:autosave/v1';
+/* NAMESPACED PER PAGE. localStorage is shared by every page on the origin, so /draw/ and
+   /charts/ would otherwise autosave over each other — and each would resume the other's
+   document on load, silently. Folio's namespace is '' and its key is the historical string
+   byte for byte, so nothing already in a human's browser is orphaned by this. */
+export const autosaveKey = (ns: string): string => (ns ? `origami-webmcp:autosave/v1:${ns}` : 'origami-webmcp:autosave/v1');
 
 export interface AutosaveRecord {
   name: string;
@@ -150,9 +154,9 @@ export interface AutosaveRecord {
   proposals?: readonly unknown[];
 }
 
-export function readAutosave(): AutosaveRecord | null {
+export function readAutosave(ns: string): AutosaveRecord | null {
   try {
-    const raw = localStorage.getItem(AUTOSAVE_KEY);
+    const raw = localStorage.getItem(autosaveKey(ns));
     if (!raw) return null;
     const rec = JSON.parse(raw) as AutosaveRecord;
     return typeof rec?.text === 'string' && rec.text.length > 0 ? rec : null;
@@ -161,18 +165,18 @@ export function readAutosave(): AutosaveRecord | null {
   }
 }
 
-export function writeAutosave(name: string, text: string, proposals: readonly unknown[] = []): boolean {
+export function writeAutosave(ns: string, name: string, text: string, proposals: readonly unknown[] = []): boolean {
   try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ name, text, at: Date.now(), proposals } satisfies AutosaveRecord));
+    localStorage.setItem(autosaveKey(ns), JSON.stringify({ name, text, at: Date.now(), proposals } satisfies AutosaveRecord));
     return true;
   } catch {
     return false; // private window, quota, or storage blocked — the app keeps working
   }
 }
 
-export function clearAutosave(): void {
+export function clearAutosave(ns: string): void {
   try {
-    localStorage.removeItem(AUTOSAVE_KEY);
+    localStorage.removeItem(autosaveKey(ns));
   } catch {
     /* nothing to do */
   }

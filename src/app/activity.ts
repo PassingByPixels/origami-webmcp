@@ -35,8 +35,20 @@ const CHIPS: Record<string, string> = {
   propose_delete: 'STAGE',
   accept_proposal: 'REVIEW',
   reject_proposal: 'REVIEW',
+  /* the mini tool pages' typed block writers (src/core/block-tools.ts). Their read-only
+     siblings — list_elements, get_data, get_roadmap — fall through to READ. */
+  add_element: 'ADD',
+  update_element: 'EDIT',
+  remove_element: 'DELETE',
+  set_chart: 'EDIT',
+  set_venn: 'EDIT',
+  set_roadmap: 'EDIT',
+  set_caption: 'META',
   /* the page's own events — pushed, not invoked */
   open: 'OPEN',
+  /* a mini tool page minting its seeded document. It replaces the whole deck, exactly as
+     create_deck does, so it wears the same chip AND resets the undo walk below. */
+  new: 'NEW',
   resume: 'OPEN',
   discard: 'DELETE',
   save: 'SAVE',
@@ -58,10 +70,18 @@ const UNDOABLE = new Set([
   'set_header',
   'set_fold_type',
   'accept_proposal',
+  // the mini pages' block writers: each applies exactly one op through writeFoldInner
+  'add_element',
+  'update_element',
+  'remove_element',
+  'set_chart',
+  'set_venn',
+  'set_roadmap',
+  'set_caption',
 ]);
 
 /** Events that RESET the undo stack — nothing before one of these is reversible. */
-const UNDO_RESETS = new Set(['create_deck', 'open', 'resume']);
+const UNDO_RESETS = new Set(['create_deck', 'open', 'resume', 'new']);
 
 /** How many rows are drawn. The log holds 500; a rail is a recent history, not an archive. */
 const ROWS = 60;

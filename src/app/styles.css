@@ -68,6 +68,11 @@ body {
 }
 
 .brand { display: flex; align-items: baseline; gap: 8px; flex: 0 0 auto; }
+/* On the mini tool pages the wordmark is the way home (docs/SITE.md: "Every page links home via
+   the brand wordmark"), so .brand is an <a> there. It must not read as body-copy link. */
+a.brand { color: inherit; text-decoration: none; border-radius: 4px; }
+a.brand:hover .wordmark { text-decoration: underline; text-underline-offset: 3px; }
+a.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .mark { width: 26px; height: 26px; align-self: center; }
 .mark.big { width: 56px; height: 56px; opacity: 0.9; margin-bottom: 18px; }
 .wordmark { font-family: var(--font-display); font-size: 20px; letter-spacing: -0.01em; }

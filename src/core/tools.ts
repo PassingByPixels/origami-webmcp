@@ -48,7 +48,7 @@ import { videoCapsNeeded } from './video-caps.js';
    --------------------------------------------------------------------------------------- */
 
 /** A path-safe, deck-like filename stem from a title (lowercase, hyphenated, bounded). */
-function slugifyTitle(title: string): string {
+export function slugifyTitle(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'deck';
 }
 
@@ -107,7 +107,7 @@ function buildInsert(
 
 /** Shared edit-contract gate for write_chunk and propose_chunk: id/kind immutability then the
     hard content policy. Refuses (throws) exactly where the stdio server refuses. */
-function coerceAndValidate(m: DeckModel, chunkId: string, html: string): string {
+export function coerceAndValidate(m: DeckModel, chunkId: string, html: string): string {
   const slide = m.slides.get(chunkId);
   if (!slide) refuse(`unknown chunk "${chunkId}" — call list_chunks`);
   const reply = coerceChunkReply(html, { slideId: chunkId, kind: slide!.kind });
@@ -122,6 +122,27 @@ function coerceAndValidate(m: DeckModel, chunkId: string, html: string): string 
     refuse('the edit would break the deck structure — nothing was applied', { violations });
   }
   return slide!.kind === 'table' ? bakeTableInner(reply.inner, Date.now()) : reply.inner;
+}
+
+/**
+ * THE write path — the one every edit to a fold's markup goes through.
+ *
+ * write_chunk is the raw route (an agent hands over the whole edited template); the mini tools'
+ * block writers are the typed route (set_chart, add_element, …) and they build markup rather
+ * than accept it. Both land HERE, so there is exactly one gate: the same coercion, the same
+ * content policy, the same capability arithmetic, one op on the undo stack per call.
+ */
+export function writeFoldInner(deck: DeckStore, chunkId: string, html: string): { caps: string[]; inner: string } {
+  return deck.mutate((m) => {
+    const inner = coerceAndValidate(m, chunkId, html);
+    const caps = videoCapsNeeded(inner).filter((c) => !m.capabilities.includes(c));
+    const op: Op =
+      caps.length > 0
+        ? { t: 'batch', ops: [{ t: 'slide.inner', id: chunkId, inner }, { t: 'deck.caps', capabilities: [...m.capabilities, ...caps] }] }
+        : { t: 'slide.inner', id: chunkId, inner };
+    deck.apply(m, op);
+    return { caps, inner };
+  });
 }
 
 /** What save_deck managed to do. The page owns the how (File System Access, autosave); the
@@ -351,16 +372,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             note: 'DRY RUN — validated against the open Fold and NOT applied; the deck is byte-identical. Call again without dryRun to apply it.',
           });
         }
-        const out = deck.mutate((m) => {
-          const inner = coerceAndValidate(m, chunkId, html);
-          const caps = videoCapsNeeded(inner).filter((c) => !m.capabilities.includes(c));
-          const op: Op =
-            caps.length > 0
-              ? { t: 'batch', ops: [{ t: 'slide.inner', id: chunkId, inner }, { t: 'deck.caps', capabilities: [...m.capabilities, ...caps] }] }
-              : { t: 'slide.inner', id: chunkId, inner };
-          deck.apply(m, op);
-          return { caps, inner };
-        });
+        const out = writeFoldInner(deck, chunkId, html);
         return ok({
           applied: chunkId,
           capabilitiesGranted: out.caps,

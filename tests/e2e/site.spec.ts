@@ -4,12 +4,13 @@ import { expect, test } from '@playwright/test';
  * The site around the tools (docs/SITE.md): the flower home page, privacy, and the Design
  * coming-soon page. Real Chromium against the real dist/ — the same bytes the zip carries.
  *
- * The three mini tools do not exist yet. This suite pins their hrefs so the slice that builds
- * them plugs into a socket that is already shaped, and says out loud that they 404 today.
+ * The three mini tools were the sockets this suite used to pin as deliberate 404s. They are
+ * built now (tests/e2e/mini.spec.ts drives them), so the hrefs test below asserts the stronger
+ * thing: EVERY href the flower offers resolves, with nothing left pending.
  */
 
-const LIVE = ['folio/', 'design/']; // built in this slice
-const PENDING = ['draw/', 'charts/', 'gantt/']; // next slice
+/** Every href the petals and the cards carry. All of them are real pages in dist/. */
+const LIVE = ['folio/', 'draw/', 'charts/', 'gantt/', 'design/'];
 const BMC = 'https://buymeacoffee.com/passingbypixels';
 
 test('the flower has eight petals — five links and three left to grow into', async ({ page }) => {
@@ -30,17 +31,16 @@ test('every petal href is matched by a tool card with the same href, in the same
   expect(cards).toEqual(petals);
 });
 
-test('the hrefs that are built resolve; the three that are not are exactly the sockets the next slice fills', async ({ page, request }) => {
+test('every href the flower offers resolves — no petal points at a 404', async ({ page, request }) => {
   await page.goto('/');
   for (const href of LIVE) {
-    const res = await request.get(href);
-    expect(res.status(), `${href} should be a real page in dist/`).toBe(200);
-  }
-  for (const href of PENDING) {
+    // the petal and the card both offer it…
     await expect(page.locator(`[data-testid="petal-link"][href="${href}"]`)).toHaveCount(1);
     await expect(page.locator(`[data-testid="tool-card"][href="${href}"]`)).toHaveCount(1);
-    // honest about this slice: the mini tools are not built, so these 404 on purpose
-    expect((await request.get(href)).status()).toBe(404);
+    // …and it is a real page in dist/, served the way a static host serves a directory
+    const res = await request.get(href);
+    expect(res.status(), `${href} should be a real page in dist/`).toBe(200);
+    expect(await res.text(), `${href} should be an HTML document`).toContain('<!DOCTYPE html>');
   }
 });
 

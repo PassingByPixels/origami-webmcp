@@ -18,9 +18,13 @@
    It is also invisible to the human — nothing outside this origin can read it — so every write
    here is paired with the "Download last save" button in the page, which is the route back out. */
 
-const DIR = 'saves';
+/* NAMESPACED PER PAGE, for the same reason the autosave slot is: OPFS and localStorage are both
+   per-ORIGIN, and origami.gratis serves four tool pages from one. A shared pointer would let
+   /draw/'s "Download last save" hand the human the roadmap they made on /gantt/. Folio's
+   namespace is '' and keeps the historical directory and key byte for byte. */
+const dirFor = (ns: string): string => (ns ? `saves-${ns}` : 'saves');
 /** Pointer to the newest OPFS save. Tiny, so it fits localStorage even when the deck does not. */
-const POINTER_KEY = 'origami-webmcp:lastsave/v1';
+export const pointerKey = (ns: string): string => (ns ? `origami-webmcp:lastsave/v1:${ns}` : 'origami-webmcp:lastsave/v1');
 
 export interface LastSave {
   name: string;
@@ -54,10 +58,11 @@ export function safeName(name: string): string {
  * Never throws: a browser with no OPFS, a denied quota or a private window degrades to
  * `{ written: false, why }`, which save_deck reports rather than swallowing.
  */
-export async function writeOpfs(name: string, text: string): Promise<OpfsResult> {
+export async function writeOpfs(ns: string, name: string, text: string): Promise<OpfsResult> {
   const rootP = opfsRoot();
   if (!rootP) return { written: false, why: 'this browser has no Origin Private File System (navigator.storage.getDirectory)' };
   const file = safeName(name);
+  const DIR = dirFor(ns);
   try {
     const dir = await (await rootP).getDirectoryHandle(DIR, { create: true });
     const handle = await dir.getFileHandle(file, { create: true });
@@ -69,7 +74,7 @@ export async function writeOpfs(name: string, text: string): Promise<OpfsResult>
     const bytes = (await handle.getFile()).size;
     const expected = new TextEncoder().encode(text).length;
     if (bytes !== expected) return { written: false, why: `wrote ${expected} bytes but the file holds ${bytes} — the write did not complete` };
-    setPointer({ name: file, at: Date.now(), bytes });
+    setPointer(ns, { name: file, at: Date.now(), bytes });
     return { written: true, path: `${DIR}/${file}`, bytes };
   } catch (e) {
     return { written: false, why: (e as Error).message };
@@ -77,12 +82,12 @@ export async function writeOpfs(name: string, text: string): Promise<OpfsResult>
 }
 
 /** The newest OPFS save's bytes, or null when there is none to hand back. */
-export async function readLastOpfs(): Promise<{ name: string; text: string } | null> {
-  const ptr = getPointer();
+export async function readLastOpfs(ns: string): Promise<{ name: string; text: string } | null> {
+  const ptr = getPointer(ns);
   const rootP = opfsRoot();
   if (!ptr || !rootP) return null;
   try {
-    const dir = await (await rootP).getDirectoryHandle(DIR);
+    const dir = await (await rootP).getDirectoryHandle(dirFor(ns));
     const handle = await dir.getFileHandle(ptr.name);
     return { name: ptr.name, text: await (await handle.getFile()).text() };
   } catch {
@@ -90,9 +95,9 @@ export async function readLastOpfs(): Promise<{ name: string; text: string } | n
   }
 }
 
-export function getPointer(): LastSave | null {
+export function getPointer(ns: string): LastSave | null {
   try {
-    const raw = localStorage.getItem(POINTER_KEY);
+    const raw = localStorage.getItem(pointerKey(ns));
     if (!raw) return null;
     const p = JSON.parse(raw) as LastSave;
     return typeof p?.name === 'string' && typeof p?.bytes === 'number' ? p : null;
@@ -101,9 +106,9 @@ export function getPointer(): LastSave | null {
   }
 }
 
-function setPointer(p: LastSave): void {
+function setPointer(ns: string, p: LastSave): void {
   try {
-    localStorage.setItem(POINTER_KEY, JSON.stringify(p));
+    localStorage.setItem(pointerKey(ns), JSON.stringify(p));
   } catch {
     /* the bytes are in OPFS either way; only the shortcut to them is lost */
   }

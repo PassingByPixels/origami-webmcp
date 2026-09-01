@@ -16,7 +16,9 @@ import type { JsonSchema, JsonSchemaProp, ToolDef, ToolRegistry } from '../core/
 /* The four groups from the design spec, in reading order, each listing its tools in the order
    a human meets them. A registered tool named in NO group still appears (under "Other"): a
    console that silently hid a tool would be worse than an ugly one. */
-const GROUPS: ReadonlyArray<readonly [string, readonly string[]]> = [
+export type ToolGroups = ReadonlyArray<readonly [string, readonly string[]]>;
+
+export const FOLIO_GROUPS: ToolGroups = [
   ['Learn', ['origami_guide', 'get_kind_schema', 'list_starters', 'list_block_defs', 'list_chunks', 'read_chunk', 'inspect_render', 'list_proposals', 'list_activity']],
   ['Author', ['create_deck', 'add_chunk', 'add_custom_fold', 'write_chunk', 'move_chunk', 'set_chunk_meta', 'delete_chunk', 'define_block', 'delete_block', 'set_header', 'set_deck_meta', 'set_fold_type', 'undo']],
   ['Review', ['propose_chunk', 'propose_add', 'propose_delete', 'accept_proposal', 'reject_proposal']],
@@ -59,7 +61,11 @@ export class TestConsole {
       invoke: HTMLButtonElement;
       state: HTMLElement;
       result: HTMLElement;
-    }
+    },
+    /* A mini tool page registers a different set, so it supplies its own headings — its block's
+       tools first, then the same Learn/Author/File vocabulary, so the grouping never forks. A
+       tool in no group still appears, under "Other". */
+    private readonly groups: ToolGroups = FOLIO_GROUPS
   ) {
     els.toggle.addEventListener('click', () => this.setOpen(els.toggle.getAttribute('aria-expanded') !== 'true'));
     els.list.addEventListener('click', (ev) => {
@@ -110,9 +116,9 @@ export class TestConsole {
     this.els.count.textContent = String(tools.length);
     const byName = new Map(tools.map((t) => [t.name, t]));
     const items: HTMLElement[] = [];
-    const grouped = new Set(GROUPS.flatMap(([, names]) => names));
+    const grouped = new Set(this.groups.flatMap(([, names]) => names));
 
-    for (const [heading, names] of GROUPS) {
+    for (const [heading, names] of this.groups) {
       const present = names.filter((n) => byName.has(n));
       if (present.length === 0) continue;
       items.push(this.groupHead(heading));

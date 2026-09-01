@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { ProposalStore } from '../../src/core/proposal-store.js';
 import { createRegistry } from '../../src/core/tools.js';
+import { createModeDoc, createModeRegistry } from '../../src/core/mode-registry.js';
+import type { ToolMode } from '../../src/core/modes.js';
 import type { ToolRegistry } from '../../src/core/registry.js';
 import type { ToolResult } from '../../src/core/result.js';
 
@@ -29,6 +31,27 @@ export function harness(): Harness {
   const deck = new DeckStore();
   const proposals = new ProposalStore();
   const registry = createRegistry({ deck, proposals, runtimeJs });
+  const call = (name: string, args: unknown = {}) => registry.invoke(name, args);
+  return {
+    deck,
+    proposals,
+    registry,
+    call,
+    text: async (name, args) => (await call(name, args)).content[0]!.text,
+    json: async (name, args) => JSON.parse((await call(name, args)).content[0]!.text),
+  };
+}
+
+/**
+ * A mini tool page, driven exactly as its browser page drives it: the mode's own scoped
+ * registry, and the mode's own seeded document already open — which is the state a human finds
+ * the page in, so no test here has to invent one.
+ */
+export async function miniHarness(mode: ToolMode): Promise<Harness> {
+  const deck = new DeckStore();
+  const proposals = new ProposalStore();
+  const registry = createModeRegistry({ deck, proposals, runtimeJs }, mode);
+  await createModeDoc(deck, mode, runtimeJs);
   const call = (name: string, args: unknown = {}) => registry.invoke(name, args);
   return {
     deck,

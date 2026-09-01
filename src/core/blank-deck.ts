@@ -25,11 +25,17 @@ export interface BlankDeckOpts {
   slideId: string;
   /** The built viewer IIFE text (dist/origami-runtime.iife.js). */
   runtimeJs: string;
+  /** The single fold's inner markup. Default: the free-card starter create_deck has always
+      minted. A mini tool page passes its own seeded block here, so the document it opens on is
+      built ONCE, clean — no create-then-edit that would arrive dirty with an undo step in it. */
+  inner?: string;
+  /** The single fold's sidebar label. Default "Cover". */
+  label?: string;
 }
 
 export async function assembleBlankDeck(opts: BlankDeckOpts): Promise<string> {
   const { assembleDeck } = await import('../../vendor/runtime-dist/index.js');
-  const { title, foldType, now, id, slideId, runtimeJs } = opts;
+  const { title, foldType, now, id, slideId, runtimeJs, inner = FREE_STARTER_INNER, label = 'Cover' } = opts;
   const manifest: Manifest = {
     v: FORMAT_VERSION,
     id,
@@ -41,12 +47,12 @@ export async function assembleBlankDeck(opts: BlankDeckOpts): Promise<string> {
     ...(foldType !== 'deck' ? { foldType } : {}),
     order: [slideId],
     hidden: [],
-    slides: { [slideId]: { kind: 'free', label: 'Cover', notes: '' } },
+    slides: { [slideId]: { kind: 'free', label, notes: '' } },
     kinds: ['free'],
     customKinds: [],
     capabilities: [],
   };
-  return assembleDeck({ manifest, slides: { [slideId]: FREE_STARTER_INNER }, assets: {}, runtimeJs });
+  return assembleDeck({ manifest, slides: { [slideId]: inner }, assets: {}, runtimeJs });
 }
 
 /** Where the viewer IIFE is served from, relative to index.html. */

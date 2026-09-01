@@ -4,7 +4,13 @@
    dist/ is the WHOLE origami.gratis site (docs/SITE.md):
      index.html · privacy/ · design/   the static pages, built from src/site/
      folio/                            the Folio Web app, self-contained under its own path
-   Every path the pages use is relative, so the same zip hosts at a domain root or a subpath. */
+     draw/ · charts/ · gantt/          the mini tools — the same app, mode-scoped to one block
+   Every path the pages use is relative, so the same zip hosts at a domain root or a subpath.
+
+   EVERY TOOL PAGE IS SELF-CONTAINED. Each gets its own bundle, its own styles.css and its own
+   copy of the viewer IIFE, so a directory can be lifted out whole and still work, and so no page
+   can break another by moving a shared chunk. That costs disk (four copies of a 240 KB runtime)
+   and buys the property docs/SITE.md asks for. */
 import { cp, mkdir, readFile, rm, stat, writeFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,16 +23,26 @@ const dist = join(root, 'dist');
 const folio = join(dist, 'folio');
 const serve = process.argv.includes('--serve');
 
+/* The three mini tool pages. `tag` is the subbrand in the shell header and must equal the
+   matching mode's `tag` in src/core/modes.ts — tests/e2e/mini.spec.ts imports MODES and asserts
+   the rendered header against it, so the two declarations cannot drift unnoticed. */
+const TOOL_PAGES = [
+  { dir: 'draw', entry: 'src/app/draw.ts', tag: 'Draw', title: 'Origami Draw', noun: 'drawing' },
+  { dir: 'charts', entry: 'src/app/charts.ts', tag: 'Charts', title: 'Origami Charts', noun: 'chart' },
+  { dir: 'gantt', entry: 'src/app/gantt.ts', tag: 'Gantt', title: 'Origami Gantt', noun: 'roadmap' },
+];
+
 /* Deck payloads, not app code: the guard's rules do not apply to a .origami.html a user made
-   or to the viewer IIFE the runtime ships. */
-const NOT_APP_CODE = (rel) => rel.startsWith('folio/sample/') || rel === 'folio/origami-runtime.iife.js';
+   or to the viewer IIFE the runtime ships (one copy per tool page). */
+const NOT_APP_CODE = (rel) => rel.startsWith('folio/sample/') || /(^|\/)origami-runtime\.iife\.js$/.test(rel);
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(join(folio, 'sample'), { recursive: true });
 
-const options = {
-  entryPoints: [join(root, 'src/app/main.ts')],
-  outdir: folio,
+/** One page's esbuild options. Every tool page is bundled into its OWN directory. */
+const bundleFor = (entry, outdir) => ({
+  entryPoints: [join(root, entry)],
+  outdir,
   entryNames: 'app',
   // @origami/runtime is a 340 KB dynamic import used only by create_deck — code-split so the
   // page that only OPENS a Fold never downloads it.
@@ -39,17 +55,29 @@ const options = {
   sourcemap: serve,
   legalComments: 'none',
   logLevel: 'info',
-};
+});
+
+const BUNDLES = [bundleFor('src/app/main.ts', folio), ...TOOL_PAGES.map((p) => bundleFor(p.entry, join(dist, p.dir)))];
 
 async function copyStatics() {
   /* ---- the Folio app, whole, one directory down ---- */
   await cp(join(root, 'src/app/index.html'), join(folio, 'index.html'));
-  await cp(join(root, 'src/app/styles.css'), join(folio, 'styles.css'));
-  await writeFile(join(folio, 'favicon.svg'), CRANE_FILE, 'utf8');
-  // the viewer IIFE is fetched at runtime by create_deck (see src/core/blank-deck.ts)
-  await cp(join(root, 'vendor/runtime-dist/origami-runtime.iife.js'), join(folio, 'origami-runtime.iife.js'));
+  await appAssets(folio);
   // a Fold to open with one click, so the app is testable with nothing else on disk
   await cp(join(root, 'sample/welcome.origami.html'), join(folio, 'sample/welcome.origami.html'));
+
+  /* ---- the mini tools: one shell template, three pages ---- */
+  const shell = await readFile(join(root, 'src/app/mini.html'), 'utf8');
+  for (const p of TOOL_PAGES) {
+    const out = join(dist, p.dir);
+    await mkdir(out, { recursive: true });
+    await writeFile(
+      join(out, 'index.html'),
+      shell.replaceAll('__TITLE__', p.title).replaceAll('__TAG__', p.tag).replaceAll('__NOUN__', p.noun),
+      'utf8'
+    );
+    await appAssets(out);
+  }
 
   /* ---- the site ---- */
   await writeFile(join(dist, 'favicon.svg'), CRANE_FILE, 'utf8');
@@ -57,6 +85,14 @@ async function copyStatics() {
   await page('index.html', join(dist, 'index.html'), '');
   await page('privacy.html', join(dist, 'privacy/index.html'), '../');
   await page('design.html', join(dist, 'design/index.html'), '../');
+}
+
+/** The three files every tool page needs beside its bundle. */
+async function appAssets(out) {
+  await cp(join(root, 'src/app/styles.css'), join(out, 'styles.css'));
+  await writeFile(join(out, 'favicon.svg'), CRANE_FILE, 'utf8');
+  // the viewer IIFE is fetched at runtime when a Fold is minted (see src/core/blank-deck.ts)
+  await cp(join(root, 'vendor/runtime-dist/origami-runtime.iife.js'), join(out, 'origami-runtime.iife.js'));
 }
 
 /** The site's stylesheet, with the app's own token block spliced in — one source for both. */
@@ -80,12 +116,13 @@ async function page(src, out, up) {
 await copyStatics();
 
 if (serve) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
-  const { host, port } = await ctx.serve({ servedir: dist, host: '127.0.0.1', port: 5173 });
-  console.log(`\n  origami.gratis  →  http://${host}:${port}/          (Folio: /folio/)\n`);
+  // Every page is watched; the FIRST context serves dist/, which holds all of them.
+  const ctxs = await Promise.all(BUNDLES.map((o) => esbuild.context(o)));
+  for (const ctx of ctxs) await ctx.watch();
+  const { host, port } = await ctxs[0].serve({ servedir: dist, host: '127.0.0.1', port: 5173 });
+  console.log(`\n  origami.gratis  →  http://${host}:${port}/          (Folio: /folio/ · ${TOOL_PAGES.map((p) => `/${p.dir}/`).join(' · ')})\n`);
 } else {
-  await esbuild.build(options);
+  for (const o of BUNDLES) await esbuild.build(o);
   await report();
 }
 
