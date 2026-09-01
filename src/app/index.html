@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Origami Folio</title>
+<link rel="icon" href="./favicon.svg">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <!-- The wordmark is the way home, as it is on every page of the site (docs/SITE.md). -->
+  <a class="brand" href="../">
+    <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><g fill="#557A4E"><polygon points="30,40 47,40 52,11" opacity="0.45"/><polygon points="26,40 48,40 43,7" opacity="0.92"/><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>
+    <span class="wordmark">Origami</span>
+    <span class="subbrand">Folio</span>
+  </a>
+
+  <div class="deck-title" data-testid="deck-name" id="deck-name">No Fold open</div>
+
+  <nav class="actions">
+    <!-- Agent access. The DOT is the whole visible control; the technical sentence (surface +
+         tool count) is the button's accessible name, so a screen reader, an automated check and
+         the popover all read the SAME measured string. -->
+    <span class="popwrap">
+      <button type="button" class="statusdot" data-testid="mcp-status" id="mcp-status" aria-haspopup="dialog" aria-expanded="false"><span class="dot" aria-hidden="true"></span><span class="sr-only" id="mcp-status-text">WebMCP: checking&hellip;</span></button>
+      <div class="popover" data-testid="mcp-popover" id="mcp-popover" role="dialog" aria-label="Agent access" hidden></div>
+    </span>
+
+    <button type="button" data-testid="btn-new" id="btn-new">New</button>
+    <button type="button" data-testid="btn-open" id="btn-open">Open&hellip;</button>
+
+    <span class="popwrap savegroup">
+      <button type="button" data-testid="btn-save" id="btn-save" class="primary" disabled>Save<i class="statepip" id="save-pip" aria-hidden="true" hidden></i></button>
+      <!-- The chevron is its own button and is NEVER disabled: the menu carries the way back out
+           of browser storage, which must stay reachable when no Fold is open. -->
+      <button type="button" class="chev" data-testid="btn-savemenu" id="btn-savemenu" aria-haspopup="menu" aria-expanded="false" aria-label="Save options">&#9662;</button>
+      <div class="popover savemenu" id="save-popover" role="menu" aria-label="Save options" hidden>
+        <div class="pop-file" data-testid="save-file" id="save-file">No Fold open</div>
+        <div class="pop-state" data-testid="save-status" id="save-status">No Fold open</div>
+        <button type="button" data-testid="btn-saveas" id="btn-saveas" disabled>Save as&hellip;</button>
+        <button type="button" data-testid="btn-lastsave" id="btn-lastsave" hidden>Download last save</button>
+      </div>
+    </span>
+  </nav>
+</header>
+
+<main>
+  <section class="stage" id="stage">
+    <!-- The empty state IS the product page: the one screen a first-time visitor is guaranteed
+         to see, so it says what a Fold is and offers the three ways in. -->
+    <div class="empty" data-testid="empty-state" id="empty-state">
+      <svg class="mark big" viewBox="0 0 64 64" aria-hidden="true"><g fill="#557A4E"><polygon points="30,40 47,40 52,11" opacity="0.45"/><polygon points="26,40 48,40 43,7" opacity="0.92"/><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>
+      <h1>Open a Fold.</h1>
+      <p class="lede">Origami decks and documents are single <code>.origami.html</code> files that play anywhere. Drop one here to read or edit it &mdash; or connect an agent and watch it author one for you. Nothing leaves this machine.</p>
+      <div class="empty-actions">
+        <button type="button" class="primary" data-testid="btn-replay" id="btn-replay"><span class="play" aria-hidden="true">&#9654;</span> Watch an agent build a deck</button>
+        <button type="button" data-testid="btn-sample" id="btn-sample">Sample Fold</button>
+        <button type="button" data-testid="btn-blank" id="btn-blank">New blank Fold</button>
+      </div>
+      <button type="button" class="linky connect" data-testid="btn-connect" id="btn-connect">Connect your agent</button>
+      <div class="resumecard" data-testid="resume-slot" id="resume-slot" hidden></div>
+    </div>
+    <!-- allow="fullscreen" is what makes the deck's OWN Present button work: the runtime calls
+         documentElement.requestFullscreen(), and a frame without the permission rejects it with
+         "Disallowed by permissions policy" — silently, because the runtime swallows the error.
+         It grants nothing else; the sandbox is unchanged (see src/app/preview.ts). -->
+    <iframe class="preview" data-testid="preview" id="preview" sandbox="allow-scripts" allow="fullscreen" title="Fold preview" hidden></iframe>
+    <!-- Shown only while the recorded run is playing. Stop keeps everything already built. -->
+    <div class="replaybar" data-testid="replaybar" id="replaybar" hidden>
+      <i class="pulse" aria-hidden="true"></i>
+      <span class="replay-step" data-testid="replay-step" id="replay-step"></span>
+      <button type="button" data-testid="btn-stop-replay" id="btn-stop-replay">Stop</button>
+    </div>
+    <div class="dropveil" id="dropveil" hidden><span>Drop the Fold to open it</span></div>
+    <div class="toasts" data-testid="toasts" id="toasts" aria-live="polite"></div>
+  </section>
+
+  <aside class="rail" data-testid="review-panel">
+    <header class="rail-head">
+      <h2>Activity</h2>
+      <span class="count" data-testid="proposal-count" id="proposal-count" hidden>0</span>
+      <span class="grow"></span>
+      <span class="rail-live" data-testid="rail-live" id="rail-live" hidden><i class="pulse" aria-hidden="true"></i><span id="rail-live-tool"></span></span>
+    </header>
+    <div class="feed" id="feed">
+      <!-- Staged proposals sit at the head of the same feed. They are NOT rendered at the
+           position of their propose_* entry: a reload restores the queue but never the log, so
+           a card anchored to an activity row would vanish on exactly the reload that matters. -->
+      <div class="proposal-list" data-testid="proposal-list" id="proposal-list"></div>
+      <ol class="activity-list" data-testid="activity-list" id="activity-list"></ol>
+    </div>
+    <!-- The support slot (docs/SITE.md): ONE quiet line, a plain link, never a widget.
+         A sponsor unit replaces this element and nothing else. -->
+    <a class="rail-support" data-testid="rail-support" href="https://buymeacoffee.com/passingbypixels" target="_blank" rel="noopener"><span aria-hidden="true">&#9749;</span> Free forever. Coffee helps.</a>
+  </aside>
+</main>
+
+<section class="console" id="console" data-testid="console">
+  <button type="button" class="console-toggle" data-testid="console-toggle" id="console-toggle" aria-expanded="false">
+    <span class="chev" aria-hidden="true">&#9662;</span> Tool console
+    <span class="count" data-testid="tool-count" id="tool-count">0</span> tools
+    <span class="hint">Drive every tool by hand &mdash; no agent needed</span>
+  </button>
+  <div class="console-body" id="console-body" hidden>
+    <ol class="tool-list" data-testid="tool-list" id="tool-list"></ol>
+    <div class="tool-run">
+      <h3 data-testid="tool-name" id="tool-name">Pick a tool</h3>
+      <p class="tool-desc" data-testid="tool-desc" id="tool-desc">Every tool below is the same registration an agent sees over WebMCP.</p>
+      <details class="schema">
+        <summary>Input schema</summary>
+        <pre data-testid="tool-schema" id="tool-schema"></pre>
+      </details>
+      <!-- Two ways to fill the same call. The FORM is generated from the tool's inputSchema and
+           writes straight into the textarea below; the textarea is what gets sent, always. -->
+      <div class="args-head">
+        <span class="args-label">Arguments</span>
+        <span class="modes" role="group" aria-label="Argument entry mode">
+          <button type="button" data-testid="btn-mode-form" id="btn-mode-form" aria-pressed="true">Form</button>
+          <button type="button" data-testid="btn-mode-json" id="btn-mode-json" aria-pressed="false">JSON</button>
+        </span>
+      </div>
+      <div class="tool-form" data-testid="tool-form" id="tool-form"></div>
+      <textarea data-testid="tool-args" id="tool-args" spellcheck="false" rows="6" hidden>{}</textarea>
+      <div class="run-row">
+        <button type="button" class="primary" data-testid="btn-invoke" id="btn-invoke" disabled>Invoke</button>
+        <span class="run-state" data-testid="run-state" id="run-state"></span>
+      </div>
+      <label class="args-label" for="tool-result">Result</label>
+      <pre class="result" data-testid="tool-result" id="tool-result">&mdash;</pre>
+    </div>
+  </div>
+</section>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

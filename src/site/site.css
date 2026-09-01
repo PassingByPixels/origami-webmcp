@@ -1,0 +1,563 @@
+/* origami.gratis — the site pages (home, privacy, design). The tool pages keep styles.css.
+   The token block below is INSERTED at build time from src/app/styles.css, so the site and the
+   tools cannot drift apart. Do not paste token values here. */
+
+/*TOKENS*/
+
+/* ---------- the desk ----------
+
+   The site pages stand on a linen desk and every object on one is a sheet of paper. The tool
+   pages are NOT affected: they load src/app/styles.css and keep the app's own paper ground.
+
+   Exactly two tokens are re-declared, because the linen moved the floor under them. Both are
+   contrast, not taste:
+   - --bg is the linen itself.
+   - --ink-faint: the brand #8C857A measures 3.0:1 on linen, below AA for body sizes. #625C51
+     is 5.5:1 on the plain weave and still 4.6:1 in the darkest corner of the ground, where the
+     bottom-right shadow gradient runs at full strength.
+   --accent and --warn stay the brand colours, but on linen they measure 4.1:1 and 3.7:1 — both
+   below AA. Text that lands ON the linen uses --accent-deep or --warn-deep instead. On paper
+   the brand accent itself is 4.9:1 and is used as it is. Neither deep shade is a new colour:
+   they are the dark facets the Folio and Draw petals are already painted with. */
+:root {
+  --bg: #EFE9DC;
+  --ink-faint: #625C51;
+  --accent-deep: #3F5F39;
+  --warn-deep: #8A4522;
+  --card-back: #EFE7D8;
+  --font-hand: "Segoe Script", "Bradley Hand", "Snell Roundhand", "Comic Sans MS", cursive;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; }
+
+body {
+  background-color: var(--bg);
+  /* A fine warp and weft, then the overhead light from the top left and the shadow it throws
+     to the bottom right. Four gradients: no image file, so nothing is fetched. */
+  background-image:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.42) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    repeating-linear-gradient(0deg, rgba(120, 104, 80, 0.055) 0 1px, rgba(0, 0, 0, 0) 1px 3px),
+    radial-gradient(120% 90% at 22% 0%, rgba(255, 252, 244, 0.85), rgba(255, 252, 244, 0) 62%),
+    radial-gradient(120% 110% at 80% 100%, rgba(120, 102, 74, 0.14), rgba(0, 0, 0, 0) 60%);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+/* Structure for a screen reader, no pixels for anyone else. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- header ---------- */
+
+/* No bar: a painted strip would read as a shelf bolted over the desk. The mark simply sits on
+   the linen, on the same measure as everything below it. */
+.site-head {
+  display: flex;
+  align-items: center;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px clamp(18px, 4vw, 40px) 0;
+}
+
+.brand { display: flex; align-items: baseline; gap: 8px; text-decoration: none; }
+.brand .mark { width: 26px; height: 26px; align-self: center; }
+.wordmark { font-family: var(--font-display); font-size: 20px; letter-spacing: -0.01em; }
+.subbrand { font-size: 12px; color: var(--ink-faint); letter-spacing: 0.09em; text-transform: uppercase; }
+
+/* ---------- page frame ---------- */
+
+/* Wider than the old 960: the desk needs the width, or the five cards crowd the flower. The
+   prose pages are unaffected — .doc keeps its own 620px measure inside this. */
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 clamp(18px, 4vw, 40px);
+}
+
+/* ---------- the headline ---------- */
+
+.intro { max-width: 700px; padding: clamp(24px, 4vw, 40px) 0 clamp(16px, 3vw, 26px); }
+.intro h2 {
+  font-family: var(--font-display);
+  font-weight: normal;
+  font-size: clamp(32px, 4.6vw, 50px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 0 0 14px;
+}
+.intro p { font-size: 16px; line-height: 1.6; color: var(--ink-soft); margin: 0; max-width: 58ch; }
+.intro code { font-family: var(--font-mono); font-size: 0.88em; }
+
+/* Two passes of a pencil under the words, the second one lighter — a hand, not a border. */
+.underlined { position: relative; display: inline-block; white-space: nowrap; }
+.underlined .pencil {
+  position: absolute;
+  left: -2%;
+  bottom: -0.3em;
+  width: 104%;
+  height: 0.34em;
+  overflow: visible;
+  pointer-events: none;
+}
+.underlined .pencil path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.underlined .pencil path.ghost { stroke-width: 1.6; opacity: 0.4; }
+
+.doc { max-width: 620px; margin: 0 auto; padding: 40px 0 8px; }
+.doc h1 { font-family: var(--font-display); font-size: 30px; font-weight: normal; margin: 0 0 10px; }
+.doc h2 { font-family: var(--font-display); font-size: 17px; font-weight: normal; margin: 28px 0 6px; }
+.doc p { font-size: 14px; line-height: 1.65; color: var(--ink-soft); margin: 0 0 10px; }
+.doc .stamp { font-size: 12px; color: var(--ink-faint); margin-top: 28px; }
+
+/* ---------- the flower, lying flat on the desk ---------- */
+
+/* Two shadows, because a sheet of paper on a table casts two: a tight dark one where it
+   touches, and a wide soft one around it. Without the first the flower floats.
+
+   BOTH need pointer-events:none. The wider one is painted after .flower (same stacking
+   context, later in DOM order), so it lies over the middle of the flower and would swallow
+   every hover and every click on a petal. */
+.plate { position: relative; width: min(460px, 100%); margin: 0 auto; }
+.plate::before,
+.plate::after { pointer-events: none; }
+.plate::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 52%;
+  width: 64%;
+  height: 52%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(50% 50% at 50% 54%, rgba(74, 60, 40, 0.34), rgba(74, 60, 40, 0) 72%);
+  filter: blur(7px);
+}
+.plate::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 96%;
+  height: 80%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(50% 50% at 50% 50%, rgba(74, 60, 40, 0.16), rgba(74, 60, 40, 0) 70%);
+  filter: blur(14px);
+}
+
+.flower {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 2px 1px rgba(80, 66, 46, 0.28));
+}
+
+.disc { fill: var(--paper); stroke: var(--rule); stroke-width: 1; }
+/* A blank petal is a real petal in paper tones, not a faded one — no opacity trick. */
+.petal { cursor: pointer; }
+
+/* The lift runs along the petal's OWN axis: the translate sits inside the rotated group. */
+.lift { transition: transform 150ms ease-out; }
+.petal:hover .lift,
+.petal:focus-visible .lift { transform: translateY(-4px); }
+
+/* Labels are permanent: the flower has to name its tools without a mouse on it. */
+.petal-label {
+  pointer-events: none;
+  font-family: var(--font-body);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  fill: var(--ink-soft);
+  transition: fill 140ms ease-out;
+}
+.petal:hover .petal-label,
+.petal:focus-visible .petal-label { fill: var(--accent); }
+
+.petal-chip rect { fill: var(--paper); stroke: var(--ink-faint); stroke-width: 1; }
+.petal-chip text {
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  fill: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lift, .petal-label, .tool-card { transition: none; }
+}
+
+/* ---------- the desk: the flower, with the cards laid around it ---------- */
+
+/* Five cards around one centrepiece, and no bare patch of desk between them:
+   - Folio and Charts hold the left column, Draw and Gantt the right. Each pair is CENTRED in
+     its row, so the slack the taller flower leaves is split three ways (~26px each) instead of
+     collecting into one hole. Stretching the cards instead was worse: a card tall enough to
+     fill the column is a half-empty sheet, and an empty sheet reads as a fault, not as desk.
+   - Design lies ACROSS the bottom, all three columns wide. As a portrait card centred under
+     the flower it left a ~330px dead patch of linen either side of it at 1440. A landscape
+     sheet closes the composition and reads as deliberate. */
+.desk {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 1.45fr) minmax(0, 1fr);
+  gap: 26px clamp(20px, 2.4vw, 34px);
+  padding: 96px 0 clamp(28px, 4vw, 44px);
+}
+
+.slot-flower { grid-column: 2; grid-row: 1 / 3; align-self: center; justify-self: center; width: 100%; }
+.slot-folio  { grid-column: 1; grid-row: 1; align-self: center; }
+.slot-charts { grid-column: 1; grid-row: 2; align-self: center; }
+.slot-draw   { grid-column: 3; grid-row: 1; align-self: center; }
+.slot-gantt  { grid-column: 3; grid-row: 2; align-self: center; }
+.slot-design { grid-column: 1 / 4; grid-row: 3; }
+
+/* ---------- a card is a folded sheet of paper ---------- */
+
+.tool-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 132px;
+  padding: 17px 19px 16px;
+  border-radius: 2px;
+  text-decoration: none;
+  color: var(--ink);
+  /* One crease, and the two faces of the sheet either side of it: the left face takes the
+     overhead light, the right face is turned a few degrees out of it. */
+  background: linear-gradient(
+    101deg,
+    #FFFEFA 0 42.6%,
+    var(--card-back) 42.9%,
+    #FFFFFF 43.7%,
+    #FBF5E9 44.6%,
+    #FCF8EE 100%
+  );
+  box-shadow:
+    0 1px 1px rgba(80, 66, 46, 0.2),
+    0 6px 12px -4px rgba(80, 66, 46, 0.24),
+    0 18px 26px -14px rgba(60, 48, 32, 0.35);
+  transform: rotate(var(--tilt, 0deg));
+  transform-origin: 50% 60%;
+  transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+}
+
+/* the top corner turned back, showing the reverse of the paper */
+.tool-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(225deg, #F1EADC 0%, #E6DDCB 55%, #DCD2BE 100%);
+  clip-path: polygon(100% 0, 100% 100%, 0 0);
+  box-shadow: -2px 2px 4px rgba(80, 66, 46, 0.22);
+  border-bottom-left-radius: 2px;
+}
+
+/* picked up off the desk, and straightened while it is in the hand */
+.tool-card:hover,
+.tool-card:focus-visible {
+  transform: rotate(0deg) translateY(-4px);
+  box-shadow:
+    0 1px 1px rgba(80, 66, 46, 0.16),
+    0 10px 18px -4px rgba(80, 66, 46, 0.26),
+    0 30px 40px -18px rgba(60, 48, 32, 0.42);
+}
+
+/* Dropped by hand, so no two lie at the same angle. */
+.slot-folio  { --tilt: -1.7deg; }
+.slot-draw   { --tilt: 1.8deg; }
+.slot-charts { --tilt: 1.2deg; }
+.slot-gantt  { --tilt: -1.1deg; }
+.slot-design { --tilt: 0.9deg; }
+
+.tool-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 34px; /* clear of the folded corner */
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.tool-swatch {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1) inset;
+}
+.tool-chip {
+  font-family: var(--font-body);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+.tool-chip[data-chip='live'] { color: var(--accent); border-color: var(--accent); }
+.tool-blurb { font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+/* pinned to the foot of the sheet, so every card reads the same way down */
+.tool-go {
+  margin-top: auto;
+  padding-top: 10px;
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ---------- the handwritten note ---------- */
+
+/* It points at the Folio card, because Folio is where a first visit should start. The arrow
+   ends above the card's top edge, clear of the name and the LIVE chip. */
+.note {
+  position: absolute;
+  left: 30px;
+  top: 10px;
+  width: 190px;
+  pointer-events: none;
+}
+/* Only the words are tilted. Tilting the whole note would tilt the arrow off its target too. */
+.note .say {
+  display: inline-block;
+  font-family: var(--font-hand);
+  font-size: 17px;
+  line-height: 1.3;
+  color: var(--accent-deep);
+  transform: rotate(-3deg);
+  transform-origin: 0 100%;
+}
+.note svg { display: block; width: 130px; height: 76px; overflow: visible; }
+.note svg path {
+  fill: none;
+  stroke: var(--accent-deep);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.note svg path.ghost { stroke-width: 1.2; opacity: 0.42; }
+
+/* The one prop on the desk. It earns its place: the note fills the band above the Folio card on
+   the left, and without this the matching band above Draw measured 122px of bare linen — the
+   only gap on the desk over the ~120px the composition allows. */
+.prop-plane {
+  position: absolute;
+  right: 26px;
+  top: 2px;
+  width: 88px;
+  height: auto;
+  pointer-events: none;
+  transform: rotate(-13deg);
+  filter: drop-shadow(0 6px 8px rgba(80, 66, 46, 0.22));
+}
+
+/* ---------- what is on the table: one notepad sheet ---------- */
+
+.pad {
+  position: relative;
+  margin-top: clamp(18px, 3vw, 30px);
+  padding: clamp(24px, 3.4vw, 38px) clamp(20px, 3.4vw, 40px) clamp(26px, 3.4vw, 38px);
+  background: var(--paper);
+  border-radius: 3px;
+  box-shadow:
+    0 1px 1px rgba(80, 66, 46, 0.18),
+    0 8px 16px -6px rgba(80, 66, 46, 0.22),
+    0 26px 34px -20px rgba(60, 48, 32, 0.34);
+  transform: rotate(-0.35deg);
+}
+/* the same folded corner the cards carry, one size up */
+.pad::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 44px;
+  height: 44px;
+  background: linear-gradient(225deg, var(--card-back) 0%, #E2D8C4 55%, #D7CBB4 100%);
+  clip-path: polygon(100% 0, 100% 100%, 0 0);
+  box-shadow: -2px 2px 5px rgba(80, 66, 46, 0.26);
+  border-bottom-left-radius: 3px;
+}
+.pad-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: normal;
+  margin: 0 0 20px;
+  padding-right: 52px;
+}
+
+.notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 30px; }
+.notes h3 { font-family: var(--font-display); font-size: 17px; font-weight: normal; margin: 0 0 7px; }
+.notes p { font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); margin: 0; }
+.notes code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--accent-soft);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+.notes pre {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  background: #FAF7F2;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 9px 11px;
+  margin: 9px 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.extension {
+  margin: 24px 0 0;
+  padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.extension a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
+.connect { margin-top: 10px; }
+.connect summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--accent);
+  list-style: none;
+}
+.connect summary::-webkit-details-marker { display: none; }
+.connect summary::before { content: '+ '; }
+.connect[open] summary::before { content: '– '; }
+.connect p { margin: 8px 0 0; }
+
+/* ---------- design, coming soon ---------- */
+
+.soon-page { text-align: center; }
+.soon-page .motif { display: block; width: 92px; height: auto; margin: 0 auto 22px; }
+.soon-page p { font-size: 15px; }
+/* on the linen, not on paper — so the deep green, not the brand accent */
+.backhome { color: var(--accent-deep); text-decoration: none; font-size: 13px; }
+.backhome:hover { text-decoration: underline; }
+
+/* ---------- footer ---------- */
+
+.site-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 24px;
+  max-width: 1120px;
+  margin: 0 auto;
+  /* no rule across the linen: the notepad sheet already ends the page */
+  padding: 34px clamp(18px, 4vw, 40px) 44px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+.site-foot a { text-decoration: none; }
+.site-foot a:hover { text-decoration: underline; }
+.site-foot .coffee { color: var(--warn-deep); }
+
+/* ---------- the desk, narrower ---------- */
+
+/* Below this the three columns cannot hold a readable card, so the flower goes to the top and
+   the cards pair up under it. The note goes with them: it points at the Folio card, and from
+   here down that card is no longer beside the flower for an arrow to reach. */
+@media (max-width: 980px) {
+  .desk {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: clamp(18px, 3vw, 28px);
+  }
+  .slot-flower { grid-column: 1 / 3; grid-row: 1; margin-bottom: 6px; }
+  .slot-folio  { grid-column: 1; grid-row: 2; }
+  .slot-draw   { grid-column: 2; grid-row: 2; }
+  .slot-charts { grid-column: 1; grid-row: 3; }
+  .slot-gantt  { grid-column: 2; grid-row: 3; }
+  .slot-design { grid-column: 1 / 3; grid-row: 4; }
+  .note, .prop-plane { display: none; }
+  .notes { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* One hand, one column: the flower, then the cards in the order the flower names them. */
+@media (max-width: 560px) {
+  .desk { grid-template-columns: minmax(0, 1fr); }
+  .slot-flower,
+  .slot-folio,
+  .slot-draw,
+  .slot-charts,
+  .slot-gantt,
+  .slot-design {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  /* flattened, not squared: a phone screen has no room for a scatter, but the paper should
+     still not look printed on */
+  .slot-folio  { --tilt: -0.5deg; }
+  .slot-draw   { --tilt: 0.5deg; }
+  .slot-charts { --tilt: 0.5deg; }
+  .slot-gantt  { --tilt: -0.5deg; }
+  .slot-design { --tilt: 0.5deg; }
+  .tool-card { min-height: 0; }
+}
+
+/* From here up the Design sheet spans the desk, so its crease moves to the far end. Left at
+   42.6% it would split a metre of paper down the middle and read as two sheets butted
+   together, not as one sheet with a turned edge. */
+@media (min-width: 561px) {
+  .slot-design {
+    background: linear-gradient(
+      101deg,
+      #FFFEFA 0 85.6%,
+      var(--card-back) 85.9%,
+      #FFFFFF 86.6%,
+      #FBF5E9 87.4%,
+      #FCF8EE 100%
+    );
+  }
+}
+
+/* Design lies on its side only while it has the width to carry name, blurb and action in one
+   line. Below that it stays a portrait card that happens to be wide. */
+@media (min-width: 700px) {
+  .slot-design {
+    flex-direction: row;
+    align-items: center;
+    gap: 26px;
+    min-height: 82px;
+    padding: 16px 24px 16px 22px;
+  }
+  /* Name and blurb stay together at the left, as they read on a portrait card; only the action
+     goes to the far end. Letting the blurb take the slack instead left three items marooned
+     across a metre of paper. */
+  .slot-design .tool-name { flex: none; padding-right: 0; }
+  .slot-design .tool-blurb { flex: 0 1 auto; }
+  .slot-design .tool-go { flex: none; margin: 0 0 0 auto; padding: 0 34px 0 0; }
+}

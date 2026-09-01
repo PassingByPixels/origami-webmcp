@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Origami — free tools that make one file</title>
+<meta name="description" content="Free browser tools. Each one makes a single .origami.html file. No accounts, no analytics, nothing uploaded.">
+<link rel="icon" href="./favicon.svg">
+<link rel="stylesheet" href="./site.css">
+</head>
+<body class="desk-page">
+
+<!--HEADER-->
+
+<main>
+  <h1 class="sr-only">Origami — free tools that make one file</h1>
+
+  <section class="intro">
+    <h2>One file.<br><span class="underlined">Every tool.<svg class="pencil" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true"><path d="M3,8.4 C34,4.9 68,10.2 100,6.6 C132,3.2 166,9.1 197,5.2"/><path class="ghost" d="M6,10.4 C38,7.6 70,12 104,8.6 C136,5.4 168,11 194,7.4"/></svg></span></h2>
+    <p>Free browser tools. Each one makes a single <code>.origami.html</code> file. No accounts, no analytics, nothing uploaded.</p>
+  </section>
+
+  <!-- The desk. The flower is the centrepiece; the five cards lie around it. Both are rendered
+       from the ONE petal config in parts.mjs, so a new tool arrives on the desk and in the
+       flower at the same time. The note is home-page furniture, so it lives here, not there. -->
+  <section class="desk">
+    <div class="note" aria-hidden="true">
+      <span class="say">start here</span>
+      <svg viewBox="0 0 130 76" aria-hidden="true"><path d="M100,2 C102,24 84,44 54,54 C42,58 32,62 26,68"/><path d="M30,52 C28,59 26,65 26,68 C31,68 37,69 43,70"/><path class="ghost" d="M104,7 C106,28 87,48 58,58 C47,62 37,66 31,72"/></svg>
+    </div>
+    <svg class="prop-plane" viewBox="0 0 72 56" aria-hidden="true"><polygon points="68,3 4,25 34,33" fill="#FFFDF8" stroke="#C4BAA2" stroke-width="1.2" stroke-linejoin="round"/><polygon points="68,3 34,33 27,53" fill="#E0D6C1" stroke="#C4BAA2" stroke-width="1.2" stroke-linejoin="round"/></svg>
+    <div class="slot-flower"><div class="plate"><!--FLOWER--></div></div>
+    <!--CARDS-->
+  </section>
+
+  <section class="pad">
+    <h2 class="pad-title">What is on the table</h2>
+    <div class="notes">
+      <div>
+        <h3>One file</h3>
+        <p>Every tool here ends in one <code>.origami.html</code> file. Double-click it and it plays. The renderer is inside the file. There is nothing to install, and nothing to keep a subscription for.</p>
+      </div>
+      <div>
+        <h3>Agents included</h3>
+        <p>Every page hands its tools to an agent over WebMCP. A human can drive the same tools by hand, on the same page, in the same order. It works both ways: fold a deck yourself — here, or with the extension — then Open it on any tool page and hand the rest to an agent.</p>
+        <details class="connect">
+          <summary>Connect your agent</summary>
+          <p>To let an agent in this browser author a document, turn WebMCP on:</p>
+          <pre>chrome://flags/#enable-webmcp-testing
+— or launch Chrome with —
+--enable-features=WebMCP</pre>
+          <p>Then reload the page.</p>
+        </details>
+      </div>
+      <div>
+        <h3>Private by construction</h3>
+        <p>This is a static site. There are no accounts and no analytics. You make your document in the tab and you save it to your own disk, or to your browser's own storage. It is never uploaded.</p>
+      </div>
+    </div>
+    <p class="extension">Folio also runs as a Chrome extension, so the editor is one click away on any tab — <a href="https://chromewebstore.google.com/detail/origami-folio/flhbdfakcooaomfaehhgenmmnlglhehk" target="_blank" rel="noopener" data-testid="extension-link">get Origami Folio from the Chrome Web Store</a>.</p>
+  </section>
+</main>
+
+<!--FOOTER-->
+
+</body>
+</html>

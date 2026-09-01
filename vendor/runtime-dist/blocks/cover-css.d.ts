@@ -1,0 +1,1 @@
+export declare const coverCss = "/* @kind:cover */\n.k-cover .eyebrow { margin-bottom: 30px; }\n.k-cover .lede { margin-top: 6px; }\n.k-cover .slide-inner::after {\n  content: \"\"; display: block; width: 64px; height: 3px;\n  background: var(--accent); margin-top: 44px; border-radius: 2px;\n}\n/* @endkind */\n";

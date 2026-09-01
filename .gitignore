@@ -1,0 +1,9 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.playwright/
+*.log
+
+# throwaway Chrome profiles created by tests/e2e/webmcp-native.spec.ts
+.tmp-chrome-*/

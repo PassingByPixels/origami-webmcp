@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en" data-origami="1.0">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P2 Fixture Deck</title>
+<style id="origami-base-css">
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.slide {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  background:
+    radial-gradient(circle at 12% 8%, var(--tint-a) 0%, transparent 42%),
+    radial-gradient(circle at 88% 92%, var(--tint-b) 0%, transparent 42%),
+    var(--bg);
+}
+.slide-inner { width: min(1080px, 90vw); margin: 0 auto; padding: clamp(72px, 12vh, 128px) 0; }
+/* blocks inserted beside a kind component (roadmap/tracker/flow/graph folds
+   have no .slide-inner) get the standard column gutter instead of full-bleed */
+.k-gantt > :not(.o-gantt-shell), .k-tracker > :not(.o-tracker-shell),
+.k-flow > :not(.o-flow-shell), .k-graph > :not(.o-graph-shell) {
+  width: min(1080px, 90vw); margin-left: auto; margin-right: auto;
+}
+.eyebrow {
+  font-size: calc(13px * var(--osz, 1)); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.2em; color: var(--accent); margin: 0 0 22px;
+}
+h1 {
+  font-family: var(--font-display); font-weight: 600;
+  font-size: calc(clamp(48px, 7.5vw, 96px) * var(--osz, 1)); line-height: 1.02;
+  letter-spacing: -0.022em; margin: 0 0 28px;
+}
+h2 {
+  font-family: var(--font-display); font-weight: 600;
+  font-size: calc(clamp(36px, 4.8vw, 60px) * var(--osz, 1)); line-height: 1.06;
+  letter-spacing: -0.018em; margin: 0 0 26px;
+}
+.lede { font-size: calc(clamp(19px, 2.1vw, 26px) * var(--osz, 1)); color: var(--ink-soft); max-width: 56ch; line-height: 1.55; }
+p { margin: 0 0 14px; font-size: calc(1em * var(--osz, 1)); }
+.rule { border: none; border-top: 1px solid var(--rule); margin: 28px 0; }
+
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(28px, 4vw, 56px); align-items: start; margin: 18px 0; }
+@media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+.card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: clamp(16px, 2vw, 28px); margin-top: clamp(28px, 5vh, 52px); }
+.stat-card { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: clamp(24px, 3vw, 40px); box-shadow: 0 1px 2px rgba(26,26,26,0.04), 0 6px 24px rgba(26,26,26,0.05); }
+.stat-card .big { font-family: var(--font-display); font-size: calc(clamp(48px, 5.5vw, 84px) * var(--osz, 1)); font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
+.stat-card .lbl { font-size: calc(14px * var(--osz, 1)); font-weight: 600; color: var(--ink-soft); margin-top: 14px; text-transform: uppercase; letter-spacing: 0.08em; }
+.o-cover-mark { display: inline-block; vertical-align: middle; height: calc(72px * var(--osz, 1)); width: auto; max-width: calc(300px * var(--osz, 1)); object-fit: contain; object-position: left; margin-bottom: 28px; }
+/* a stamp followed by a short text block forms a side-by-side lockup; text too
+   wide for the remaining space drops below on its own (eyebrows excluded —
+   covers stack stamp-then-eyebrow by design) */
+.o-cover-mark + :where(h1, h2, p:not(.eyebrow), .lede, .o-text) {
+  display: inline-block; vertical-align: middle; width: auto; max-width: 100%; margin-left: 20px;
+}
+.o-text { margin: 14px 0; font-size: calc(1em * var(--osz, 1)); }
+/* paragraphs inside a text block read as one flowing box, not stacked blocks */
+.o-text p { margin: 0 0 8px; }
+.o-text p:last-child { margin-bottom: 0; }
+ul, ol { font-size: calc(1em * var(--osz, 1)); }
+figcaption { font-size: calc(1em * var(--osz, 1)); }
+
+/* ---- block formatting vocabulary (data-o*): core, kind-agnostic.
+   Size = a multiplier consumed by the type rules above. The :where reset
+   stops it inheriting into nested consuming rules (a quote's <p> would
+   otherwise scale twice); the scaled font-size itself flows down via em.
+   Tone = an inherited custom property (presets below, custom via
+   style="--tone:#hex"). ---- */
+[data-oalign="left"] { text-align: left; }
+[data-oalign="center"] { text-align: center; }
+[data-oalign="right"] { text-align: right; }
+figure.o-img[data-oalign="center"] { margin-left: auto; margin-right: auto; }
+figure.o-img[data-oalign="right"] { margin-left: auto; }
+.o-cover-mark[data-oalign="center"] { margin-left: auto; margin-right: auto; object-position: center; }
+.o-cover-mark[data-oalign="right"] { margin-left: auto; object-position: right; }
+[data-osize] :where(*) { --osz: 1; }
+[data-osize="s"] { --osz: 0.8; }
+[data-osize="l"] { --osz: 1.25; }
+[data-osize="xl"] { --osz: 1.55; }
+[data-osize="xxl"] { --osz: 2; }
+[data-osize="xxxl"] { --osz: 2.7; }
+[data-otone] { color: var(--tone, inherit); }
+[data-otone="accent"] { --tone: var(--accent); }
+[data-otone="green"] { --tone: #3D8B5A; }
+[data-otone="amber"] { --tone: #B07D2B; }
+[data-otone="red"] { --tone: #B3402A; }
+[data-otone="ink"] { --tone: var(--ink); }
+.stat-card[data-otone] { border-color: var(--tone, var(--rule)); color: inherit; }
+.stat-card[data-otone] .big { color: var(--tone, inherit); }
+.o-btn[data-otone] { background: var(--tone, var(--accent)); color: #fff; }
+.o-pill[data-otone] { border-color: var(--tone, var(--rule)); color: var(--tone, inherit); }
+figure.o-img[data-owidth] { width: calc(var(--ow, 100) * 1% - 6px); display: inline-block; vertical-align: top; }
+figure.o-img[data-owidth] + figure.o-img[data-owidth] { margin-left: 10px; }
+[data-ofont="playfair"] { font-family: 'Playfair Display', Georgia, serif; }
+[data-ofont="lora"] { font-family: 'Lora', Georgia, serif; }
+[data-ofont="inter"] { font-family: 'Inter', "Segoe UI", Arial, sans-serif; }
+[data-ofont="source-serif"] { font-family: 'Source Serif 4', Georgia, serif; }
+table.o-table[data-ohead="row"] th, table.o-table[data-ohead="both"] th {
+  background: color-mix(in srgb, var(--accent) 9%, var(--paper)); color: var(--accent);
+  border-bottom-color: var(--accent); padding-left: 10px;
+}
+table.o-table[data-ohead="col"] td:first-child, table.o-table[data-ohead="both"] td:first-child {
+  background: color-mix(in srgb, var(--accent) 9%, var(--paper)); font-weight: 700; padding-left: 10px;
+}
+.o-quote {
+  border-left: 3px solid var(--accent); margin: 28px 0; padding: 6px 0 6px 28px;
+  font-family: var(--font-display); font-style: italic;
+  font-size: calc(clamp(24px, 2.7vw, 36px) * var(--osz, 1)); line-height: 1.45; color: var(--ink);
+}
+.o-quote footer {
+  margin-top: 14px; font-family: var(--font-body); font-style: normal;
+  font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
+}
+table.o-table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: calc(clamp(15px, 1.6vw, 19px) * var(--osz, 1)); }
+.o-table th {
+  text-align: left; font-size: calc(12.5px * var(--osz, 1)); font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--ink-soft); border-bottom: 2px solid var(--ink); padding: 10px 18px 10px 0;
+}
+.o-table td { border-bottom: 1px solid var(--rule); padding: 13px 18px 13px 0; vertical-align: top; }
+.o-btn {
+  display: inline-block; background: var(--accent); color: #fff; border-radius: 8px;
+  padding: 13px 28px; font-weight: 600; font-size: calc(15px * var(--osz, 1)); text-decoration: none; margin: 10px 0;
+}
+.o-pill {
+  display: inline-block; border: 1px solid var(--rule); background: var(--paper); border-radius: 999px;
+  padding: 6px 16px; font-size: calc(13px * var(--osz, 1)); font-weight: 600; color: var(--ink-soft); margin: 0 8px 8px 0;
+}
+.o-icon { display: inline-flex; color: var(--accent); vertical-align: middle; }
+.o-icon svg { width: 1.5em; height: 1.5em; }
+/* traffic light — the lit lamp follows the block's tone (the toolbar tone dots
+   are the switch): green / amber / red; cleared = no status, all lamps dim */
+.o-tlight {
+  display: inline-flex; align-items: center; gap: 7px; margin: 10px 0;
+  padding: 9px 18px 9px 12px; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper);
+}
+.o-tlight .tl-lamp { width: calc(15px * var(--osz, 1)); height: calc(15px * var(--osz, 1)); border-radius: 50%; opacity: 0.16; flex: 0 0 auto; }
+.o-tlight .tl-r { background: #B3402A; }
+.o-tlight .tl-a { background: #B07D2B; }
+.o-tlight .tl-g { background: #3D8B5A; }
+.o-tlight[data-otone="red"] .tl-r, .o-tlight[data-otone="amber"] .tl-a, .o-tlight[data-otone="green"] .tl-g { opacity: 1; }
+.o-tlight p { margin: 0 0 0 4px; font-weight: 700; font-size: calc(14px * var(--osz, 1)); }
+figure.o-img { margin: 26px 0; }
+figure.o-img img {
+  display: block; width: 100%; height: auto; border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(26,26,26,0.06), 0 12px 40px rgba(26,26,26,0.10);
+}
+figure.o-img figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
+
+/* stepped position (round G): 11 stops, 0 (cleared) = natural left, 10 = flush
+   right, 5 = exact centre. margin-left walks the container while translate
+   pulls back the same fraction of the BLOCK's own width — together a true
+   lerp from flush-left to flush-right at any block size. translate is the
+   separate CSS property, so .anim's transform never fights it. :where keeps
+   width specificity flat (data-owidth still wins on resized images); the rule
+   sits AFTER every block rule above so its margin-left beats their margin
+   shorthands. Layout containers are excluded — they own their full width. */
+[data-opos]:where(:not(.card-grid):not(.cols):not(table)) {
+  width: fit-content; margin-left: calc(var(--op, 0) * 10%); translate: calc(var(--op, 0) * -10%) 0;
+}
+[data-opos="1"] { --op: 1; } [data-opos="2"] { --op: 2; } [data-opos="3"] { --op: 3; }
+[data-opos="4"] { --op: 4; } [data-opos="5"] { --op: 5; } [data-opos="6"] { --op: 6; }
+[data-opos="7"] { --op: 7; } [data-opos="8"] { --op: 8; } [data-opos="9"] { --op: 9; }
+[data-opos="10"] { --op: 10; }
+
+/* diagram ✎ — rendered only by the Studio canvas (edit mode), shared by the
+   flow + graph kinds, so it lives in base rather than a treeshakeable section */
+.o-diagram-edit {
+  position: absolute; top: 8px; right: 8px; font: 600 12px "Segoe UI", sans-serif;
+  border: 1px solid var(--rule); border-radius: 7px; background: var(--paper);
+  color: var(--ink-soft); padding: 5px 10px; cursor: pointer;
+}
+.o-diagram-edit:hover { color: var(--accent); border-color: var(--accent); }
+.o-dport { cursor: crosshair; }
+.o-dmenu {
+  position: absolute; z-index: 60; display: flex; flex-direction: column; gap: 2px;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; padding: 4px;
+  box-shadow: 0 8px 26px rgba(26,26,26,0.16);
+}
+.o-dmenu button {
+  border: none; background: none; cursor: pointer; text-align: left;
+  font: 600 12.5px var(--font-body); color: var(--ink); padding: 6px 12px; border-radius: 5px;
+}
+.o-dmenu button:hover { background: var(--rule-soft); color: var(--accent); }
+.o-dmrename {
+  position: absolute; z-index: 60; width: 180px; text-align: center;
+  font: 600 13px var(--font-body); color: var(--ink);
+  border: 1.5px solid var(--accent); border-radius: 7px; padding: 5px 8px; background: var(--paper);
+}
+
+.anim { opacity: 0; transform: translateY(16px); }
+.is-shown .anim {
+  animation: o-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+@keyframes o-rise { to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .anim { opacity: 1; transform: none; animation: none; }
+}
+</style>
+<style id="origami-kinds-css">
+/* @kind:cover */
+.k-cover .eyebrow { margin-bottom: 30px; }
+.k-cover .lede { margin-top: 6px; }
+.k-cover .slide-inner::after {
+  content: ""; display: block; width: 64px; height: 3px;
+  background: var(--accent); margin-top: 44px; border-radius: 2px;
+}
+/* @endkind */
+/* @kind:bullets */
+.k-bullets ul { list-style: none; padding: 0; margin: 10px 0 0; font-size: calc(clamp(20px, 2.2vw, 27px) * var(--osz, 1)); line-height: 1.6; }
+.k-bullets li { padding: 16px 0 16px 36px; position: relative; border-bottom: 1px solid var(--rule-soft); font-size: calc(1em * var(--osz, 1)); }
+.k-bullets li::before { content: "—"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
+.k-bullets li:last-child { border-bottom: none; }
+/* @endkind */
+/* @kind:stats */
+/* stat cards are core block vocabulary (base sheet) — blocks render
+   identically on every slide kind */
+/* @endkind */
+/* @kind:gantt */
+.k-gantt { justify-content: flex-start; }
+.o-gantt-shell { width: min(1480px, 96vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 32px; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.o-gantt-head .eyebrow { margin-bottom: 12px; }
+.o-gantt-head h2 { margin-bottom: 18px; }
+.o-gantt { display: flex; flex-direction: column; min-height: 0; }
+.o-gantt-bar { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; flex-wrap: wrap; }
+.o-gantt-chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.o-gantt-chip {
+  border: 1px solid var(--rule); background: var(--paper); color: var(--ink-soft); cursor: pointer;
+  border-radius: 999px; padding: 4px 12px; font: 600 11.5px var(--font-body);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.o-gantt-chip:hover { border-color: var(--accent); color: var(--accent); }
+.o-gantt-chip.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.o-gantt-wrap { overflow: auto; position: relative; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); max-height: 62vh; }
+.o-gantt-grid { position: relative; min-width: 100%; width: max-content; padding-bottom: 10px; }
+.o-gantt-axis { position: sticky; top: 0; z-index: 30; background: var(--paper); border-bottom: 2px solid var(--rule); height: 52px; display: flex; box-shadow: 0 2px 4px rgba(26,26,26,0.04); }
+.o-gantt-corner { width: 230px; flex-shrink: 0; border-right: 2px solid var(--rule); background: var(--paper); position: sticky; left: 0; z-index: 5; padding: 8px 14px; font-size: 11px; color: var(--ink-soft); letter-spacing: 0.08em; text-transform: uppercase; box-sizing: border-box; }
+.o-gantt-axis-track { position: relative; flex: 1; min-width: var(--gantt-w); }
+.o-gantt-month { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--rule); padding: 8px 8px 0; font-size: 11px; color: var(--ink-soft); letter-spacing: 0.08em; text-transform: uppercase; box-sizing: border-box; }
+.o-gantt-month-name { font-weight: 600; color: var(--ink); }
+.o-gantt-month-range { font-size: 10px; opacity: 0.7; }
+.o-gantt-tick { position: absolute; top: 34px; width: 1px; height: 18px; background: var(--rule); }
+.o-gantt-tick.major { background: var(--ink-soft); }
+.o-gantt-lane { display: flex; min-height: 64px; border-bottom: 1px solid var(--rule); }
+.o-gantt-lane:nth-child(even) .o-gantt-tracks { background: color-mix(in srgb, var(--rule) 18%, var(--paper)); }
+.o-gantt-label { width: 230px; flex-shrink: 0; padding: 10px 14px; border-right: 2px solid var(--rule); background: var(--paper); position: sticky; left: 0; z-index: 10; display: flex; flex-direction: column; justify-content: center; box-sizing: border-box; }
+.o-gantt-lane-name { font-size: 13px; font-weight: 700; color: var(--accent); padding-right: 46px; }
+.o-gantt-lane-owner { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.o-gantt-lane-count { font-size: 11px; color: var(--ink-soft); margin-top: 4px; font-weight: 600; }
+.o-gantt-tracks { position: relative; flex: 1; min-width: var(--gantt-w); background: var(--paper); }
+.o-gantt-card {
+  position: absolute; min-width: 24px; height: 36px; border-radius: 4px;
+  padding: 4px 14px 4px 12px; color: #fff; font-size: 11px; font-weight: 600;
+  overflow: hidden; display: flex; align-items: center; box-sizing: border-box;
+  transition: opacity 0.25s, transform 0.15s, box-shadow 0.2s;
+  border: 2px solid transparent; box-shadow: 0 1px 3px rgba(26,26,26,0.10); user-select: none;
+}
+.o-gantt-card.faded { opacity: 0.12; pointer-events: none; }
+.o-gantt-card.completed { opacity: 0.32; filter: grayscale(0.65); }
+.o-gantt-card.completed .o-gantt-card-title { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.o-gantt-card.completed::before { content: '\2713'; display: inline-block; margin-right: 4px; font-weight: 800; color: #fff; }
+.o-gantt-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,0.85); margin-right: 6px; flex-shrink: 0; }
+.o-gantt-card-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-gantt-ms-line { position: absolute; top: 0; bottom: 0; width: 2px; opacity: 0.7; pointer-events: none; z-index: 4; }
+.o-gantt-ms-tag {
+  position: absolute; top: 4px; transform: translateX(-50%); white-space: nowrap;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em; z-index: 35;
+  background: var(--paper); padding: 1px 6px; border-radius: 4px; border: 1px solid currentColor; user-select: none;
+}
+.o-gantt-ms-tag::after { content: ''; position: absolute; left: 50%; top: 100%; width: 2px; height: 8px; background: currentColor; transform: translateX(-50%); }
+.o-gantt-legend { flex-shrink: 0; padding: 10px 2px 0; display: flex; align-items: center; gap: 18px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+.o-gantt-swatch { display: inline-flex; align-items: center; gap: 6px; }
+.o-gantt-swatch .sw { width: 14px; height: 14px; border-radius: 3px; }
+.o-gantt-count { margin-left: auto; color: var(--accent); font-weight: 600; }
+.o-gantt-empty { padding: 28px 14px; color: var(--ink-soft); font-size: 14px; }
+.o-gantt-error { padding: 24px 0; color: #a13d2d; font-size: 15px; }
+@media (max-width: 760px) { .o-gantt-corner, .o-gantt-label { width: 130px; } }
+/* @endkind */
+/* @kind:flow */
+.k-flow { justify-content: flex-start; }
+.o-flow-shell { width: min(1280px, 94vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-flow-head .eyebrow { margin-bottom: 12px; }
+.o-flow-head h2 { margin-bottom: 18px; }
+.o-flow { position: relative; }
+.o-flow-svg { display: block; width: 100%; height: auto; max-height: 72vh; }
+
+/* @kind:graph */
+.k-graph { justify-content: flex-start; }
+.o-graph-shell { width: min(1280px, 94vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-graph-head .eyebrow { margin-bottom: 12px; }
+.o-graph-head h2 { margin-bottom: 18px; }
+.o-graph { position: relative; }
+.o-graph-svg { display: block; width: 100%; height: auto; max-height: 72vh; }
+
+/* @kind:tracker */
+.k-tracker { justify-content: flex-start; }
+.o-tracker-shell { width: min(1200px, 92vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-tracker-head .eyebrow { margin-bottom: 12px; }
+.o-tracker-head h2 { margin-bottom: 18px; }
+.o-tracker-filterbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 12px;
+  padding: 12px 14px; background: var(--paper); border: 1px solid var(--rule);
+  border-radius: 12px; box-shadow: 0 2px 12px rgba(26,26,26,0.05);
+}
+.o-tracker-search { flex: 1; min-width: 200px; font: inherit; font-size: 14px; border: 1.5px solid var(--rule); border-radius: 8px; padding: 8px 12px; background: var(--paper); color: var(--ink); }
+.o-tracker-search:focus { border-color: var(--accent); outline: none; }
+.o-tracker-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; user-select: none; white-space: nowrap; }
+.o-tracker-toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.o-tracker-clear { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 8px; padding: 7px 12px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
+.o-tracker-clear:hover { border-color: var(--accent); color: var(--accent); }
+.o-tracker-toolbar { display: flex; align-items: center; gap: 14px; margin: 8px 0 14px; }
+.o-tracker-add { font: 600 13px var(--font-body); border: none; border-radius: 8px; padding: 8px 14px; background: #3D8B5A; color: #fff; cursor: pointer; }
+.o-tracker-add:hover { background: #2d6c45; }
+.o-tracker-wrap { border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(26,26,26,0.05); }
+table.o-tracker-table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--paper); }
+table.o-tracker-table th { background: var(--accent); color: #fff; text-align: left; padding: 11px 14px; font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em; }
+table.o-tracker-table td { padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.o-tracker-table tr:last-child td { border-bottom: none; }
+table.o-tracker-table tr.done td { background: #f3faf5; }
+table.o-tracker-table tr.done .o-tracker-cell[data-f="action"] { text-decoration: line-through; color: var(--ink-soft); }
+table.o-tracker-table tr.blocked td { background: #fdeeee; }
+table.o-tracker-table tr.blocked .o-tracker-status, table.o-tracker-table tr.blocked .o-tracker-status-text { border-color: #B3402A; color: #B3402A; font-weight: 700; }
+.o-tracker-cell { min-height: 22px; padding: 6px 8px; border-radius: 5px; outline: none; line-height: 1.45; }
+.o-tracker.editing .o-tracker-cell:hover { background: color-mix(in srgb, var(--rule) 30%, var(--paper)); }
+.o-tracker.editing .o-tracker-cell:focus { background: color-mix(in srgb, var(--accent) 8%, var(--paper)); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.o-tracker-status { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 6px; padding: 6px; background: var(--paper); color: var(--ink); }
+.o-tracker-status:focus { border-color: var(--accent); outline: none; }
+.o-tracker-status-text { font-size: 13px; }
+.o-tracker-done-td { text-align: center; }
+.o-tracker-check { width: 28px; height: 28px; border-radius: 6px; border: 1.5px solid var(--rule); background: var(--paper); color: var(--ink-soft); cursor: pointer; font-size: 14px; font-weight: 800; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.o-tracker-check:hover { border-color: #3D8B5A; color: #3D8B5A; }
+.o-tracker-check.on { background: #3D8B5A; color: #fff; border-color: #3D8B5A; }
+.o-tracker-del { width: 28px; height: 28px; border-radius: 6px; border: none; background: transparent; cursor: pointer; font-size: 14px; opacity: 0.55; }
+.o-tracker-del:hover { opacity: 1; background: #fdecec; }
+.o-tracker-empty { padding: 22px 14px; text-align: center; color: var(--ink-soft); font-size: 14px; }
+.o-tracker-count { font-size: 12.5px; color: var(--ink-soft); margin-top: 10px; }
+.o-tracker-error { padding: 24px 0; color: #a13d2d; font-size: 15px; }
+/* @endkind */
+/* @kind:chart */
+figure.o-chartfig { margin: 26px 0; }
+.o-chart svg { display: block; width: 100%; height: auto; max-width: 760px; }
+.o-chart-grid { stroke: var(--rule); stroke-width: 1; }
+.o-chart-tick { font: 11px var(--font-body); fill: var(--ink-soft); }
+.o-chart-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; color: var(--ink-soft); }
+.o-chart-swatch { display: inline-flex; align-items: center; gap: 6px; }
+.o-chart-swatch .sw { width: 12px; height: 12px; border-radius: 3px; }
+figure.o-chartfig figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
+.o-chart-error { padding: 18px 0; color: #a13d2d; font-size: 14px; }
+/* @endkind */
+/* @kind:video */
+figure.o-videofig { margin: 26px 0; }
+.o-video { max-width: 760px; }
+.o-vd { box-sizing: border-box; }
+.o-vd-play { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; aspect-ratio: 16 / 9; width: 100%; border-radius: 14px; background: linear-gradient(145deg, #23211d, #3a362e); color: #faf7f2; cursor: pointer; }
+.o-vd-play .o-vd-badge { position: absolute; top: 14px; right: 16px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(250, 247, 242, 0.65); }
+.o-vd-play .o-vd-btn { display: grid; place-items: center; width: 68px; height: 68px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 24px; padding-left: 5px; transition: transform 0.15s; }
+.o-vd-play:hover .o-vd-btn, .o-vd-play:focus-visible .o-vd-btn { transform: scale(1.08); }
+.o-vd-play .o-vd-title { font-family: var(--font-display); font-size: 22px; max-width: 80%; text-align: center; }
+.o-vd-play .o-vd-hint { font-size: 12px; color: rgba(250, 247, 242, 0.55); }
+.o-vd-frame { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 14px; background: #000; }
+.o-vd-link, .o-vd-empty { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 1.5px solid var(--rule); border-radius: 14px; background: var(--paper); color: inherit; text-decoration: none; }
+.o-vd-link .o-vd-btn, .o-vd-empty .o-vd-btn { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 15px; padding-left: 3px; }
+.o-vd-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.o-vd-link .o-vd-title { font-weight: 600; font-size: 16px; }
+.o-vd-url { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.o-vd-link .o-vd-hint, .o-vd-empty .o-vd-hint { margin-left: auto; flex: none; font-size: 12px; color: var(--ink-soft); }
+a.o-vd-link:hover { border-color: var(--accent); }
+.o-vd-empty { border-style: dashed; color: var(--ink-soft); }
+.o-vd-empty .o-vd-btn { background: var(--rule); color: var(--ink-soft); }
+figure.o-videofig figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
+.o-video-error { padding: 18px 0; color: #a13d2d; font-size: 14px; }
+/* @endkind */
+</style>
+<style id="origami-theme-css">
+:root {
+  --bg: #F7F6F1;
+  --paper: #FFFFFF;
+  --ink: #22251F;
+  --ink-soft: #5D6156;
+  --rule: #E4E3D6;
+  --rule-soft: #EFEEE4;
+  --accent: #3F7268;
+  --tint-a: rgba(63, 114, 104, 0.05);
+  --tint-b: rgba(123, 94, 167, 0.04);
+  --chrome: #F7F6F1;
+  --chrome-ink: #22251F;
+  --chrome-soft: #5D6156;
+  --font-display: "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+</style>
+</head>
+<body>
+<div id="origami-root"></div>
+
+<script type="application/json" id="origami-manifest">
+{
+  "v": "1.0",
+  "id": "d-p2fixture",
+  "title": "Welcome to Origami",
+  "created": "2026-06-10T12:00:00Z",
+  "modified": "2026-06-10T12:00:00Z",
+  "theme": {
+    "name": "origami-default",
+    "tokens": {}
+  },
+  "order": [
+    "cover",
+    "agenda",
+    "numbers",
+    "gallery",
+    "roadmap",
+    "actions",
+    "secret"
+  ],
+  "hidden": [
+    "secret"
+  ],
+  "slides": {
+    "cover": {
+      "kind": "cover",
+      "label": "Cover",
+      "notes": ""
+    },
+    "agenda": {
+      "kind": "bullets",
+      "label": "Agenda",
+      "notes": "private speaker note"
+    },
+    "numbers": {
+      "kind": "stats",
+      "label": "KPIs",
+      "notes": ""
+    },
+    "gallery": {
+      "kind": "free",
+      "label": "Gallery",
+      "notes": ""
+    },
+    "roadmap": {
+      "kind": "gantt",
+      "label": "Roadmap",
+      "notes": ""
+    },
+    "actions": {
+      "kind": "tracker",
+      "label": "Actions",
+      "notes": ""
+    },
+    "secret": {
+      "kind": "bullets",
+      "label": "Secret",
+      "notes": ""
+    }
+  },
+  "kinds": [
+    "cover",
+    "bullets",
+    "stats",
+    "free",
+    "gantt",
+    "tracker"
+  ],
+  "customKinds": [],
+  "capabilities": [
+    "embed:www.youtube-nocookie.com",
+    "embed:player.vimeo.com"
+  ]
+}
+</script>
+
+<template data-origami-slide="cover" data-kind="cover">
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Origami Labs</p>
+    <h1 class="anim" style="--i:1" data-oedit="title">One file. The whole deck.</h1>
+    <p class="lede anim" style="--i:2" data-oedit="lede">Double-click, it plays. No install, no network, no storage, and it doesn't feel like PowerPoint.</p>
+  </div>
+</template>
+
+<template data-origami-slide="agenda" data-kind="bullets">
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Agenda</p>
+    <h2 class="anim" style="--i:1" data-oedit="title">What gets verified</h2>
+    <ul>
+      <li class="anim" style="--i:2" data-oedit="li1">Keyboard, tab, and pip navigation</li>
+      <li class="anim" style="--i:3" data-oedit="li2">Zero network, zero storage</li>
+      <li class="anim" style="--i:4" data-oedit="li3">Lite-edit round-trip</li>
+    </ul>
+  </div>
+</template>
+
+<template data-origami-slide="numbers" data-kind="stats">
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Numbers</p>
+    <h2 class="anim" style="--i:1" data-oedit="title">Headline numbers</h2>
+    <div class="card-grid">
+      <div class="stat-card anim" style="--i:2"><div class="big" data-count-to="128">0</div><div class="lbl" data-oedit="lbl1">Decks emailed</div></div>
+      <div class="stat-card anim" style="--i:3"><div class="big" data-count-to="42">0</div><div class="lbl" data-oedit="lbl2">Slides edited</div></div>
+      <div class="stat-card anim" style="--i:4"><div class="big" data-count-to="7">0</div><div class="lbl" data-oedit="lbl3">Seconds to open</div></div>
+    </div>
+  </div>
+</template>
+
+<template data-origami-slide="gallery" data-kind="free">
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Gallery</p>
+    <h2 class="anim" style="--i:1">The block vocabulary</h2>
+    <div class="cols anim" style="--i:2">
+      <div class="col">
+        <blockquote class="o-quote">It reads like a document, not a slide.<footer>A satisfied recipient</footer></blockquote>
+        <span class="o-pill">zero network</span><span class="o-pill">zero storage</span>
+      </div>
+      <div class="col">
+        <figure class="o-img"><img data-oasset="redpx" alt="A red pixel, magnified"><figcaption>Asset-table image, resolved at mount.</figcaption></figure>
+      </div>
+    </div>
+    <table class="o-table anim" style="--i:3">
+      <thead><tr><th>Block</th><th>Status</th></tr></thead>
+      <tbody><tr><td>Quote</td><td>shipped</td></tr><tr><td>Table</td><td>shipped</td></tr></tbody>
+    </table>
+    <figure class="o-chartfig anim" style="--i:4">
+<script type="application/json" data-odata="chart">
+{
+  "type": "bar",
+  "labels": [
+    "Q1",
+    "Q2",
+    "Q3"
+  ],
+  "series": [
+    {
+      "name": "Plan",
+      "color": "#4a8cc4",
+      "values": [
+        40,
+        60,
+        80
+      ]
+    },
+    {
+      "name": "Actual",
+      "color": "#d9a520",
+      "values": [
+        35,
+        70,
+        90
+      ]
+    }
+  ],
+  "yMax": null
+}
+</script>
+    <div class="o-chart" data-chart-mount></div>
+    <figcaption>Quarterly throughput, plan vs actual.</figcaption>
+    </figure>
+    <figure class="o-videofig anim" style="--i:5">
+<script type="application/json" data-odata="video">
+{
+  "provider": "vimeo",
+  "videoId": "76979871",
+  "url": "https://vimeo.com/76979871",
+  "title": "Launch demo"
+}
+</script>
+    <div class="o-video" data-video-mount></div>
+    <figcaption>Click-to-play embed.</figcaption>
+    </figure>
+    <figure class="o-videofig anim" style="--i:6">
+<script type="application/json" data-odata="video">
+{
+  "provider": "youtube",
+  "videoId": "dQw4w9WgXcQ",
+  "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "title": "Background talk"
+}
+</script>
+    <div class="o-video" data-video-mount></div>
+    <figcaption>YouTube: link card on file:// (needs a Referer).</figcaption>
+    </figure>
+  </div>
+</template>
+
+<template data-origami-slide="roadmap" data-kind="gantt">
+  <div class="o-gantt-shell">
+    <header class="o-gantt-head">
+      <p class="eyebrow anim" style="--i:0">Roadmap</p>
+      <h2 class="anim" style="--i:1">Critical path</h2>
+    </header>
+<script type="application/json" data-odata="gantt">
+{
+  "totalWeeks": 12,
+  "startDate": null,
+  "lenses": [
+    {
+      "name": "Plan",
+      "color": "#4a8cc4"
+    },
+    {
+      "name": "Build",
+      "color": "#d9a520"
+    },
+    {
+      "name": "Risk",
+      "color": "#c64a4a"
+    }
+  ],
+  "swimlanes": [
+    {
+      "name": "Workstream A",
+      "owner": "Ada"
+    },
+    {
+      "name": "Workstream B",
+      "owner": "Brunel"
+    }
+  ],
+  "cards": [
+    {
+      "id": "C01",
+      "title": "Discovery",
+      "swimlane": "Workstream A",
+      "start": "W1",
+      "durationWeeks": 2,
+      "lens": "Plan",
+      "type": "Process",
+      "effort": "EASY",
+      "what": "",
+      "needs": "",
+      "caveat": "",
+      "deliverable": "",
+      "sources": "",
+      "completed": false
+    },
+    {
+      "id": "C02",
+      "title": "Design overlap",
+      "swimlane": "Workstream A",
+      "start": "W2",
+      "durationWeeks": 2,
+      "lens": "Build",
+      "type": "Process",
+      "effort": "MED",
+      "what": "",
+      "needs": "",
+      "caveat": "",
+      "deliverable": "",
+      "sources": "",
+      "completed": false
+    },
+    {
+      "id": "C03",
+      "title": "Build phase",
+      "swimlane": "Workstream A",
+      "start": "W5",
+      "durationWeeks": 3,
+      "lens": "Build",
+      "type": "Technical",
+      "effort": "MED",
+      "what": "",
+      "needs": "",
+      "caveat": "",
+      "deliverable": "",
+      "sources": "",
+      "completed": false
+    },
+    {
+      "id": "C04",
+      "title": "Free-dragged UAT",
+      "swimlane": "Workstream B",
+      "start": 6.5,
+      "durationWeeks": 2,
+      "lens": "Risk",
+      "type": "Process",
+      "effort": "MED",
+      "what": "",
+      "needs": "",
+      "caveat": "",
+      "deliverable": "",
+      "sources": "",
+      "completed": true
+    }
+  ],
+  "milestones": [
+    {
+      "label": "Go-live",
+      "week": 7,
+      "color": "#3d8b5a"
+    }
+  ]
+}
+</script>
+    <div class="o-gantt anim" style="--i:2" data-gantt-mount></div>
+  </div>
+</template>
+
+<template data-origami-slide="actions" data-kind="tracker">
+  <div class="o-tracker-shell">
+    <header class="o-tracker-head">
+      <p class="eyebrow anim" style="--i:0">Live component</p>
+      <h2 class="anim" style="--i:1">Action tracker</h2>
+    </header>
+<script type="application/json" data-odata="tracker">
+{
+  "rows": [
+    {
+      "action": "Ship the parser",
+      "owner": "Ada",
+      "comments": "Offsets, not DOM",
+      "due": "W2",
+      "status": "In progress",
+      "done": false
+    },
+    {
+      "action": "Fix the vendor leak",
+      "owner": "Brunel",
+      "comments": "Waiting on upstream",
+      "due": "W3",
+      "status": "Blocked",
+      "done": false
+    },
+    {
+      "action": "Retire PowerPoint",
+      "owner": "Everyone",
+      "comments": "",
+      "due": "W52",
+      "status": "Closed",
+      "done": true
+    }
+  ]
+}
+</script>
+    <div class="o-tracker anim" style="--i:2" data-tracker-mount></div>
+  </div>
+</template>
+
+<template data-origami-slide="secret" data-kind="bullets">
+  <div class="slide-inner">
+    <h2>Hidden slide — should never mount</h2>
+    <ul><li>confidential draft content</li></ul>
+  </div>
+</template>
+
+<script type="application/json" id="origami-assets">
+{
+  "redpx": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+}
+</script>
+
+<script id="origami-runtime">
+"use strict";(()=>{var T=class extends Error{constructor(e){super(e),this.name="FormatError"}};var yt=/<script\s+type="application\/json"\s+id="origami-manifest"\s*>/,kt=/<script\s+type="application\/json"\s+id="origami-assets"\s*>/,ye="<template",U="</template>";function P(t){if(!/^<!DOCTYPE html>/i.test(t.trimStart()))throw new T("not an HTML document");if(!/<html[^>]*\bdata-origami="[^"]+"/.test(t))throw new T("missing data-origami attribute on <html>");let e=t.includes(`\r
+`)?`\r
+`:`
+`,n=yt.exec(t);if(!n)throw new T("missing origami-manifest script");let o=n.index+n[0].length,r=t.indexOf("<\/script>",o);if(r===-1)throw new T("unterminated manifest script");let a;try{a=JSON.parse(t.slice(o,r))}catch(g){throw new T("manifest is not valid JSON: "+g.message)}let s={},d=null,c=kt.exec(t);if(c){let g=c.index+c[0].length,h=t.indexOf("<\/script>",g);if(h===-1)throw new T("unterminated origami-assets script");let x;try{x=JSON.parse(t.slice(g,h))}catch(w){throw new T("origami-assets is not valid JSON: "+w.message)}if(x===null||typeof x!="object"||Array.isArray(x))throw new T("origami-assets must be a JSON object");for(let[w,M]of Object.entries(x))if(typeof M!="string")throw new T(`origami-assets: asset "${w}" is not a string`);s=x,d={start:g,end:h}}let i=[],m=0;for(;;){let g=t.indexOf("<script",m);if(g===-1)break;let h=t.indexOf(">",g);if(h===-1)break;let x=t.indexOf("<\/script>",h);if(x===-1)break;let w=x+9;i.push({start:g,end:w}),m=w}let u=g=>i.find(h=>g>=h.start&&g<h.end),p=[],l=0;for(;;){let g=t.indexOf(ye,l);if(g===-1)break;let h=u(g);if(h){l=h.end;continue}let x=wt(t,g),w=t.slice(g,x+1),M=/\bdata-origami-slide="([^"]*)"/.exec(w);if(!M){let G=t.indexOf(U,x);if(G===-1)throw new T("unterminated <template>");l=G+U.length;continue}let v=M[1],y=/\bdata-kind="([^"]*)"/.exec(w);if(!y)throw new T(`slide "${v}": missing data-kind`);let S=x+1,L=t.indexOf(U,S);if(L===-1)throw new T(`slide "${v}": unterminated template`);let O=t.indexOf(ye,S);if(O!==-1&&O<L)throw new T(`slide "${v}": nested <template> is not allowed`);p.push({id:v,kind:y[1],element:{start:g,end:L+U.length},inner:{start:S,end:L}}),l=L+U.length}let f=new Map;for(let g of p){if(f.has(g.id))throw new T(`duplicate slide id "${g.id}"`);f.set(g.id,g)}return{text:t,eol:e,manifest:a,manifestRegion:{start:o,end:r},slides:p,slideById:f,assets:s,assetsRegion:d}}function wt(t,e){let n=e,o=null;for(;n<t.length;){let r=t[n];if(o)r===o&&(o=null);else if(r==='"'||r==="'")o=r;else if(r===">")return n;n++}throw new T("unterminated tag")}function ae(t,e){let n=t.slideById.get(e);if(!n)throw new T(`unknown slide "${e}"`);return t.text.slice(n.inner.start,n.inner.end)}function K(t,e){let n=[...e].sort((r,a)=>r.start-a.start);for(let r=1;r<n.length;r++)if(n[r].start<n[r-1].end)throw new T("overlapping edits");let o=t;for(let r=n.length-1;r>=0;r--){let a=n[r];o=o.slice(0,a.start)+a.replacement+o.slice(a.end)}return o}function ie(t,e){let n=t.replace(/\r\n/g,`
+`);return e===`
+`?n:n.replace(/\n/g,`\r
+`)}function q(t,e,n){let o=t.slideById.get(e);if(!o)throw new T(`unknown slide "${e}"`);let r=K(t.text,[{start:o.inner.start,end:o.inner.end,replacement:ie(n,t.eol)}]);return P(r)}var pe=["youtube","vimeo","loom"],Y={youtube:{label:"YouTube",host:"www.youtube-nocookie.com",idRe:/^[A-Za-z0-9_-]{11}$/,embedUrl:t=>`https://www.youtube-nocookie.com/embed/${t}?autoplay=1&rel=0`,needsReferrer:!0},vimeo:{label:"Vimeo",host:"player.vimeo.com",idRe:/^\d{1,12}$/,embedUrl:t=>`https://player.vimeo.com/video/${t}?autoplay=1`,needsReferrer:!1},loom:{label:"Loom",host:"www.loom.com",idRe:/^[a-f0-9]{32}$/,embedUrl:t=>`https://www.loom.com/embed/${t}`,needsReferrer:!1}};function se(t){return t==="link"?null:`embed:${Y[t].host}`}function ue(t){if(t.provider==="link")return null;let e=Y[t.provider];return!e||!e.idRe.test(t.videoId)?null:e.embedUrl(t.videoId)}var Rt="h1,h2,h3,h4,p,li,th,td,figcaption,footer,.lbl,.o-btn,.o-pill",zt="[data-gantt-mount],[data-tracker-mount],[data-flow-mount],[data-graph-mount],[data-chart-mount],[data-video-mount]";function X(t){return Array.from(t.querySelectorAll(Rt)).filter(e=>e.children.length===0&&!e.hasAttribute("data-count-to")&&!e.closest(zt))}function Ae(t,e){let n=P(t);for(let[o,r]of e){if(!n.slideById.has(o))continue;let a=document.createElement("template");a.innerHTML=ae(n,o),X(a.content).forEach((s,d)=>{r[d]!==void 0&&(s.textContent=r[d])}),n=q(n,o,a.innerHTML)}return n.text}function Te(t,e){let n=(e||"deck").replace(/[\\/:*?"<>|]+/g,"_").trim()||"deck",o=document.createElement("a");o.href=URL.createObjectURL(new Blob([t],{type:"text/html"})),o.download=`${n} (edited).origami.html`,document.body.appendChild(o),o.click(),o.remove();let r=o.href;setTimeout(()=>URL.revokeObjectURL(r),2e3)}function Ce(t,e){t.querySelectorAll("img[data-oasset]").forEach(n=>{let o=n.getAttribute("data-oasset")??"",r=e[o];r?n.src=r:n.removeAttribute("src")})}var _t={"font-display":"Origami Display","font-body":"Origami Body","font-playfair":"Playfair Display","font-lora":"Lora","font-inter":"Inter","font-source-serif":"Source Serif 4"};function $e(t){let e="";for(let[n,o]of Object.entries(_t)){let r=t[n];r&&r.startsWith("data:font/woff2;")&&(e+=`@font-face { font-family: '${o}'; src: url(${r}) format('woff2'); font-weight: 100 900; font-style: normal; font-display: swap; }
+`)}return e}var z={left:46,right:12,top:12,bottom:30},Z=640-z.left-z.right,J=360-z.top-z.bottom,B=["#4a8cc4","#d9a520","#3d8b5a","#c64a4a","#9333ea","#0d9488","#db2777","#65a30d"],Me="http://www.w3.org/2000/svg";function It(t){let e=t&&typeof t=="object"&&!Array.isArray(t)?t:{},n=(Array.isArray(e.labels)?e.labels:[]).map(s=>typeof s=="string"?s:"").slice(0,24);n.length===0&&n.push("\u2014");let o=(Array.isArray(e.series)?e.series:[]).slice(0,6).map((s,d)=>{let c=s??{},i=(Array.isArray(c.values)?c.values:[]).map(m=>typeof m=="number"&&Number.isFinite(m)&&m>=0?m:0);for(;i.length<n.length;)i.push(0);return{name:typeof c.name=="string"?c.name:`Series ${d+1}`,color:typeof c.color=="string"&&/^#[0-9a-fA-F]{3,8}$/.test(c.color)?c.color:B[d%B.length],values:i.slice(0,n.length)}});o.length===0&&o.push({name:"Series 1",color:B[0],values:n.map(()=>0)});let r=e.type==="line"||e.type==="pie"?e.type:"bar",a=typeof e.yMax=="number"&&Number.isFinite(e.yMax)&&e.yMax>0?e.yMax:null;return{type:r,labels:n,series:r==="pie"?o.slice(0,1):o,yMax:a}}var j=(t,e,n)=>{let o=document.createElementNS(Me,t);for(let[r,a]of Object.entries(e))o.setAttribute(r,String(a));return n.appendChild(o),o};function De(t){if(t<=0)return 1;let e=Math.floor(Math.log10(t)),n=Math.pow(10,e);for(let o of[1,2,5,10])if(t<=o*n)return o*n;return 10*n}function Le(t,e){for(let n=0;n<=4;n++){let o=z.top+J*n/4;j("line",{x1:z.left,y1:o,x2:z.left+Z,y2:o,class:"o-chart-grid"},t);let r=j("text",{x:z.left-6,y:o+4,"text-anchor":"end",class:"o-chart-tick"},t);r.textContent=String(Math.round(e*(1-n/4)*100)/100)}}function Ne(t,e){let n=Z/e.length;e.forEach((o,r)=>{let a=j("text",{x:z.left+n*(r+.5),y:352,"text-anchor":"middle",class:"o-chart-tick"},t);a.textContent=o})}function Gt(t,e){let n=e.yMax??De(Math.max(...e.series.flatMap(a=>a.values)));Le(t,n),Ne(t,e.labels);let o=Z/e.labels.length,r=Math.min(40,o*.7/e.series.length);e.labels.forEach((a,s)=>{let d=z.left+o*s+(o-r*e.series.length)/2;e.series.forEach((c,i)=>{let m=c.values[s]??0,u=Math.min(m,n)/n*J;j("rect",{x:d+r*i,y:z.top+J-u,width:r,height:u,rx:2,fill:c.color,"data-series":i,"data-label":s},t)})})}function Ht(t,e){let n=e.yMax??De(Math.max(...e.series.flatMap(r=>r.values)));Le(t,n),Ne(t,e.labels);let o=Z/e.labels.length;e.series.forEach((r,a)=>{let s=r.values.map((d,c)=>{let i=z.left+o*(c+.5),m=z.top+J-Math.min(d,n)/n*J;return{x:i,y:m}});j("polyline",{points:s.map(d=>`${d.x},${d.y}`).join(" "),fill:"none",stroke:r.color,"stroke-width":2.5,"stroke-linejoin":"round","data-series":a},t),s.forEach((d,c)=>j("circle",{cx:d.x,cy:d.y,r:3.5,fill:r.color,"data-label":c},t))})}function Pt(t,e){let n=e.series[0]?.values??[],o=n.reduce((c,i)=>c+i,0),r=640/2,a=360/2,s=Math.min(Z,J)/2-4;if(o<=0){j("circle",{cx:r,cy:a,r:s,fill:"none",stroke:"#ccc","stroke-width":1.5},t);return}let d=-Math.PI/2;n.forEach((c,i)=>{if(c<=0)return;let m=c/o,u=B[i%B.length];if(m>=.999999){j("circle",{cx:r,cy:a,r:s,fill:u,"data-label":i},t);return}let p=d+m*Math.PI*2,l=r+s*Math.cos(d),f=a+s*Math.sin(d),g=r+s*Math.cos(p),h=a+s*Math.sin(p),x=m>.5?1:0;j("path",{d:`M ${r} ${a} L ${l} ${f} A ${s} ${s} 0 ${x} 1 ${g} ${h} Z`,fill:u,"data-label":i},t),d=p})}function jt(t,e){let n=t.querySelector("[data-chart-mount]");if(!n)return;n.textContent="";let o=document.createElementNS(Me,"svg");o.setAttribute("viewBox","0 0 640 360"),o.setAttribute("role","img"),n.appendChild(o),e.type==="bar"?Gt(o,e):e.type==="line"?Ht(o,e):Pt(o,e);let r=document.createElement("div");r.className="o-chart-legend",n.appendChild(r);let a=e.type==="pie"?e.labels.map((s,d)=>({label:s,color:B[d%B.length]})):e.series.map(s=>({label:s.name,color:s.color}));for(let s of a){let d=document.createElement("span");d.className="o-chart-swatch";let c=document.createElement("span");c.className="sw",c.style.background=s.color,d.appendChild(c),d.appendChild(document.createTextNode(" "+s.label)),r.appendChild(d)}}function Vt(t){let e=t.querySelector('script[data-odata="chart"]');if(!e?.textContent)return null;try{return It(JSON.parse(e.textContent))}catch{return null}}function Oe(t){t.querySelectorAll('script[data-odata="chart"]').forEach(e=>{let n=e.closest(".o-chartfig")??e.parentElement;if(!n)return;let o=Vt(n),r=n.querySelector("[data-chart-mount]");if(r){if(!o){r.textContent="";let a=document.createElement("div");a.className="o-chart-error",a.textContent="This chart\u2019s data block is invalid \u2014 open the deck in Origami Studio to repair it.",r.appendChild(a);return}jt(n,o)}})}function Ft(t){let e=t&&typeof t=="object"&&!Array.isArray(t)?t:{};return{provider:pe.includes(e.provider)?e.provider:"link",videoId:typeof e.videoId=="string"?e.videoId:"",url:typeof e.url=="string"?e.url:"",title:typeof e.title=="string"?e.title:""}}var I=(t,e,n)=>{let o=document.createElement("span");return o.className=t,o.textContent=e,n.appendChild(o),o};function Bt(t,e){let n=document.createElement("iframe");return n.className="o-vd-frame",n.src=e,n.title=t.title||"Video",n.setAttribute("allow","autoplay; fullscreen; encrypted-media; picture-in-picture"),n.setAttribute("allowfullscreen",""),n.setAttribute("sandbox","allow-scripts allow-same-origin allow-presentation allow-popups"),n}function Wt(t,e,n={}){let o=t.querySelector("[data-video-mount]");if(!o)return;o.textContent="";let r=n.interactive??!1,a=ue(e),s=se(e.provider),d=a!==null&&s!==null&&(n.capabilities??[]).includes(s),c=e.provider!=="link"?Y[e.provider]:null,i=d&&!!c?.needsReferrer&&!!n.referrerless;if(d&&!i&&c){let l=document.createElement("div");if(l.className="o-vd o-vd-play",I("o-vd-badge",c.label,l),I("o-vd-btn","\u25B6",l),I("o-vd-title",e.title||"Untitled video",l),I("o-vd-hint",`Click to play \u2014 loads from ${c.host}`,l),r){l.setAttribute("role","button"),l.setAttribute("tabindex","0"),l.setAttribute("aria-label",`Play video: ${e.title||"untitled"}`);let f=()=>{o.textContent="",o.appendChild(Bt(e,a))};l.addEventListener("click",f),l.addEventListener("keydown",g=>{(g.key==="Enter"||g.key===" ")&&(g.preventDefault(),f())})}o.appendChild(l);return}if(!e.url){let l=document.createElement("div");l.className="o-vd o-vd-empty",I("o-vd-btn","\u25B6",l),I("o-vd-title",e.title||"No video link set",l),I("o-vd-hint","Open in Origami Studio to add one",l),o.appendChild(l);return}let u=document.createElement(r?"a":"div");u.className="o-vd o-vd-link",r&&(u.href=e.url,u.target="_blank",u.rel="noopener noreferrer"),I("o-vd-btn","\u25B6",u);let p=document.createElement("span");p.className="o-vd-meta",u.appendChild(p),I("o-vd-title",e.title||"Watch video",p),I("o-vd-url",e.url,p),I("o-vd-hint",i&&c?`${c.label} can\u2019t play inside a local file \u2014 opens in a browser tab`:"Opens in a browser tab",u),o.appendChild(u)}function qt(t){let e=t.querySelector('script[data-odata="video"]');if(!e?.textContent)return null;try{return Ft(JSON.parse(e.textContent))}catch{return null}}function Re(t,e={}){t.querySelectorAll('script[data-odata="video"]').forEach(n=>{let o=n.closest(".o-videofig")??n.parentElement;if(!o)return;let r=o.querySelector("[data-video-mount]");if(!r)return;let a=qt(o);if(!a){r.textContent="";let s=document.createElement("div");s.className="o-video-error",s.textContent="This video\u2019s data block is invalid \u2014 open the deck in Origami Studio to repair it.",r.appendChild(s);return}Wt(o,a,e)})}function Q(t){if(typeof t=="number")return t;if(!t)return 0;if(t.startsWith("W"))return parseFloat(t.slice(1))-1;if(t.startsWith("M"))return(parseFloat(t.slice(1))-1)*4;let e=parseFloat(t);return Number.isNaN(e)?0:e}function me(t,e){return t.lenses.find(n=>n.name===e)?.color??"#8a8a9e"}function Jt(t){let e=t&&typeof t=="object"&&!Array.isArray(t)?t:{},n=l=>Array.isArray(l)?l:[],o=(l,f="")=>typeof l=="string"?l:f,r=(l,f)=>typeof l=="number"&&Number.isFinite(l)?l:f,a=n(e.lenses).map(l=>({name:o(l?.name),color:o(l?.color,"#8a8a9e")})).filter(l=>l.name!==""),s=n(e.swimlanes).map(l=>({name:o(l?.name),owner:o(l?.owner)})).filter(l=>l.name!==""),d=n(e.cards).map((l,f)=>({id:o(l?.id,`C${f+1}`),title:o(l?.title,"Untitled"),swimlane:o(l?.swimlane),start:typeof l?.start=="number"?l.start:o(l?.start,"W1"),durationWeeks:Math.max(.25,r(l?.durationWeeks,1)),lens:o(l?.lens),type:["Technical","Process","Cultural"].includes(o(l?.type))?o(l?.type):"Process",effort:["EASY","MED","DEFER"].includes(o(l?.effort))?o(l?.effort):"MED",what:o(l?.what),needs:o(l?.needs),caveat:o(l?.caveat),deliverable:o(l?.deliverable),sources:o(l?.sources),completed:l?.completed===!0})),c=n(e.milestones).map(l=>({label:o(l?.label,"Milestone"),week:Math.max(1,r(l?.week,1)),color:o(l?.color,"#c64a4a")})),i=d.reduce((l,f)=>Math.max(l,Q(f.start)+f.durationWeeks),0),m=c.reduce((l,f)=>Math.max(l,f.week),0),u=Math.max(4,Math.round(r(e.totalWeeks,Math.max(16,Math.ceil(Math.max(i,m)/4)*4)))),p=typeof e.startDate=="string"&&/^\d{4}-\d{2}-\d{2}$/.test(e.startDate)?e.startDate:null;return{totalWeeks:u,startDate:p,lenses:a,swimlanes:s,cards:d,milestones:c}}function ze(t){let e=t.querySelector('script[data-odata="gantt"]');if(!e?.textContent)return null;try{return Jt(JSON.parse(e.textContent))}catch{return null}}function Ut(t){let e=[...t].sort((r,a)=>Q(r.start)-Q(a.start)),n=[],o=new Map;for(let r of e){let a=Q(r.start),s=a+r.durationWeeks,d=0;for(;d<n.length&&n[d]>a;)d++;n[d]=s,o.set(r.id,d)}return{rows:o,numRows:Math.max(1,n.length)}}function Kt(t,e){if(!t)return null;let n=new Date(t+"T00:00:00");return n.setDate(n.getDate()+(e-1)*4*7),n.toLocaleDateString(void 0,{month:"short",year:"numeric"})}var E=(t,e,n)=>{let o=document.createElement(t);return o.className=e,n?.appendChild(o),o};function _e(t,e,n={}){let o=t.querySelector("[data-gantt-mount]");if(!o)return;o.textContent="";let r=n.fitPx?Math.max(4,Math.floor(n.fitPx/e.totalWeeks)):Math.min(220,Math.max(24,n.pxPerWeek??80)),a=e.totalWeeks*r,s=n.activeLens??"all",d=E("div","o-gantt-bar",o),c=E("span","o-gantt-chips",d),i=()=>{c.textContent="";let v=(y,S)=>{let L=E("button","o-gantt-chip"+(s===S?" active":""),c);L.setAttribute("type","button"),L.textContent=y,s===S&&S!=="all"&&(L.style.background=me(e,S),L.style.borderColor=me(e,S),L.style.color="#fff"),n.interactive&&L.addEventListener("click",()=>{s=S,i(),M()})};v("All","all");for(let y of e.lenses)v(y.name,y.name)},m=E("div","o-gantt-wrap",o),u=E("div","o-gantt-grid",m);u.style.setProperty("--gantt-w",`${a}px`);let p=E("div","o-gantt-axis",u),l=E("div","o-gantt-corner",p);l.textContent="Owner";let f=E("div","o-gantt-axis-track",p),g=Math.ceil(e.totalWeeks/4);for(let v=1;v<=g;v++){let y=E("div","o-gantt-month",f);y.style.left=`${(v-1)*4*r}px`,y.style.width=`${4*r}px`;let S=Kt(e.startDate,v);E("div","o-gantt-month-name",y).textContent=`M${v}`,E("div","o-gantt-month-range",y).textContent=S??`Month ${v}`}for(let v=0;v<e.totalWeeks;v++){let y=E("div","o-gantt-tick"+(v%4===0?" major":""),f);y.style.left=`${v*r}px`}e.milestones.forEach((v,y)=>{let S=E("div","o-gantt-ms-tag",f);S.style.left=`${(v.week-1)*r}px`,S.style.color=v.color,S.setAttribute("data-ms",String(y)),S.textContent=v.label});let h=new Map;for(let v of e.swimlanes)h.set(v.name,[]);for(let v of e.cards)h.get(v.swimlane)?.push(v);for(let v of e.swimlanes){let y=h.get(v.name)??[],{rows:S,numRows:L}=Ut(y),O=L*42+16,G=E("div","o-gantt-lane",u);G.setAttribute("data-lane",v.name);let H=E("div","o-gantt-label",G);H.style.minHeight=`${O}px`,E("div","o-gantt-lane-name",H).textContent=v.name,E("div","o-gantt-lane-owner",H).textContent=v.owner,E("div","o-gantt-lane-count",H).textContent=`${y.length} card${y.length===1?"":"s"}`;let V=E("div","o-gantt-tracks",G);V.style.minHeight=`${O}px`,V.setAttribute("data-lane-tracks",v.name),e.milestones.forEach(($,R)=>{let b=E("div","o-gantt-ms-line",V);b.setAttribute("data-ms",String(R)),b.style.left=`${($.week-1)*r}px`,b.style.background=$.color});for(let $ of y){let R=E("div","o-gantt-card"+($.completed?" completed":""),V);R.setAttribute("data-card",$.id),R.setAttribute("data-lens",$.lens),R.style.background=me(e,$.lens),R.style.left=`${Q($.start)*r+2}px`,R.style.width=`${Math.max(36,$.durationWeeks*r-4)}px`,R.style.top=`${8+(S.get($.id)??0)*42}px`,E("span","o-gantt-dot",R).title=$.type,E("span","o-gantt-card-title",R).textContent=$.title,R.title=`${$.id} \u2014 ${$.title}
+${$.lens} \xB7 ${$.type} \xB7 ${$.effort}
+Start ${typeof $.start=="number"?"W"+(Math.round($.start*100)/100+1):$.start} \xB7 ${$.durationWeeks}w`}}e.swimlanes.length===0&&(E("div","o-gantt-empty",u).textContent="No swimlanes yet.");let x=E("div","o-gantt-legend",o);for(let v of e.lenses){let y=E("span","o-gantt-swatch",x),S=E("span","sw",y);S.style.background=v.color,y.appendChild(document.createTextNode(" "+v.name))}let w=E("span","o-gantt-count",x),M=()=>{let v=0,y=0;o.querySelectorAll(".o-gantt-card").forEach(S=>{let L=s==="all"||S.getAttribute("data-lens")===s;S.classList.toggle("faded",!L),L&&v++,S.classList.contains("completed")&&y++}),w.textContent=`Showing ${v} of ${e.cards.length} cards`+(y>0?` \xB7 ${y} complete`:"")};i(),M()}function Ie(t){let e=t.querySelector("[data-gantt-mount]");e&&(e.textContent="",E("div","o-gantt-error",e).textContent="This roadmap\u2019s data block is missing or invalid \u2014 open the deck in Origami Studio to repair it.")}function Ge(t){let e=ze(t);if(!e){Ie(t);return}_e(t,e,{interactive:!0})}function He(t){let e=ze(t);if(!e){Ie(t);return}_e(t,e,{interactive:!1,fitPx:970})}var Pe=["Open","In progress","Blocked","Closed"];function Yt(t){let e=t&&typeof t=="object"&&!Array.isArray(t)?t:{},n=r=>typeof r=="string"?r:"";return{rows:(Array.isArray(e.rows)?e.rows:[]).map(r=>{let a=r??{};return{action:n(a.action),owner:n(a.owner),comments:n(a.comments),due:n(a.due),status:Pe.includes(a.status)?a.status:"Open",done:a.done===!0}})}}function je(t){let e=t.querySelector('script[data-odata="tracker"]');if(!e?.textContent)return null;try{return Yt(JSON.parse(e.textContent))}catch{return null}}var A=(t,e,n)=>{let o=document.createElement(t);return e&&(o.className=e),n?.appendChild(o),o};function Ve(t,e,n={}){let o=t.querySelector("[data-tracker-mount]");if(!o)return;o.textContent="",o.classList.toggle("editing",!!n.edit);let r="",a=!1,s=()=>Fe(t,e,n,{search:r,hideDone:a});if(n.interactive){let p=A("div","o-tracker-filterbar",o),l=A("input","o-tracker-search",p);l.setAttribute("type","text"),l.placeholder="Search actions, owners, comments\u2026";let f=A("label","o-tracker-toggle",p),g=A("input","",f);g.setAttribute("type","checkbox"),f.appendChild(document.createTextNode(" Hide completed"));let h=A("button","o-tracker-clear",p);h.setAttribute("type","button"),h.textContent="Clear",l.addEventListener("input",()=>{r=l.value,s()}),g.addEventListener("change",()=>{a=g.checked,s()}),h.addEventListener("click",()=>{r="",a=!1,l.value="",g.checked=!1,s()})}if(n.edit){let p=A("div","o-tracker-toolbar",o),l=A("button","o-tracker-add",p);l.setAttribute("type","button"),l.textContent="+ Add action",l.addEventListener("click",()=>{e.rows.push({action:"New action",owner:"",comments:"",due:"",status:"Open",done:!1}),n.edit.onCommit(e),s();let f=o.querySelectorAll('.o-tracker-cell[data-f="action"]');f[f.length-1]?.focus()})}let d=A("div","o-tracker-wrap",o),c=A("table","o-tracker-table",d),i=A("thead","",c),m=A("tr","",i),u=[["Action","26%"],["Owner","12%"],["Comments",""],["Due","9%"],["Status","12%"],["Done","64px"]];n.edit&&u.push(["","40px"]);for(let[p,l]of u){let f=A("th","",m);f.textContent=p,l&&(f.style.width=l)}A("tbody","",c),A("div","o-tracker-count",o),s()}function Fe(t,e,n,o){let r=t.querySelector("[data-tracker-mount]"),a=r?.querySelector("tbody");if(!r||!a)return;a.textContent="";let s=o.search.trim().toLowerCase(),d=0;if(e.rows.forEach((i,m)=>{if(o.hideDone&&i.done||s&&![i.action,i.owner,i.comments,i.due,i.status].join(" ").toLowerCase().includes(s))return;d++;let u=A("tr",(i.done?"done ":"")+(i.status==="Blocked"?"blocked":""),a),p=()=>n.edit.onCommit(e),l=()=>Fe(t,e,n,o);for(let h of["action","owner","comments","due"]){let x=A("td","",u),w=A("div","o-tracker-cell",x);w.setAttribute("data-f",h),w.textContent=i[h],n.edit&&(w.setAttribute("contenteditable","plaintext-only"),w.addEventListener("blur",()=>{let M=(w.textContent??"").trim();M!==i[h]&&(i[h]=M,p(),l())}))}let f=A("td","",u);if(n.edit){let h=A("select","o-tracker-status",f);for(let x of Pe){let w=document.createElement("option");w.textContent=x,w.selected=x===i.status,h.appendChild(w)}h.addEventListener("change",()=>{i.status=h.value,i.status==="Closed"&&(i.done=!0),p(),l()})}else A("span","o-tracker-status-text",f).textContent=i.status;let g=A("td","o-tracker-done-td",u);if(n.edit){let h=A("button","o-tracker-check"+(i.done?" on":""),g);h.setAttribute("type","button"),h.title="Mark complete",h.textContent="\u2713",h.addEventListener("click",()=>{i.done=!i.done,i.done&&i.status!=="Closed"&&(i.status="Closed"),!i.done&&i.status==="Closed"&&(i.status="Open"),p(),l()})}else i.done&&(g.textContent="\u2713");if(n.edit){let h=A("td","o-tracker-done-td",u),x=A("button","o-tracker-del",h);x.setAttribute("type","button"),x.title="Delete row (Ctrl+Z undoes)",x.textContent="\u{1F5D1}",x.addEventListener("click",()=>{e.rows.splice(m,1),p(),l()})}}),d===0){let i=A("tr","",a),m=A("td","o-tracker-empty",i);m.setAttribute("colspan",n.edit?"7":"6"),m.textContent=e.rows.length===0?"No actions yet.":"No actions match the current filters."}let c=r.querySelector(".o-tracker-count");if(c){let i=e.rows.filter(u=>!u.done).length,m=`${e.rows.length} action${e.rows.length===1?"":"s"} \xB7 ${i} open`;(s||o.hideDone)&&(m+=` \xB7 ${d} shown`),c.textContent=m}}function Be(t){let e=t.querySelector("[data-tracker-mount]");e&&(e.textContent="",A("div","o-tracker-error",e).textContent="This tracker\u2019s data block is missing or invalid \u2014 open the deck in Origami Studio to repair it.")}function We(t){let e=je(t);if(!e){Be(t);return}Ve(t,e,{interactive:!0})}function qe(t){let e=je(t);if(!e){Be(t);return}Ve(t,e,{})}var Ue="http://www.w3.org/2000/svg",de={"":"var(--ink-soft)",accent:"var(--accent)",green:"#3D8B5A",amber:"#B07D2B",red:"#B3402A"},Xt=0,W=t=>typeof t=="string"?t:"",Ke=t=>t==="accent"||t==="green"||t==="amber"||t==="red"?t:"";function Ye(t,e){return(Array.isArray(t)?t:[]).map(n=>{let o=n??{};return{from:W(o.from),to:W(o.to),label:W(o.label)}}).filter(n=>e.has(n.from)&&e.has(n.to))}function Zt(t){let e=t&&typeof t=="object"&&!Array.isArray(t)?t:{},n=r=>typeof r=="number"&&Number.isFinite(r)?Math.max(0,Math.min(100,r)):void 0,o=(Array.isArray(e.nodes)?e.nodes:[]).map((r,a)=>{let s=r??{},d=n(s.x),c=n(s.y);return{id:W(s.id)||`n${a+1}`,label:W(s.label),shape:s.shape==="pill"||s.shape==="diamond"?s.shape:"box",tone:Ke(s.tone),...d!==void 0&&c!==void 0?{x:d,y:c}:{}}});return{nodes:o,edges:Ye(e.edges,new Set(o.map(r=>r.id)))}}function Qt(t){let e=t&&typeof t=="object"&&!Array.isArray(t)?t:{},n=(r,a)=>typeof r=="number"&&Number.isFinite(r)?Math.max(0,Math.min(100,r)):a,o=(Array.isArray(e.nodes)?e.nodes:[]).map((r,a)=>{let s=r??{};return{id:W(s.id)||`n${a+1}`,label:W(s.label),x:n(s.x,15+a%4*23),y:n(s.y,20+Math.floor(a/4)*25),tone:Ke(s.tone)}});return{nodes:o,edges:Ye(e.edges,new Set(o.map(r=>r.id)))}}function en(t){let e=t.querySelector('script[data-odata="flow"]');if(!e?.textContent)return null;try{return Zt(JSON.parse(e.textContent))}catch{return null}}function tn(t){let e=t.querySelector('script[data-odata="graph"]');if(!e?.textContent)return null;try{return Qt(JSON.parse(e.textContent))}catch{return null}}function C(t,e,n){let o=document.createElementNS(Ue,t);for(let[r,a]of Object.entries(e))o.setAttribute(r,a);return n?.appendChild(o),o}function Xe(t,e,n,o,r,a){let s=i=>i.length>r?i.slice(0,r-1)+"\u2026":i,d;if(o.length<=r)d=[o];else{let i=Math.floor(o.length/2),m=-1;for(let u=0;u<i;u++){if(o[i-u]===" "){m=i-u;break}if(o[i+u]===" "){m=i+u;break}}d=m===-1?[s(o)]:[s(o.slice(0,m)),s(o.slice(m+1))]}let c=C("text",{x:String(e),y:String(n),"text-anchor":"middle","dominant-baseline":"middle",fill:"var(--ink)",style:`font: 600 ${a}px var(--font-body); pointer-events: none;`},t);d.forEach((i,m)=>{let u=document.createElementNS(Ue,"tspan");u.setAttribute("x",String(e)),u.setAttribute("dy",String(m===0?d.length>1?-a*.62:0:a*1.24)),u.textContent=i,c.appendChild(u)})}function Ze(t,e,n,o){if(!o)return;let r=C("text",{x:String(e),y:String(n-6),"text-anchor":"middle",fill:"var(--ink-soft)",stroke:"var(--bg)","stroke-width":"4","paint-order":"stroke",style:"font: 600 12px var(--font-body); pointer-events: none;"},t);r.textContent=o}function nn(t,e,n,o,r,a){let d={fill:"var(--paper)",stroke:de[e.tone]??de[""],"stroke-width":"2"};return e.shape==="diamond"?C("polygon",{...d,points:`${n},${o-a/2-10} ${n+r/2+12},${o} ${n},${o+a/2+10} ${n-r/2-12},${o}`},t):C("rect",{...d,x:String(n-r/2),y:String(o-a/2),width:String(r),height:String(a),rx:e.shape==="pill"?String(a/2):"10"},t)}var _=null,ne=null,Je=!1;function Qe(){Je||(Je=!0,document.addEventListener("keydown",t=>{if(t.key!=="Delete")return;let e=t.target;if(e.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)||!ne||!_)return;let n=ne.data;if(n.nodes.length<=1)return;t.preventDefault();let o=_;_=null,ne.commit({nodes:n.nodes.filter(r=>r.id!==o),edges:n.edges.filter(r=>r.from!==o&&r.to!==o)})}))}function et(t,e,n){let o=t.getScreenCTM();if(!o)return{x:0,y:0};let r=new DOMPoint(e,n).matrixTransform(o.inverse());return{x:r.x,y:r.y}}function on(t){for(let e=1;;e++){let n=`n${e}`;if(!t.nodes.some(o=>o.id===n))return n}}function tt(t,e,n,o,r){C("rect",{class:"o-dhalo",x:String(e-o/2-7),y:String(n-r/2-7),width:String(o+14),height:String(r+14),rx:"12",fill:"none",stroke:"var(--accent)","stroke-width":"1.5","stroke-dasharray":"5 4"},t)}function nt(t,e,n){let o=_===e;t.querySelectorAll(".o-dhalo").forEach(r=>r.remove()),_=o?null:e,o||n()}function ot(t,e,n,o,r){t.querySelector(".o-dmrename")?.remove();let a=document.createElement("input");a.className="o-dmrename",a.value=o,a.style.left=`${e}px`,a.style.top=`${n}px`,t.appendChild(a),a.focus(),a.select();let s=!1,d=c=>{if(s)return;s=!0;let i=a.value.trim();a.remove(),c&&i!==o&&r(i)};a.addEventListener("keydown",c=>{c.stopPropagation(),c.key==="Enter"&&d(!0),c.key==="Escape"&&d(!1)}),a.addEventListener("blur",()=>d(!0)),a.addEventListener("mousedown",c=>c.stopPropagation())}function rt(t,e,n,o){let r=e.getBoundingClientRect(),a=t.getBoundingClientRect();ot(t,r.left-a.left+r.width/2-90,r.top-a.top+r.height/2-14,n,o)}function rn(t,e,n,o,r){let a=e.getScreenCTM();if(!a)return;let s=new DOMPoint(n.x,n.y).matrixTransform(a),d=t.getBoundingClientRect();ot(t,s.x-d.left-90,s.y-d.top-14,o,r)}function at(t,e,n,o,r,a,s,d){let c=o.d?C("path",{d:o.d,fill:"none",class:"o-ehit"},t):C("line",{x1:String(o.line.x1),y1:String(o.line.y1),x2:String(o.line.x2),y2:String(o.line.y2),class:"o-ehit"},t);c.setAttribute("stroke","rgba(0,0,0,0)"),c.setAttribute("stroke-width","16"),c.setAttribute("pointer-events","stroke"),c.style.cursor="text",c.addEventListener("mousedown",i=>i.stopPropagation()),c.addEventListener("click",i=>{i.stopPropagation(),rn(e,n,r,a.label,m=>d({nodes:s.nodes,edges:s.edges.map(u=>u===a?{...u,label:m}:u)}))})}function it(t,e,n,o,r,a){let s=C("g",{class:"o-dport",transform:`translate(${n.vx} ${n.vy})`},t);C("circle",{r:"9",fill:"var(--accent)",opacity:"0.9"},s),C("path",{d:"M -4 0 H 4 M 0 -4 V 4",stroke:"#fff","stroke-width":"2","stroke-linecap":"round"},s),s.addEventListener("pointerdown",d=>{d.preventDefault(),d.stopPropagation();let c=l=>et(t,l.clientX,l.clientY),i=!1,m=null,u=l=>{let f=c(l);!i&&Math.hypot(f.x-n.vx,f.y-n.vy)<14||(i=!0,m??=C("path",{fill:"none",stroke:"var(--accent)","stroke-width":"2","stroke-dasharray":"6 5","pointer-events":"none"},t),m.setAttribute("d",`M ${n.vx} ${n.vy} L ${f.x} ${f.y}`))},p=l=>{if(window.removeEventListener("pointermove",u),window.removeEventListener("pointerup",p),m?.remove(),i){let g=document.elementFromPoint(l.clientX,l.clientY)?.closest("[data-node]")?.getAttribute("data-node");g&&g!==n.id&&!r.edges.some(h=>h.from===n.id&&h.to===g)&&a({nodes:r.nodes,edges:[...r.edges,{from:n.id,to:g,label:""}]});return}an(e,t,n,o,r,a)};window.addEventListener("pointermove",u),window.addEventListener("pointerup",p)})}function an(t,e,n,o,r,a){t.querySelector(".o-dmenu")?.remove();let s=document.createElement("div");s.className="o-dmenu";let d=e.getBoundingClientRect(),c=t.getBoundingClientRect();s.style.left=`${d.left-c.left+n.vx/Number(e.viewBox.baseVal.width)*d.width+12}px`,s.style.top=`${d.top-c.top+n.vy/Number(e.viewBox.baseVal.height)*d.height-10}px`;let i=o==="flow"?[["Step","box"],["Decision","diamond"],["Terminal","pill"]]:[["New node",""]],m=Number(e.viewBox.baseVal.width),u=Number(e.viewBox.baseVal.height),p=Math.round(Math.max(2,Math.min(98,n.vx/m*100+15))*10)/10,l=Math.round(Math.max(4,Math.min(96,n.vy/u*100+7))*10)/10;for(let[g,h]of i){let x=document.createElement("button");x.type="button",x.textContent=`+ ${g}`,x.addEventListener("mousedown",w=>w.stopPropagation()),x.addEventListener("click",()=>{s.remove();let w=on(r),M=o==="flow"?{id:w,label:g,shape:h,tone:"",x:p,y:l}:{id:w,label:"New node",x:p,y:l,tone:""};a({nodes:[...r.nodes,M],edges:[...r.edges,{from:n.id,to:w,label:""}]})}),s.appendChild(x)}let f=g=>{s.contains(g.target)||(s.remove(),document.removeEventListener("mousedown",f))};document.addEventListener("mousedown",f),t.appendChild(s)}function st(t,e){let n=document.createElement("button");n.type="button",n.className="o-diagram-edit",n.textContent="\u270E Edit diagram",n.addEventListener("mousedown",o=>o.stopPropagation()),n.addEventListener("click",e),t.appendChild(n)}function lt(t,e){let n=t.querySelector(`[data-${e}-mount]`);n&&(n.textContent=`${e} data block missing or unparseable`)}var oe=176,re=60,sn=34,ee=1200,te=660;function ln(t){let e=new Map(t.nodes.map(a=>[a.id,0]));for(let a=0;a<t.nodes.length;a++){let s=!1;for(let d of t.edges){let c=(e.get(d.from)??0)+1;c>(e.get(d.to)??0)&&c<t.nodes.length+1&&(e.set(d.to,c),s=!0)}if(!s)break}let n=[];for(let a of t.nodes)(n[e.get(a.id)??0]??=[]).push(a);let o=Math.max(1,n.length),r=new Map;return n.forEach((a,s)=>{a.forEach((d,c)=>{r.set(d.id,{x:(s+.5)/o*(ee-120)+60,y:te/2+(c-(a.length-1)/2)*(re+sn+14)})})}),r}function dn(t,e){let n=e.x-t.x,o=e.y-t.y;if(Math.abs(n)>=Math.abs(o)){let c=n>=0?1:-1,i=t.x+c*(oe/2+6),m=e.x-c*(oe/2+8),u=Math.max(30,Math.abs(m-i)/2);return{d:`M ${i} ${t.y} C ${i+c*u} ${t.y}, ${m-c*u} ${e.y}, ${m} ${e.y}`,mid:{x:(i+m)/2,y:(t.y+e.y)/2}}}let r=o>=0?1:-1,a=t.y+r*(re/2+6),s=e.y-r*(re/2+12),d=Math.max(24,Math.abs(s-a)/2);return{d:`M ${t.x} ${a} C ${t.x} ${a+r*d}, ${e.x} ${s-r*d}, ${e.x} ${s}`,mid:{x:(t.x+e.x)/2,y:(a+s)/2}}}function cn(t,e,n={}){let o=t.querySelector("[data-flow-mount]");if(!o)return;o.textContent="";let r=ln(e),a=new Map;for(let p of e.nodes)a.set(p.id,p.x!==void 0&&p.y!==void 0?{x:p.x/100*ee,y:p.y/100*te}:r.get(p.id));let s=C("svg",{viewBox:`0 0 ${ee} ${te}`,class:"o-flow-svg",role:"img"}),d=`o-arrow-${++Xt}`,c=C("defs",{},s),i=C("marker",{id:d,viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"},c);C("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:"var(--ink-soft)"},i);let m=C("g",{},s);for(let p of e.edges){let l=a.get(p.from),f=a.get(p.to);if(!l||!f)continue;let{d:g,mid:h}=dn(l,f);C("path",{d:g,fill:"none",stroke:"var(--ink-soft)","stroke-width":"1.6","marker-end":`url(#${d})`},m),Ze(m,h.x,h.y,p.label),n.edit&&at(m,o,s,{d:g},h,p,e,n.edit.onCommit)}n.edit&&_&&!e.nodes.some(p=>p.id===_)&&(_=null);let u=C("g",{},s);for(let p of e.nodes){let l=a.get(p.id),f=C("g",{"data-node":p.id,transform:`translate(${l.x} ${l.y})`},u);if(nn(f,p,0,0,oe,re),Xe(f,0,0,p.label,p.shape==="diamond"?18:22,13.5),n.edit){let g=n.edit,h=(M,v)=>g.onCommit({nodes:e.nodes.map(y=>y.id===p.id?{...y,x:M,y:v}:y),edges:e.edges}),x=dt(s,f,{x:l.x/ee*100,y:l.y/te*100},ee,te,h),w=()=>tt(f,0,0,oe+(p.shape==="diamond"?24:0),re+(p.shape==="diamond"?20:0));f.addEventListener("click",M=>{if(M.stopPropagation(),x.dragged){x.dragged=!1;return}nt(s,p.id,w)}),f.addEventListener("dblclick",M=>{M.stopPropagation(),rt(o,f,p.label,v=>g.onCommit({nodes:e.nodes.map(y=>y.id===p.id?{...y,label:v}:y),edges:e.edges}))}),_===p.id&&w()}}if(n.edit){let p=n.edit;for(let l of e.nodes){let f=a.get(l.id);it(s,o,{id:l.id,vx:f.x+oe/2+(l.shape==="diamond"?14:2),vy:f.y},"flow",e,p.onCommit)}ne={data:e,commit:p.onCommit},Qe()}o.appendChild(s),n.edit&&st(o,n.edit.onOpenEditor)}var fe=1e3,ge=600,le=150,he=50;function pn(t,e,n={}){let o=t.querySelector("[data-graph-mount]");if(!o)return;o.textContent="";let r=C("svg",{viewBox:`0 0 ${fe} ${ge}`,class:"o-graph-svg",role:"img"}),a=i=>({x:i.x/100*fe,y:i.y/100*ge}),s=C("g",{},r),d=new Map(e.nodes.map(i=>[i.id,i]));for(let i of e.edges){let m=d.get(i.from),u=d.get(i.to);if(!m||!u)continue;let p=a(m),l=a(u);C("line",{x1:String(p.x),y1:String(p.y),x2:String(l.x),y2:String(l.y),stroke:"var(--rule)","stroke-width":"2"},s);let f={x:(p.x+l.x)/2,y:(p.y+l.y)/2};Ze(s,f.x,f.y,i.label),n.edit&&at(s,o,r,{line:{x1:p.x,y1:p.y,x2:l.x,y2:l.y}},f,i,e,n.edit.onCommit)}n.edit&&_&&!e.nodes.some(i=>i.id===_)&&(_=null);let c=C("g",{},r);for(let i of e.nodes){let m=a(i),u=C("g",{"data-node":i.id,transform:`translate(${m.x} ${m.y})`},c);if(C("rect",{x:String(-le/2),y:String(-he/2),width:String(le),height:String(he),rx:"24",fill:"var(--paper)",stroke:de[i.tone]??de[""],"stroke-width":"2"},u),Xe(u,0,0,i.label,18,13.5),n.edit){let p=n.edit,l=dt(r,u,{x:i.x,y:i.y},fe,ge,(g,h)=>p.onCommit({nodes:e.nodes.map(x=>x.id===i.id?{...x,x:g,y:h}:x),edges:e.edges})),f=()=>tt(u,0,0,le,he);u.addEventListener("click",g=>{if(g.stopPropagation(),l.dragged){l.dragged=!1;return}nt(r,i.id,f)}),u.addEventListener("dblclick",g=>{g.stopPropagation(),rt(o,u,i.label,h=>p.onCommit({nodes:e.nodes.map(x=>x.id===i.id?{...x,label:h}:x),edges:e.edges}))}),_===i.id&&f()}}if(n.edit){let i=n.edit;for(let m of e.nodes){let u=a(m);it(r,o,{id:m.id,vx:u.x+le/2+2,vy:u.y},"graph",e,i.onCommit)}ne={data:e,commit:i.onCommit},Qe()}o.appendChild(r),n.edit&&st(o,n.edit.onOpenEditor)}function dt(t,e,n,o,r,a){let s={dragged:!1};return e.style.cursor="grab",e.addEventListener("pointerdown",d=>{d.preventDefault(),d.stopPropagation();let c=n.x,i=n.y,m=p=>{let l=et(t,p.clientX,p.clientY);c=Math.max(2,Math.min(98,l.x/o*100)),i=Math.max(4,Math.min(96,l.y/r*100)),e.setAttribute("transform",`translate(${c/100*o} ${i/100*r})`)},u=()=>{window.removeEventListener("pointermove",m),window.removeEventListener("pointerup",u),!(c===n.x&&i===n.y)&&(s.dragged=!0,a(Math.round(c*10)/10,Math.round(i*10)/10))};window.addEventListener("pointermove",m),window.addEventListener("pointerup",u)}),s}function be(t){let e=en(t);e?cn(t,e):lt(t,"flow")}function xe(t){let e=tn(t);e?pn(t,e):lt(t,"graph")}var ct=be,pt=xe;function ut(t){t.querySelectorAll("[data-count-to]").forEach(e=>{let n=parseInt(e.getAttribute("data-count-to")??"0",10)||0,o=performance.now(),r=a=>{let s=Math.min(1,(a-o)/800);e.textContent=String(Math.round(n*s)),s<1&&requestAnimationFrame(r)};requestAnimationFrame(r)})}function mt(t){t.querySelectorAll("[data-count-to]").forEach(e=>{e.textContent=e.getAttribute("data-count-to")??e.textContent})}var ft={cover:{},bullets:{},stats:{},free:{},gantt:{mount:Ge,finalize:He},tracker:{mount:We,finalize:qe},flow:{mount:be,finalize:ct},graph:{mount:xe,finalize:pt}};function gt(t,e){ft[t]?.mount?.(e)}function ht(t,e){ft[t]?.finalize?.(e)}var bt=`
+.o-logo { height: 22px; width: auto; max-width: 140px; flex: none; }
+.o-top {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+  display: flex; align-items: center; gap: 28px;
+  padding: 16px 28px;
+  /* chrome token (round I): corporate decks recolour the header bar; the
+     default keeps today's soft bg fade */
+  background: var(--chrome, linear-gradient(to bottom, var(--bg) 30%, transparent));
+  color: var(--chrome-ink, var(--ink));
+}
+.o-title { font-family: var(--font-display); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; color: inherit; }
+.o-title::after { content: "."; color: var(--accent); }
+/* many folds overflow \u2014 a visible (thin) scrollbar, and go() keeps the active
+   tab scrolled into view */
+.o-tabs { display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+.o-tabs::-webkit-scrollbar { height: 6px; }
+.o-tabs::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+.o-tab {
+  border: none; background: none; cursor: pointer; white-space: nowrap;
+  font: 600 12.5px var(--font-body); color: var(--chrome-soft, var(--ink-soft));
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 8px 12px; border-radius: 6px; border-bottom: 2px solid transparent;
+}
+.o-tab:hover { color: var(--accent); }
+.o-tab.o-active { color: var(--chrome-ink, var(--ink)); border-bottom-color: var(--accent); }
+.o-actions { display: flex; gap: 8px; }
+.o-actions button {
+  border: 1px solid var(--rule); background: rgba(255,255,255,0.6); color: var(--ink-soft);
+  border-radius: 6px; padding: 5px 12px; cursor: pointer; font: 600 12.5px var(--font-body);
+}
+.o-actions button:hover { border-color: var(--accent); color: var(--accent); }
+
+.o-banner {
+  display: none; position: fixed; top: 58px; left: 50%; transform: translateX(-50%); z-index: 41;
+  padding: 8px 14px; border-radius: 8px; background: #FFF4E5; color: #8a4b00;
+  font: 500 13px var(--font-body); border: 1px solid #f0ddc0; box-shadow: 0 4px 18px rgba(26,26,26,0.08);
+  gap: 12px; align-items: center;
+}
+.o-edit-mode .o-banner { display: flex; }
+.o-banner button { border: 1px solid #c98a3d; background: #fff; color: #8a4b00; border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 12.5px; }
+
+.o-stage { min-height: 100vh; }
+
+.o-bottom {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
+  display: flex; align-items: center; gap: 20px;
+  padding: 14px 28px;
+  background: linear-gradient(to top, var(--bg) 25%, transparent);
+}
+.o-mark { font: 500 11.5px var(--font-body); color: var(--ink-soft); text-decoration: none; opacity: 0.7; display: inline-flex; align-items: center; gap: 5px; }
+.o-mark:hover { opacity: 1; color: var(--accent); }
+.o-mark svg { height: 16px; width: auto; color: var(--accent); flex: none; }
+.o-pips { display: flex; gap: 8px; margin: 0 auto; }
+.o-pip { width: 8px; height: 8px; border-radius: 50%; border: none; padding: 0; background: var(--rule); cursor: pointer; transition: background 0.2s, transform 0.2s; }
+.o-pip.o-active { background: var(--accent); transform: scale(1.25); }
+.o-nav { display: flex; align-items: center; gap: 10px; font: 600 12.5px var(--font-body); color: var(--ink-soft); }
+.o-nav button { border: 1px solid var(--rule); background: rgba(255,255,255,0.6); color: var(--ink); border-radius: 6px; padding: 4px 11px; cursor: pointer; font-size: 14px; line-height: 1.2; }
+.o-nav button:hover { border-color: var(--accent); color: var(--accent); }
+
+.o-edit-mode [contenteditable] { outline: 1px dashed rgba(85,122,78,0.45); outline-offset: 3px; min-width: 1ch; }
+.o-edit-mode [data-oedit]:focus { outline: 2px solid var(--accent); }
+
+.o-overlay { position: fixed; inset: 0; display: none; z-index: 60; }
+.o-overlay.o-black { display: block; background: #000; }
+.o-overlay.o-white { display: block; background: #fff; }
+
+.o-present .o-top, .o-present .o-bottom, .o-present .o-banner { display: none; }
+
+.o-print { display: none; }
+@media print {
+  @page { size: 1280px 720px; margin: 0; }
+  body { background: #fff; }
+  .o-top, .o-bottom, .o-banner, .o-stage, .o-overlay { display: none !important; }
+  .o-print { display: block; }
+  .o-print .slide {
+    width: 1280px; height: 720px; min-height: 0; overflow: hidden;
+    page-break-after: always; break-after: page;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .o-print .anim { opacity: 1 !important; transform: none !important; animation: none !important; }
+}
+`;var xt=t=>document.querySelector(`template[data-origami-slide="${CSS.escape(t)}"]`);function vt(t,e,n={}){let o=document.getElementById("origami-root");if(!o)throw new Error("origami: #origami-root missing");let r=document.createElement("style");r.id="origami-runtime-css",r.textContent=bt,document.head.appendChild(r);let a=$e(n);if(a){let b=document.createElement("style");b.id="origami-fonts-css",b.textContent=a,document.head.appendChild(b)}let s=new Set(t.hidden??[]),d=(t.order??[]).filter(b=>!s.has(b)&&xt(b)),c=new Map,i=0,m=!1;if(o.innerHTML=`
+    <header class="o-top">
+      <span class="o-title"></span>
+      <nav class="o-tabs" aria-label="Slides"></nav>
+      <span class="o-actions">
+        <button class="o-edit-toggle">\u270E Edit</button>
+        <button class="o-present-btn">Present</button>
+      </span>
+    </header>
+    <div class="o-banner"><span>Editing \u2014 changes live here until you save a copy.</span><button class="o-save">Save a copy</button></div>
+    <main class="o-stage"></main>
+    <footer class="o-bottom">
+      <a class="o-mark" href="https://github.com/origami-decks" target="_blank" rel="noopener"><svg viewBox="0 0 64 64" aria-hidden="true"><g fill="currentColor"><animateTransform attributeName="transform" type="translate" values="0 0; 0 -1; 0 0" keyTimes="0;0.5;1" dur="4.5s" repeatCount="indefinite"/><g opacity="0.45"><animateTransform attributeName="transform" type="rotate" values="0 36 40; 7 36 40; 0 36 40" keyTimes="0;0.5;1" dur="3.2s" repeatCount="indefinite"/><polygon points="30,40 47,40 52,11"/></g><g><animateTransform attributeName="transform" type="rotate" values="0 34 40; -12 34 40; 0 34 40" keyTimes="0;0.5;1" dur="3.2s" repeatCount="indefinite"/><polygon points="26,40 48,40 43,7" opacity="0.92"/></g><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>made with origami</a>
+      <div class="o-pips" role="tablist" aria-label="Slide position"></div>
+      <span class="o-nav">
+        <button class="o-prev" aria-label="Previous slide">\u2039</button>
+        <span class="o-progress"></span>
+        <button class="o-next" aria-label="Next slide">\u203A</button>
+      </span>
+    </footer>
+    <div class="o-overlay"></div>
+    <div class="o-print"></div>`,o.querySelector(".o-title").textContent=t.title||"Untitled deck",n["brand-logo"]){let b=document.createElement("img");b.className="o-logo",b.src=n["brand-logo"],b.alt="";let k=o.querySelector(".o-top");k.insertBefore(b,k.firstChild)}let u=o.querySelector(".o-tabs"),p=o.querySelector(".o-pips"),l=o.querySelector(".o-stage"),f=o.querySelector(".o-progress"),g=o.querySelector(".o-overlay"),h=o.querySelector(".o-print");function x(b,k=!1){let D=xt(b),N=t.slides[b],F=document.createElement("section");F.className="slide k-"+(N?.kind??"unknown"),F.setAttribute("data-slide-id",b),F.appendChild(D.content.cloneNode(!0)),Ce(F,n),Oe(F),Re(F,{capabilities:t.capabilities??[],interactive:!k,referrerless:location.protocol==="file:"});let ve=c.get(b);return ve&&w(F,ve),F}function w(b,k){X(b).forEach((D,N)=>{k[N]!==void 0&&(D.textContent=k[N])})}function M(){let b=l.querySelector(".slide");if(!b||!m)return;let k=b.getAttribute("data-slide-id"),D=X(b);D.length!==0&&c.set(k,D.map(N=>N.textContent??""))}function v(){u.innerHTML="",p.innerHTML="",d.forEach((b,k)=>{if(k!==0&&t.slides[b]?.group===!0)return;let D=document.createElement("button");D.className="o-tab",D.setAttribute("data-tab",b),D.setAttribute("data-head",String(k)),D.textContent=t.slides[b]?.label??b,D.addEventListener("click",()=>O(k)),u.appendChild(D);let N=document.createElement("button");N.className="o-pip",N.setAttribute("data-head",String(k)),N.setAttribute("aria-label",t.slides[b]?.label??`Slide ${k+1}`),N.addEventListener("click",()=>O(k)),p.appendChild(N)})}function y(b){let k=0;for(let D=0;D<=b;D++)(D===0||t.slides[d[D]]?.group!==!0)&&(k=D);return k}function S(b){X(b).forEach(k=>{m?k.setAttribute("contenteditable","plaintext-only"):k.removeAttribute("contenteditable")})}function L(){let b=d[i];l.innerHTML="";let k=x(b);l.appendChild(k),S(k),gt(t.slides[b]?.kind??"",k),ut(k),requestAnimationFrame(()=>k.classList.add("is-shown")),window.scrollTo(0,0),f.textContent=`${i+1} / ${d.length}`;let D=String(y(i));u.querySelectorAll(".o-tab").forEach(N=>N.classList.toggle("o-active",N.getAttribute("data-head")===D)),u.querySelector(".o-tab.o-active")?.scrollIntoView({inline:"nearest",block:"nearest"}),p.querySelectorAll(".o-pip").forEach(N=>N.classList.toggle("o-active",N.getAttribute("data-head")===D))}function O(b){M(),i=(b+d.length)%d.length,L()}function G(b){M(),m=b,document.documentElement.classList.toggle("o-edit-mode",b),L(),H()}function H(){h.innerHTML="";for(let b of d){let k=x(b,!0);k.classList.add("is-shown"),ht(t.slides[b]?.kind??"",k),mt(k),h.appendChild(k)}}function V(b){g.className="o-overlay"+(b?" "+b:"")}function $(){document.documentElement.classList.add("o-present"),document.documentElement.requestFullscreen?.().catch(()=>{})}function R(){if(V(""),document.documentElement.classList.contains("o-present")){document.documentElement.classList.remove("o-present"),document.fullscreenElement&&document.exitFullscreen?.().catch(()=>{});return}m&&G(!1)}return o.querySelector(".o-prev").addEventListener("click",()=>O(i-1)),o.querySelector(".o-next").addEventListener("click",()=>O(i+1)),o.querySelector(".o-present-btn").addEventListener("click",$),document.documentElement.hasAttribute("data-origami-published")?o.querySelector(".o-edit-toggle").remove():o.querySelector(".o-edit-toggle").addEventListener("click",()=>G(!m)),o.querySelector(".o-save").addEventListener("click",()=>{M(),e.onSaveCopy()}),document.addEventListener("keydown",b=>{let k=b.target;if(k?.isContentEditable){b.key==="Escape"&&k.blur();return}switch(b.key){case"ArrowRight":case" ":b.preventDefault(),O(i+1);break;case"ArrowLeft":b.preventDefault(),O(i-1);break;case"Escape":R();break;case"f":case"F":$();break;case"b":case"B":V(g.classList.contains("o-black")?"":"o-black");break;case"w":case"W":V(g.classList.contains("o-white")?"":"o-white");break}}),window.addEventListener("beforeprint",()=>{M(),H()}),document.addEventListener("fullscreenchange",()=>{document.fullscreenElement||document.documentElement.classList.remove("o-present")}),v(),L(),H(),{go:O,next:()=>O(i+1),prev:()=>O(i-1),current:()=>d[i],setEditMode:G,isEditMode:()=>m,edits:c,visibleOrder:d,refreshPrint:H}}var un=`<!DOCTYPE html>
+`+document.documentElement.outerHTML;(function(){let e=document.getElementById("origami-manifest");if(!e)return;let n;try{n=JSON.parse(e.textContent??"")}catch{return}let o={},r=document.getElementById("origami-assets");if(r)try{o=JSON.parse(r.textContent??"")??{}}catch{o={}}let a=vt(n,{onSaveCopy:()=>Te(Ae(un,a.edits),n.title)},o);window.__origami={version:n.v,viewer:a}})();})();
+
+</script>
+</body>
+</html>

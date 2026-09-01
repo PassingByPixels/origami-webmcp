@@ -1,0 +1,23 @@
+{
+  "name": "origami-folio-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Origami Folio Web — open a Fold in the browser, register Origami's authoring tools to in-page agents over WebMCP, accept or reject their proposals by hand, save back to disk.",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node build.mjs --serve",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tests.json",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "demo": "node demo/author-demo.mjs",
+    "demo:audit": "node demo/audit-artifact.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^26.4.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
