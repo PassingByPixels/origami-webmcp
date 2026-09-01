@@ -6,7 +6,7 @@ import { origamiGuide } from '../../src/core/guide.js';
 import { modeFileName } from '../../src/core/mode-registry.js';
 import { autosaveKey } from '../../src/app/files.js';
 import { pointerKey } from '../../src/app/opfs.js';
-import { miniHarness, sampleDeck } from './harness.js';
+import { harness, miniHarness, sampleDeck } from './harness.js';
 
 /* The mini tool pages (docs/SITE.md, "Mini tools"), against the REAL vendored @origami/format
    and @origami/runtime. Every assertion here is about observable state — what the block's JSON
@@ -98,6 +98,27 @@ describe('each mini page registers exactly its own toolset', () => {
         for (const req of t.inputSchema.required ?? []) {
           expect(t.inputSchema.properties[req], `${mode.key}.${t.name}.${req}`).toBeDefined();
         }
+      }
+    }
+  });
+
+  it('locks every top-level inputSchema against unknown arguments — additionalProperties:false, Folio and every mini mode', async () => {
+    /* A strict WebMCP host may enforce the schema literally: an arg the tool never asked for
+       must be REJECTED, not silently ignored. That only holds if every registered tool's
+       top-level schema says so — one missed tool is one hole a strict host would exploit.
+
+       Covers every definition site: buildTools(), block-tools, AND pageGuideTool()'s own
+       schema (mode-guide.ts) that createModeRegistry swaps in on a mini mode. */
+    const folio = harness().registry.list();
+    expect(folio.length).toBeGreaterThan(0);
+    for (const t of folio) {
+      expect(t.inputSchema.additionalProperties, `folio.${t.name}`).toBe(false);
+    }
+    for (const mode of MINI_MODES) {
+      const h = await miniHarness(mode);
+      expect(h.registry.list().length, mode.key).toBeGreaterThan(0);
+      for (const t of h.registry.list()) {
+        expect(t.inputSchema.additionalProperties, `${mode.key}.${t.name}`).toBe(false);
       }
     }
   });

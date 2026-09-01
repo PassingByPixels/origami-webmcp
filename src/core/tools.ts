@@ -224,6 +224,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'START HERE. The whole Origami contract in one call — what a Fold is, the read→edit→write chunk protocol, every kind schema, the inert/active rules, the capability model, and the tool catalog. An agent with no prior knowledge of Origami should call this once on connect to learn the format. The default answer is COMPLETE except for two bulk payloads it points at instead of pasting: the recipe cards\' html and the starter catalog. Pass topic to get one section on its own — contract (the protocol) | kinds | recipes | starters | issues | tools — which is also how you fetch either of those two. Pass kind for just one kind\'s schema.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           kind: { type: 'string', description: 'Optional: one kind to detail (else the whole contract)' },
           topic: { type: 'string', enum: GUIDE_TOPICS, description: 'Optional: one section only — contract | kinds | recipes | starters | issues | tools' },
@@ -248,6 +249,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       description: 'The markup contract for a slide/block kind: what structure and attributes are valid.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { kind: { type: 'string', description: 'Kind key, e.g. "free", "gantt", "chart"' } },
         required: ['kind'],
       },
@@ -267,6 +269,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Create a NEW blank Fold — a fresh, valid deck with one editable fold — and OPEN IT IN THIS TAB. It renders immediately. Call this FIRST when asked to build something from nothing, then author it with add_chunk / add_custom_fold / write_chunk and finish with save_deck. foldType picks the reading experience: "deck" (default card-stage) | "scroll" (a long-form document — pair it with document-kind folds) | "ledger". If a Fold with UNSAVED changes is already open this refuses rather than throw that work away; pass discard:true to replace it anyway (use that when you are running unattended and the open Fold is not the human\'s work).',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           title: { type: 'string', maxLength: 200, description: 'Deck title (default "Untitled deck"); also seeds the suggested filename' },
           foldType: { type: 'string', enum: FOLD_TYPES, description: 'deck (default card-stage) | scroll (long-form document) | ledger' },
@@ -308,7 +311,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // DEVIATION: "Read fresh from the file every time" -> the open Fold in this tab.
       description:
         'Table of contents of the open Fold: every editable chunk (slide) with id, kind, label and hidden flag, in order. Always reflects what the human is looking at right now.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const m = deck.model();
         return ok({
@@ -331,6 +334,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Read one chunk for editing: a self-contained payload with the deck context, the kind schema (what markup is valid), and the slide <template>. Edit the template and send the whole element back via write_chunk. Always reflects the Fold open in this tab.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { chunkId: { type: 'string', description: 'Chunk id from list_chunks' } },
         required: ['chunkId'],
       },
@@ -350,6 +354,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Apply an edited chunk to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Send the whole <template data-origami-slide=...> element from read_chunk, edited. The slide id and kind are immutable; drift is rejected. The only hard rule is single-file structure (no stray <template> tags, balanced <script>). Scripts, styles, iframes and remote URLs are ALLOWED — they mark the deck "active" (returned as activeContent; recipients open it locked until they trust the sender). Returns errors instead of applying only when the content would break the file structure. Pass dryRun:true to run the WHOLE gate and apply NOTHING — you get the same verdict, or the same violations, a real write would give, and the Fold stays byte-identical. Use propose_chunk instead when the change is a judgement call the human should approve.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chunkId: { type: 'string', description: 'The chunk the edit was for' },
           html: { type: 'string', description: 'The edited <template> element (a full chunk reply is fine too)' },
@@ -388,6 +393,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Add a new slide to the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Defaults to a "free" slide with starter content at the end of the deck. For a built-in kind supply html (call get_kind_schema first). For a COMPOSITE block already defined in this Fold, pass block + fields — the block is rendered and baked into a free slide; no html needed. For a whole ready-made fold — a roadmap, a flowchart, a ledger — pass starter (see list_starters) and nothing else. Pass dryRun:true to build, bake and validate the slide WITHOUT adding it — the same verdict, or the same violations, a real add would give, and the Fold stays byte-identical.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           kind: { type: 'string', description: 'Slide kind (default "free")' },
           position: { type: 'integer', minimum: 0, description: '0-based insert index (default: end)' },
@@ -443,6 +449,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Add a whole CUSTOM FOLD (a full page) as one fold — the same feature the Studio exposes in its left rail. Pass `html`, the fold\'s inner. For a page a human EDITS by clicking straight on it, compose it from Origami\'s inline-editable blocks inside a <div class="slide-inner">: headings (<h2>/<h3>), paragraphs (<p>, <p class="lede">, <p class="eyebrow">), lists (<ul><li>…), and stat cards (<div class="card-grid"><div class="stat-card"><div class="big">42</div><div class="lbl">Label</div></div>…</div>). Or paste a full report verbatim — active content (scripts, <style>, remote assets) is ALLOWED but flags the deck active so a recipient opens it under the padlock; only a stray <template> or unbalanced <script> is rejected (it would corrupt the single file). This CHANGES THE OPEN FOLD and re-renders it.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           html: { type: 'string', description: "The fold's inner HTML — a whole page (editable Origami blocks in a .slide-inner, or a raw report)" },
           label: { type: 'string', description: 'Sidebar label (default: "Custom fold")' },
@@ -486,6 +493,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Move one chunk to a different place in the open Fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. `position` is the 0-based index the chunk ENDS UP at, counting hidden folds, and the folds it passes shift by one to make room. Order only: no content, label or kind is touched, nothing is added and nothing is removed. A position outside the deck is refused rather than clamped, so a wrong index never silently means "last". Returns the whole new order. undo reverses it in one step.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
           position: { type: 'integer', minimum: 0, description: '0-based index to move it to (0 = first)' },
@@ -536,6 +544,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Set one chunk\'s label, speaker notes or hidden flag in the open Fold — this CHANGES THE DECK the human is looking at. `label` is the name in the sidebar and the tabs; `notes` is the presenter text that never renders on the fold; `hidden:true` takes the fold out of the show without deleting it, and `hidden:false` puts it back — that is the ONLY way to un-hide a fold that delete_chunk hid. Fields you do not pass are left alone (pass "" to clear a label or notes). The chunk\'s CONTENT and kind are not touched — use write_chunk for those. Supply at least one field. One call is one undo step.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
           label: { type: 'string', maxLength: 200, description: 'Sidebar/tab label ("" clears it)' },
@@ -573,6 +582,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Hide or delete a slide in the open Fold — this CHANGES THE DECK the human is looking at. Default mode "hide" keeps the slide in the file but out of the show (the recoverable path — prefer it); mode "delete" removes the slide template entirely. A hidden fold comes back with set_chunk_meta({chunkId, hidden:false}); a deleted one only comes back through undo. Use propose_delete when the human should approve first.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
           mode: { type: 'string', enum: ['hide', 'delete'], description: 'Default "hide"' },
@@ -595,6 +605,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Register (or update) a COMPOSITE BLOCK definition in the deck — a reusable typed component a human can still edit field-by-field. The def is a template of inert primitives + a field manifest; once defined, author instances via add_chunk(block, fields). The template MUST render inert (no <script>/<style>/<iframe>/on*/remote URLs) — an active template is rejected. Re-defining the same kind replaces it (bump version). This CHANGES THE OPEN FOLD.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           def: {
             type: 'object',
@@ -645,7 +656,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       annotations: { readOnlyHint: true },
       description:
         'List the composite block definitions registered in this deck (kind, name, version, fields). Use a kind with add_chunk(block, fields).',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () =>
         ok({
           blocks: Object.values(deck.model().blocks).map((d) => ({ kind: d.kind, name: d.name, version: d.version, fields: d.fields })),
@@ -659,7 +670,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // catalog to list. These are the Studio rail's whole-fold starters, ported verbatim.
       description:
         `The ready-made FOLDS you can add in one call: a roadmap, a flowchart, a node graph, a drawing, a Venn diagram, a ledger. Each is a free card already holding one seeded data block — the exact shape every data kind's schema recommends — copied from the Studio's own palette, so a fold you start from one is what the human would have got by clicking the rail. Add one with add_chunk({starter:"<key>"}), or stage it for review with propose_add({starter:"<key>"}). Use these when a seeded example is a fine starting point; supply html yourself when the content matters more than the shape.`,
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => ok({ starters: starterCatalog(), note: 'add one with add_chunk({starter:"roadmap"}) — it lands as a free fold holding that block, seeded and ready to edit.' }),
     },
 
@@ -670,6 +681,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Delete a composite block definition from the deck. Non-destructive: every placed instance keeps its baked output but loses its data-script, becoming plain inert content — so there is no dangling reference and the deck stays valid. This CHANGES THE OPEN FOLD.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { kind: { type: 'string', description: 'Block kind x.<name> from list_block_defs' } },
         required: ['kind'],
       },
@@ -701,6 +713,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Set the deck-level masthead shown in the header bar (a corporate report header): a subtitle line under the title and metadata chips (e.g. ["5 plants","Built 2026-06-15","Q3 2026"]). This CHANGES THE OPEN FOLD. The bar COLOURS and thickness are theme tokens (chrome / chrome-ink / chrome-mark / chrome-pad), set in the deck theme or the Studio Header panel — not here. Pass an empty subtitle ("") / chips ([]) to clear.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           subtitle: { type: 'string', maxLength: 200, description: 'A line under the deck title' },
           chips: { type: 'array', items: { type: 'string', maxLength: 60 }, maxItems: 8, description: 'Metadata chips' },
@@ -727,6 +740,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Set the deck-level title and/or theme of the open Fold — this CHANGES THE DECK the human is looking at and re-renders it. `title` is the name in the manifest and the header bar; it does NOT rename the file (the suggested filename was fixed when the Fold was created, and only the human choosing "Save as…" changes where bytes land). `themeName` renames the theme; on its own it changes the label, NOT the colours — pass themeTokens for those. `themeTokens` patches CSS custom properties: the tokens you name are merged onto the ones the deck is already using, so the rest survive. The tokens the deck stylesheet actually reads are bg, paper, ink, ink-soft, rule, rule-soft, accent, tint-a, tint-b, chrome, chrome-ink, chrome-soft, font-display and font-body, plus chrome-mark, chrome-mark-h and chrome-pad for the masthead bar; a name outside that set is stored and simply never read. Values are colours or font stacks — braces, semicolons, angle brackets, @ and url() are rejected, and nothing is applied when they are. Supply at least one of the three. One call is one undo step.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           title: { type: 'string', maxLength: 200, description: 'Deck title (manifest + header bar); does not rename the file' },
           themeName: { type: 'string', maxLength: 60, description: 'Theme name, e.g. "origami-default" — a label, not a restyle' },
@@ -776,6 +790,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Set the deck\'s reading experience (foldType). "deck" (default) = the card-stage — one fold at a time with tabs/pips, presentable. "scroll" = a continuous-reading document — every fold stacked and read top to bottom (pair it with document-kind folds for a long-form report). "ledger" is reserved. This CHANGES THE OPEN FOLD. "deck" is the default and writes no key, so the file stays byte-stable.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { foldType: { type: 'string', enum: FOLD_TYPES, description: 'deck | scroll | ledger' } },
         required: ['foldType'],
       },
@@ -805,6 +820,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'SEE THE DECK YOU CANNOT SEE. Lays the open Fold out in a real browser, off-screen, and reports the geometry of every fold as text: how tall the content is against how much screen there is, where the content starts against where the deck masthead ends, how many blocks and diagram labels rendered. It then names four defects it can prove — content that OVERFLOWS the screen, content CLIPPED behind the masthead, an EMPTY fold (a data block whose JSON did not parse renders as nothing at all, and validation will not catch that), and SVG labels that COLLIDE on a venn/flow/graph. Call it after authoring and before save_deck. Layout depends on the SCREEN, so the measurement is taken at a stated viewport (1280x720 by default) and the result names it; pass viewport to re-check a smaller one, which is where folds usually break. It measures the real render, never a model: a fold it could not put on screen comes back measured:false with the reason instead of a number, and a host with no browser layout says so for the whole deck — an absent warning is not a clean bill of health unless measured is true.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           viewport: {
             type: 'object',
@@ -842,7 +858,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // web-only tool built on @origami/format's History, which the page keeps per open Fold.
       description:
         'Reverse the LAST change made to the open Fold and re-render it. One tool call is one undo step, so calling this twice reverses the last two. It covers write_chunk, add_chunk, add_custom_fold, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any proposal that was accepted — by you or by the human clicking the card. It does NOT cover: create_deck or the human opening/dropping a different Fold (both replace the whole deck and reset the stack, so you cannot undo across one), a file save_deck already wrote to disk (undo changes the deck in the tab, never the bytes on disk — save again to push the reversal through), or a proposal that is still staged (staging is not a change; use reject_proposal). The stack holds the 50 most recent steps and there is no redo — re-apply by hand if you undo too far.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const undone = deck.undo();
         if (!undone) {
@@ -867,6 +883,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'What has been DONE in this tab, newest first — one entry per tool call, whoever made it. Each entry carries seq, at (ISO), source (agent | human | console | replay), tool, ok plus the error when it failed, the chunk or proposal it targeted, ms, and a one-line summary. The summary is deliberately thin: it names the tool and its scalar arguments and NEVER carries slide html, so reading the feed can never cost what reading the deck costs — use read_chunk or export_deck for content. Use it to see what a human did while you were working, to find the call that broke something, or to check your own trail. It is NOT the undo stack (undo keeps its own 50 steps and this cannot drive it) and it is not part of the Fold: nothing here is saved to disk, and a page reload starts an empty log. Only the 500 most recent entries are held; a gap in seq means older entries were dropped. Your own call is recorded after this answer is built, so it never appears in its own result.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { limit: { type: 'integer', minimum: 1, description: 'How many of the newest entries to return (default 50, capped at the 500 held)' } },
       },
       execute: async ({ limit }) => {
@@ -886,7 +903,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // an outcome rather than content.
       description:
         'Hand YOURSELF the complete .origami.html text of the open Fold — every byte, as a string in the result. This is the AGENT\'s copy: use it to hash the file, diff it, quote a fragment, or pass it on to something else. It writes NOTHING, saves NOTHING and changes NOTHING; the human still has no file until save_deck runs, so calling this INSTEAD of save_deck ends the job with the work stranded in your context. The bytes are the deck exactly as it stands, byte-identical to what the page renders; save_deck stamps a fresh manifest.modified and this does not, so the two differ by that one field after a save. A Fold over 4 MB (embedded images will do it) is refused with its size rather than returned — that is a context-window accident, not an export; use save_deck.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const text = deck.serialize();
         const bytes = utf8Bytes(text);
@@ -915,7 +932,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // unattended agent would have no way to finish.
       description:
         `Finish the job: re-validate the Fold and put it somewhere durable. READ THE RESULT — it tells you exactly which of three things happened, and only one of them is a save. (1) saved:true means the page held a writable File System Access handle for the file and the bytes were written AND read back to confirm it. (2) opfs.written means the complete Fold is in this browser's own private file system, which needs no permission and no gesture and has room for a Fold with images; it is real storage but INVISIBLE outside this page, so the human retrieves it with the "Download last save" button. It is also not permanent — the browser may evict it. (3) downloadStarted means a download was fired at the browser; on Chrome that usually lands the file in Downloads, but this page cannot see where it went and a browser may block a repeat, so it is NEVER reported as saved. When saved is false the work is safe but the human still has to press Save (or Save as…) to put it on their own disk — say so rather than reporting success. It never throws and never opens a picker (nobody would be there to click it), so always end on it. Safe to call any number of times; it never changes content.`,
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const text = deck.serialize(new Date().toISOString());
         const violations = validateDeck(parseDeck(text));
@@ -961,6 +978,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Propose an edit to a chunk WITHOUT applying it — STAGED for a human (or another agent) to review and accept (a "document PR"). It appears as a review card in the page, so a human who is watching can Accept or Reject it themselves; if nobody is, resolve it yourself with accept_proposal. Same edit contract as write_chunk (send the edited <template>; id+kind immutable; single-file structure validated NOW so a broken proposal never reaches review). The proposal pins the chunk\'s current content; accept_proposal refuses with a 3-way view if the chunk changed since — never a silent overwrite. Returns a proposalId. Review with list_proposals; apply with accept_proposal; drop with reject_proposal.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chunkId: { type: 'string', description: 'The chunk to edit' },
           html: { type: 'string', description: 'The edited <template> element (a full chunk reply is fine)' },
@@ -998,6 +1016,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Propose a NEW slide WITHOUT adding it — staged for review (the add equivalent of propose_chunk). Same content args as add_chunk (kind/html, block+fields for a composite, or starter for a ready-made fold); the content is rendered, baked and validated now, then a slide.insert is staged. It appears as a review card in the page for a watching human; resolve it yourself with accept_proposal if nobody is. Review with list_proposals; apply with accept_proposal.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           kind: { type: 'string', description: 'Slide kind (default "free")' },
           position: { type: 'integer', minimum: 0, description: '0-based insert index (default: end)' },
@@ -1041,6 +1060,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Propose hiding or deleting a slide WITHOUT doing it — staged for review, as a card in the page for a watching human and as a queue entry you can resolve yourself. mode "hide" (default, recoverable) or "delete". accept_proposal refuses if the chunk is already gone.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
           mode: { type: 'string', enum: ['hide', 'delete'], description: 'Default "hide"' },
@@ -1074,7 +1094,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       annotations: { readOnlyHint: true },
       description:
         'The review queue: every staged proposal for the open Fold with author, title, the target chunk, the before/after content, and a conflict flag (true if that chunk changed since the proposal was made). Empty until propose_chunk / propose_add / propose_delete stages something. The human accepts or rejects them by clicking the cards in the page.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => ok({ proposals: await proposals.views(deck.model()) }),
     },
 
@@ -1086,6 +1106,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         'Accept a staged proposal — apply its edit to the open Fold immediately. Refuses if the target chunk changed since the proposal was made: returns conflicted with the proposed + current content so you can re-propose against the new base (never a silent overwrite). Video capabilities the edit needs are granted on accept. This is the same action the human takes by clicking Accept on the proposal card, so use it when you are running unattended — and prefer leaving the card for the human when one is watching and the change is a judgement call.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { proposalId: { type: 'string', description: 'Proposal id from list_proposals' } },
         required: ['proposalId'],
       },
@@ -1115,6 +1136,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       description: 'Drop a staged proposal without applying it. The same action the human takes by clicking Reject on the proposal card.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { proposalId: { type: 'string', description: 'Proposal id from list_proposals' } },
         required: ['proposalId'],
       },

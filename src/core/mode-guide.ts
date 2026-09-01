@@ -120,7 +120,7 @@ export function pageGuideTool(mode: ToolMode): ToolDef {
       `(the format library's own schema, verbatim), the protocol, and the tool catalog. It is deliberately SMALL — this is ` +
       `not the whole Origami contract, because this page is not the whole editor. It also names the tools that exist on ` +
       `/folio/ and not here, and how to get there. An agent with no prior knowledge of Origami should call this once on connect.`,
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     execute: async () => ok(pageGuide(mode)),
   };
 }

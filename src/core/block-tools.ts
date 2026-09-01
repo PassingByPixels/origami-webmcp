@@ -208,7 +208,7 @@ function drawTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
       annotations: { readOnlyHint: true },
       description:
         'READ THE SCENE FIRST. Every element in the drawing on this page, in draw order, with its id, type, geometry and style — the exact objects that live in the block\'s JSON. Element ids are how add/update/remove address the scene, so nothing else here is safe to call blind. Also reports the canvas box (w x h) new elements should be placed inside, and the caption under the figure.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const s = site();
         const d = s.data as { w?: number; h?: number };
@@ -230,6 +230,7 @@ function drawTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
         'Add ONE element to the drawing — this CHANGES THE DRAWING on this page and re-renders it immediately. Pass the element\'s own fields (type, x, y, width, height, stroke, …) as the arguments; `id` and `seed` are MINTED when you leave them out, so a simple shape needs neither. Geometry, enums and colours are checked by the draw schema itself and a bad value is refused with the violation named — nothing is applied. arrow/line/freedraw need `points`; text needs `text`. Call list_elements first: coordinates are scene units and new work belongs inside the canvas box that call reports.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           ...ELEMENT_PROPS,
           id: { type: 'string', maxLength: 40, description: 'Element id (minted when absent). Keep ids stable — they are how you address it later' },
@@ -255,6 +256,7 @@ function drawTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
         'Patch ONE element of the drawing by id — this CHANGES THE DRAWING on this page and re-renders it immediately. Only the fields you name in `patch` change; everything else on that element is left exactly as it was. An id that is not in the scene is REFUSED with the ids that are (never created, never guessed at). The patched element is re-checked against the draw schema before anything is applied, so a move that would put a shape outside the coordinate limits, or a value outside an enum, is refused with the violation named.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           id: { type: 'string', description: 'Element id from list_elements' },
           patch: { type: 'object', description: 'The fields to change, e.g. {"x": 120, "stroke": "#B3402A"}. An `id` here is ignored — ids are addresses, not properties', properties: ELEMENT_PROPS },
@@ -285,6 +287,7 @@ function drawTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
         'Remove ONE element from the drawing by id — it is GONE from the scene (undo brings it back; nothing else does). An unknown id is refused with the ids that exist. An element another element is ATTACHED to cannot be removed on its own: the scene would name a party that is not there, so the draw schema refuses the whole change and the drawing is left alone — detach or remove the arrow first.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: { id: { type: 'string', description: 'Element id from list_elements' } },
         required: ['id'],
       },
@@ -316,7 +319,7 @@ function chartTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
       annotations: { readOnlyHint: true },
       description:
         'READ THE FIGURE FIRST. What this page is currently showing: whether it is a chart or a Venn diagram, the block\'s whole JSON exactly as it is stored, and the caption. set_chart and set_venn REPLACE that JSON wholesale rather than patching it, so read it here, edit what you have read, and send the whole thing back.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const s = site();
         return ok({ chunkId: s.chunkId, kind: s.kind, caption: s.caption, data: s.data, schema: kindSchemaComment(s.kind) });
@@ -329,6 +332,7 @@ function chartTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
         'Set the WHOLE chart on this page — this CHANGES THE FIGURE the human is looking at and re-renders it immediately. `chart` is the complete chart JSON (type, labels, series, yMax, plus any of the optional presentation fields); it REPLACES what is there, so read get_data first if you mean to keep part of it. Every rule of the chart schema is enforced before anything is applied: an unknown type, a series whose values do not have one number per label, a colour that is not a #hex, a flag on a type that cannot draw it — each is refused with the violation named, and the figure is left untouched. If the page is currently showing a Venn diagram, this swaps the figure back to a chart.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           chart: {
             type: 'object',
@@ -351,6 +355,7 @@ function chartTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
         'Make this page show a VENN DIAGRAM of 2-6 overlapping sets, replacing whatever figure is there — this CHANGES THE FIGURE the human is looking at and re-renders it immediately. `venn` is the complete venn JSON: count, one labelled and #hex-coloured entry in `sets` per count, and optional named `overlaps` placed by percent. sets.length must equal count; a mismatch, a bad colour or an overlap naming a circle that does not exist is refused with the violation named and nothing is applied. get_data then reports kind "venn"; set_chart swaps back.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           venn: {
             type: 'object',
@@ -379,7 +384,7 @@ function ganttTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
       annotations: { readOnlyHint: true },
       description:
         'READ THE ROADMAP FIRST. The whole gantt JSON on this page exactly as it is stored — totalWeeks, startDate, lenses, swimlanes, cards and milestones — plus the caption. set_roadmap REPLACES that JSON wholesale rather than patching it, so read it here, edit what you have read, and send the whole thing back.',
-      inputSchema: { type: 'object', properties: {} },
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const s = site();
         return ok({ chunkId: s.chunkId, caption: s.caption, roadmap: s.data, schema: kindSchemaComment('gantt') });
@@ -392,6 +397,7 @@ function ganttTools(deck: DeckStore, mode: ToolMode): ToolDef[] {
         'Set the WHOLE roadmap on this page — this CHANGES THE ROADMAP the human is looking at and re-renders it immediately. `roadmap` is the complete gantt JSON; it REPLACES what is there, so read get_roadmap first if you mean to keep part of it. The gantt schema is enforced before anything is applied: a card naming a swimlane or a lens that is not declared, a duplicate card id, a start or a milestone week outside totalWeeks, an effort or type outside the enum — each is refused with the violation named and the roadmap is left untouched.',
       inputSchema: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           roadmap: {
             type: 'object',
@@ -429,6 +435,7 @@ function captionTool(deck: DeckStore, mode: ToolMode): ToolDef {
       'Set the caption printed under the figure on this page — this CHANGES THE FOLD the human is looking at and re-renders it. The caption is TEXT: "<" and "&" are escaped, so it can never smuggle markup into the fold. Pass "" to clear it. Nothing about the block\'s data is touched.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: { caption: { type: 'string', maxLength: 200, description: 'The line under the figure ("" clears it)' } },
       required: ['caption'],
     },
