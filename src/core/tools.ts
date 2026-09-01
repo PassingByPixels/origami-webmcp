@@ -24,6 +24,7 @@ import {
 import { ActivityLog } from './activity.js';
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
 import { bakeTableInner } from './bake.js';
+import { DATA_BLOCK_REFUSAL, validateDataBlocks } from './data-blocks.js';
 import type { DeckStore } from './deck-store.js';
 import { newDeckId, newProposalId, newSlideId, sha256Hex } from './ids.js';
 import { GUIDE_TOPICS, origamiGuide, type GuideTopic } from './guide.js';
@@ -95,6 +96,10 @@ function buildInsert(
   inner = bakeTableInner(inner, Date.now());
   const violations = validateSlideContent(inner);
   if (violations.length > 0) return { error: 'the slide would break the deck structure', extra: { violations } };
+  // the data gate, at AUTHORING time: every data block is checked by its own kind's validator —
+  // the same functions save_deck runs — so a wrong shape is refused here, not after the deck is built
+  const dataViolations = validateDataBlocks(inner, m.blocks);
+  if (dataViolations.length > 0) return { error: DATA_BLOCK_REFUSAL, extra: { violations: dataViolations } };
   const id = newSlideId();
   const index = position === undefined ? m.order.length : position;
   const grants = videoCapsNeeded(inner).filter((c) => !m.capabilities.includes(c));
@@ -122,7 +127,12 @@ export function coerceAndValidate(m: DeckModel, chunkId: string, html: string): 
   if (violations.length > 0) {
     refuse('the edit would break the deck structure — nothing was applied', { violations });
   }
-  return bakeTableInner(reply.inner, Date.now());
+  // bake FIRST, then gate: the baked rows are the bytes that would land, so they are the bytes
+  // the validator must see (a formula whose result breaks the table schema is still a refusal)
+  const baked = bakeTableInner(reply.inner, Date.now());
+  const dataViolations = validateDataBlocks(baked, m.blocks);
+  if (dataViolations.length > 0) refuse(DATA_BLOCK_REFUSAL, { violations: dataViolations });
+  return baked;
 }
 
 /**
@@ -1119,6 +1129,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             ...(res.targetId ? { targetId: res.targetId } : {}),
             ...(res.proposed !== undefined ? { proposed: res.proposed } : {}),
             ...(res.current !== undefined ? { current: res.current } : {}),
+            ...(res.violations !== undefined ? { violations: res.violations } : {}),
           });
         }
         return ok({

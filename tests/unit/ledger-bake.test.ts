@@ -19,7 +19,7 @@ const rowsOf = (deckText: string): string[][] => {
 
 describe('ledger formulas bake on a free card', () => {
   const data = {
-    columns: [{ label: 'Item' }, { label: 'Cost', format: 'number' }],
+    columns: [{ label: 'Item' }, { label: 'Cost', format: { kind: 'number' } }],
     rows: [
       ['Rent', '1200'],
       ['Food', '300'],

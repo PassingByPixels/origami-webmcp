@@ -219,10 +219,11 @@ test('inspect_render measures a REAL layout and names two real defects', async (
      are real: a deck is built with two defects that genuinely render wrong, and inspect_render
      has to find both by laying the actual Fold out in an actual browser.
 
-     Defect 2 is the one a validator cannot help with in time. An empty flow data block
-     (nodes: []) passes the content policy and add_chunk accepts it, so the agent gets an "ok"
-     and a fold that draws NOTHING. save_deck does eventually refuse it — asserted below — but
-     only at the very end, with a schema violation rather than "this fold is blank". */
+     Defect 2 is the one no VALIDATOR can catch: a fold whose markup is perfectly legal and
+     whose data blocks all pass their schemas, and which still paints nothing — here an empty
+     .slide-inner. (The other route to a blank fold, an empty data block, is now refused at
+     write time by the data gate; that refusal is asserted below and in tests/unit/tools.test.ts.
+     Layout, not schema, is what is left, and only a real render can see it.) */
   await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Inspect Me', discard: true });
   await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
@@ -230,12 +231,18 @@ test('inspect_render measures a REAL layout and names two real defects', async (
   const dataBlock = (kind: string, data: unknown) =>
     `<script type="application/json" data-odata="${kind}">${JSON.stringify(data).replace(/</g, '\u003c')}</script>`;
 
-  const blank = await invoke(page, 'add_chunk', {
+  // an empty data block is REFUSED now — same verdict, same rule, at authoring time
+  const refused = await invoke(page, 'add_chunk', {
     kind: 'flow',
     label: 'Blank flow',
     html: `<figure class="o-flowfig anim">${dataBlock('flow', { nodes: [], edges: [] })}<div class="o-flow" data-flow-mount></div></figure>`,
   });
-  expect(blank.state, 'an empty data block is ACCEPTED — that is the point').toContain('ok');
+  expect(refused.state).toContain('error');
+  expect(JSON.stringify(refused.body.violations)).toContain('flow.nodes.count');
+
+  // what a validator still cannot see: legal markup that paints nothing
+  const blank = await invoke(page, 'add_chunk', { kind: 'free', label: 'Blank card', html: '<div class="slide-inner"></div>' });
+  expect(blank.state, 'an empty card is legal markup — that is the point').toContain('ok');
 
   const tall = await invoke(page, 'add_chunk', {
     kind: 'free',
@@ -283,10 +290,11 @@ test('inspect_render measures a REAL layout and names two real defects', async (
       `blank flow paints nothing; overflowing fold contentHeight=${tallGeo.contentHeight}px`
   );
 
-  // save_deck refuses the same deck, but only at the end and only as a schema violation
+  // and this deck SAVES: every data block passes its schema. A blank fold is a layout defect,
+  // which is why inspect_render is the only thing that reports it.
   const saved = await invoke(page, 'save_deck', {});
-  expect(saved.state).toContain('error');
-  expect(JSON.stringify(saved.body.violations)).toContain('flow.nodes.count');
+  expect(saved.state).toContain('ok');
+  expect(saved.body.validated).toBe(true);
 
   // and the measuring frame cleaned itself up — it must never linger next to the preview
   await expect(page.locator('[data-testid="measure-frame"]')).toHaveCount(0);

@@ -779,7 +779,11 @@ describe('the kind catalog steers, and knownIssues is measured', () => {
     // and it does not tell an agent to work around a defect that is not there
     expect(clip).not.toMatch(/avoid the flow kind|do not use/i);
 
-    expect(guide.knownIssues.emptyDataBlockPassesUntilSave).toMatch(/renders completely blank/);
+    // the empty-data-block trap is FIXED, so the entry states the new behaviour: the gate
+    // refuses it at authoring time with the rule named, and inspect_render still owns the rest
+    expect(guide.knownIssues.dataBlocksAreGatedAtWriteTime).toMatch(/REFUSED at authoring time/);
+    expect(guide.knownIssues.dataBlocksAreGatedAtWriteTime).toMatch(/flow\.nodes\.count/);
+    expect(guide.knownIssues.dataBlocksAreGatedAtWriteTime).toMatch(/inspect_render/);
     expect(guide.knownIssues.studioTreeShakenCss).toMatch(/tree-shaken|stripped/);
   });
 });
@@ -2179,5 +2183,115 @@ describe('the OPFS backstop', () => {
     expect(safeName('...')).toBe('untitled.origami.html');
     expect(safeName('x'.repeat(400)).length).toBe(120);
     expect(safeName('welcome.origami.html')).toBe('welcome.origami.html');
+  });
+});
+
+describe('S1 — one data gate, at authoring time', () => {
+  /* The two gates used to disagree: add_chunk / write_chunk checked only the CARRIER (well-formed
+     <script type="application/json">), while save_deck checked what was inside it. So a wrong
+     shape was accepted for a whole authoring session and refused at the end, after the agent had
+     built the deck around it. Every write path now runs the format library's OWN per-kind
+     validator, so the verdict an agent gets at add time is the verdict save_deck gives. */
+
+  const figure = (kind: string, data: unknown): string =>
+    `<div class="slide-inner"><h2>Gate</h2><figure class="o-${kind}fig anim"><script type="application/json" data-odata="${kind}">${JSON.stringify(data).replace(/</g, '\u003c')}</script><div class="o-${kind}" data-${kind}-mount></div><figcaption>x</figcaption></figure></div>`;
+
+  /** Sonnet's real refusal: a table column.format given as a STRING. add_chunk took it and only
+      save_deck said no. */
+  const STRING_FORMAT = { columns: [{ label: 'Item' }, { label: 'Cost', format: 'currency' }], rows: [['Widget', '10']] };
+
+  it("refuses Sonnet's string column.format at add_chunk, with the rule save_deck names", async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('add_chunk', { kind: 'free', html: figure('table', STRING_FORMAT) });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.violations.map((v: any) => v.rule)).toContain('table.column.format');
+    // and nothing landed: no fold, no dirty flag, the same bytes
+    expect(h.deck.model().order).toHaveLength(1);
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses the same table at write_chunk, and the dryRun verdict is identical', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Gate' });
+    const id = created.chunks[0].id;
+    const before = h.deck.serialize();
+
+    const dry = await h.call('write_chunk', { chunkId: id, html: figure('table', STRING_FORMAT), dryRun: true });
+    const wet = await h.call('write_chunk', { chunkId: id, html: figure('table', STRING_FORMAT) });
+    expect(dry.isError).toBe(true);
+    expect(wet.isError).toBe(true);
+    expect(JSON.parse(dry.content[0]!.text)).toEqual(JSON.parse(wet.content[0]!.text));
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses an EMPTY flow block — the blank fold is caught at add, not at save', async () => {
+    /* knownIssues.emptyDataBlockPassesUntilSave described exactly this and said it passed until
+       save_deck. It no longer does, so that entry has to change with it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const res = await h.call('add_chunk', { kind: 'free', html: figure('flow', { nodes: [], edges: [] }) });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+  });
+
+  it('refuses a data block that is not valid JSON at all', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const html = '<div class="slide-inner"><h2>Broken</h2><figure><script type="application/json" data-odata="chart">{ not json }</script><div class="o-chart" data-chart-mount></div></figure></div>';
+    const res = await h.call('add_chunk', { kind: 'free', html });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('kind-data.json');
+  });
+
+  it('add_custom_fold runs the same gate', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const res = await h.call('add_custom_fold', { html: figure('venn', { count: 3, sets: [{ label: 'A', color: '#4A8CC4' }] }) });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.length).toBeGreaterThan(0);
+    expect(h.deck.model().order).toHaveLength(1);
+  });
+
+  it('propose_add and propose_chunk stage nothing when the data is wrong', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Gate' });
+    expect((await h.call('propose_add', { kind: 'free', html: figure('flow', { nodes: [], edges: [] }) })).isError).toBe(true);
+    expect((await h.call('propose_chunk', { chunkId: created.chunks[0].id, html: figure('flow', { nodes: [], edges: [] }) })).isError).toBe(true);
+    expect(h.proposals.count()).toBe(0);
+  });
+
+  it('accept_proposal re-runs the gate, so a def deleted after staging cannot land a broken instance', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    await h.json('define_block', {
+      def: { kind: 'x.note', name: 'Note', version: 1, fields: [{ name: 'body', type: 'text' }], template: '<p>{{body}}</p>' },
+    });
+    const staged = await h.json('propose_add', { block: 'x.note', fields: { body: 'hello' } });
+    expect(staged.proposalId).toBeTruthy();
+    await h.json('delete_block', { kind: 'x.note' });
+
+    const res = await h.call('accept_proposal', { proposalId: staged.proposalId });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('block.unknown-def');
+  });
+
+  it('a VALID data block still lands, unchanged — the gate is not a wall', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const good = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+    const body = await h.json('add_chunk', { kind: 'free', html: figure('chart', good) });
+    expect(body.chunkId).toBeTruthy();
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('the guide no longer claims an empty data block passes until save', async () => {
+    const h = harness();
+    const issues = (await h.json('origami_guide', { topic: 'issues' })).knownIssues;
+    expect(issues.emptyDataBlockPassesUntilSave).toBeUndefined();
+    expect(JSON.stringify(issues)).not.toMatch(/passes the content policy, so add_chunk returns ok/);
   });
 });
