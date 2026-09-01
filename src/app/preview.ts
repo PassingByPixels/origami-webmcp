@@ -10,6 +10,18 @@ import { injectMeasurer } from './measure.js';
  * so the deck renders, but it sits on an opaque origin with no reach into this page, no
  * storage, and no way to read the file the human opened.
  *
+ * ONE PERMISSION, `allow="fullscreen"`. The deck's own Present button (vendor/runtime-dist,
+ * `present()`) adds `html.o-present` and then calls `documentElement.requestFullscreen()`. A
+ * frame that was not granted the fullscreen permission rejects that call — measured in real
+ * Chromium: `document.fullscreenEnabled` false, the promise rejecting `TypeError: Disallowed by
+ * permissions policy` — and the runtime swallows it (`.catch(() => void 0)`), so Present became
+ * a near-silent no-op: the class landed, the deck's footer arrows and brand mark went away
+ * inside the same small pane, and nothing presented. The permission is granted on the iframe
+ * element in src/app/index.html and src/app/mini.html. It is fullscreen and nothing else; the
+ * sandbox string is untouched, and `allow="fullscreen"` alone is enough for the build's own
+ * targets (esbuild: chrome120 / firefox120 / safari17) — the legacy `allowfullscreen` beside it
+ * only makes Chrome log "Allow attribute will take precedence".
+ *
  * THE BRIDGE. The srcdoc copy — and ONLY the srcdoc copy — carries one small appended script.
  * The save path serializes separately (DeckStore.serialize, straight to disk/OPFS), so the
  * bytes a human or an agent saves are the deck and nothing else; an e2e check asserts the

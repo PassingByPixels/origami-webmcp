@@ -164,6 +164,23 @@ test('the Folio app still lives at its own path, with its own shell', async ({ p
   await page.goto('/folio/');
   await expect(page.getByTestId('empty-state')).toBeVisible();
   await expect(page.locator('.subbrand')).toHaveText('Folio');
+  // the wordmark is the way home here too (docs/SITE.md: "Every page links home via the brand
+  // wordmark") — it was the one tool page whose brand was an inert <div>
+  await expect(page.locator('a.brand')).toHaveAttribute('href', '../');
+  await expect(page.locator('a.brand')).toBeVisible();
+  // and a keyboard reaches it: it is the first stop in the shell, with a visible focus ring
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.activeElement?.className)).toBe('brand');
+  expect(await page.locator('a.brand').evaluate((el) => getComputedStyle(el).outlineWidth)).toBe('2px');
+});
+
+test('the home page points at the Folio browser extension, as a plain link out', async ({ page }) => {
+  await page.goto('/');
+  const ext = page.getByTestId('extension-link');
+  await expect(ext).toHaveAttribute('href', 'https://chromewebstore.google.com/detail/origami-folio/flhbdfakcooaomfaehhgenmmnlglhehk');
+  await expect(ext).toHaveAttribute('target', '_blank');
+  await expect(ext).toHaveAttribute('rel', 'noopener');
+  await expect(ext).toHaveText('browser extension');
 });
 
 test('every tool page carries the support slot — one plain link, no widget', async ({ page }) => {
@@ -178,4 +195,48 @@ test('every tool page carries the support slot — one plain link, no widget', a
   // the slot is a link and nothing else: no script/iframe/img anywhere near it
   const html = await page.content();
   expect(html).not.toContain('buymeacoffee.com/widget');
+});
+
+/* PRESENT. The button belongs to the deck runtime, not to this shell: vendor/runtime-dist
+   `present()` adds `html.o-present` and calls `documentElement.requestFullscreen()`. The preview
+   frame is sandboxed onto an opaque origin, and a frame with no fullscreen permission rejects
+   that call ("Disallowed by permissions policy") while the runtime swallows the error — so the
+   button did nothing a reader could see. This drives the REAL button inside the REAL frame and
+   asserts both halves of the presented state, on every page that has a preview. */
+test("the deck's own Present button really presents, in every tool page's preview", async ({ page }) => {
+  // one origin for the whole site, so a Fold left in storage by another spec would decide what
+  // these pages open
+  await page.goto('/folio/');
+  await page.evaluate(() => localStorage.clear());
+
+  for (const path of ['/folio/', '/draw/', '/charts/', '/gantt/']) {
+    await page.goto(path);
+    // the minis mint their document on load; /folio/ is a landing until a Fold is opened
+    if (path === '/folio/') await page.getByTestId('btn-sample').click();
+    await expect(page.getByTestId('preview'), path).toBeVisible();
+
+    const frame = (await (await page.getByTestId('preview').elementHandle())!.contentFrame())!;
+    const present = page.frameLocator('[data-testid="preview"]').locator('.o-present-btn');
+    await expect(present, path).toBeVisible();
+    expect(await frame.evaluate(() => document.fullscreenElement !== null), `${path} starts unpresented`).toBe(false);
+
+    await present.click();
+
+    // the deck is really fullscreen — not just wearing the class inside a 900px pane
+    await expect
+      .poll(() => frame.evaluate(() => document.fullscreenElement?.tagName ?? null), { message: `${path} enters fullscreen` })
+      .toBe('HTML');
+    expect(await frame.evaluate(() => document.documentElement.classList.contains('o-present')), `${path} presented class`).toBe(true);
+    expect(
+      await frame.evaluate(() => window.innerWidth === screen.width && window.innerHeight === screen.height),
+      `${path} fills the screen`,
+    ).toBe(true);
+
+    // and Esc comes back out: the runtime's own fullscreenchange handler drops the class with it
+    await page.keyboard.press('Escape');
+    await expect
+      .poll(() => frame.evaluate(() => document.fullscreenElement?.tagName ?? null), { message: `${path} leaves fullscreen` })
+      .toBe(null);
+    expect(await frame.evaluate(() => document.documentElement.classList.contains('o-present')), `${path} class cleared`).toBe(false);
+  }
 });

@@ -10,11 +10,12 @@
 <body>
 
 <header class="topbar">
-  <div class="brand">
+  <!-- The wordmark is the way home, as it is on every page of the site (docs/SITE.md). -->
+  <a class="brand" href="../">
     <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><g fill="#557A4E"><polygon points="30,40 47,40 52,11" opacity="0.45"/><polygon points="26,40 48,40 43,7" opacity="0.92"/><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>
     <span class="wordmark">Origami</span>
     <span class="subbrand">Folio</span>
-  </div>
+  </a>
 
   <div class="deck-title" data-testid="deck-name" id="deck-name">No Fold open</div>
 
@@ -61,7 +62,11 @@
       <button type="button" class="linky connect" data-testid="btn-connect" id="btn-connect">Connect your agent</button>
       <div class="resumecard" data-testid="resume-slot" id="resume-slot" hidden></div>
     </div>
-    <iframe class="preview" data-testid="preview" id="preview" sandbox="allow-scripts" title="Fold preview" hidden></iframe>
+    <!-- allow="fullscreen" is what makes the deck's OWN Present button work: the runtime calls
+         documentElement.requestFullscreen(), and a frame without the permission rejects it with
+         "Disallowed by permissions policy" — silently, because the runtime swallows the error.
+         It grants nothing else; the sandbox is unchanged (see src/app/preview.ts). -->
+    <iframe class="preview" data-testid="preview" id="preview" sandbox="allow-scripts" allow="fullscreen" title="Fold preview" hidden></iframe>
     <!-- Shown only while the recorded run is playing. Stop keeps everything already built. -->
     <div class="replaybar" data-testid="replaybar" id="replaybar" hidden>
       <i class="pulse" aria-hidden="true"></i>
