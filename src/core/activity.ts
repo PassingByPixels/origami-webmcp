@@ -59,6 +59,7 @@ const SUMMARY_FIELDS: ReadonlyArray<[string, (v: unknown) => string]> = [
   ['starter', (v) => `${plain(v)} starter`],
   ['block', (v) => `block ${plain(v)}`],
   ['kind', (v) => `kind ${plain(v)}`],
+  ['type', (v) => plain(v)],
   ['foldType', (v) => `foldType ${plain(v)}`],
   ['themeName', (v) => `theme ${plain(v)}`],
   ['title', (v) => `"${clip(plain(v), 60)}"`],

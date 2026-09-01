@@ -163,5 +163,19 @@ test('the design page promises one thing and shows no fake UI', async ({ page })
 test('the Folio app still lives at its own path, with its own shell', async ({ page }) => {
   await page.goto('/folio/');
   await expect(page.getByTestId('empty-state')).toBeVisible();
-  await expect(page.locator('.subbrand')).toHaveText('Folio Web');
+  await expect(page.locator('.subbrand')).toHaveText('Folio');
+});
+
+test('every tool page carries the support slot — one plain link, no widget', async ({ page }) => {
+  for (const path of ['/folio/', '/draw/', '/charts/', '/gantt/']) {
+    await page.goto(path);
+    const slot = page.getByTestId('rail-support');
+    await expect(slot, path).toHaveAttribute('href', 'https://buymeacoffee.com/passingbypixels');
+    await expect(slot, path).toHaveAttribute('rel', 'noopener');
+    await expect(slot, path).toHaveAttribute('target', '_blank');
+    await expect(slot, path).toContainText('Coffee helps');
+  }
+  // the slot is a link and nothing else: no script/iframe/img anywhere near it
+  const html = await page.content();
+  expect(html).not.toContain('buymeacoffee.com/widget');
 });

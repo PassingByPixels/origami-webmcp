@@ -373,6 +373,19 @@ main {
   display: flex;
   flex-direction: column;
 }
+/* The support slot: pinned under the feed (margin-top:auto), never over it, never animated. */
+.rail-support {
+  margin-top: auto;
+  display: block;
+  padding: 10px 16px;
+  border-top: 1px solid var(--rule);
+  font-size: 11.5px;
+  text-align: center;
+  color: var(--ink-faint);
+  text-decoration: none;
+}
+.rail-support:hover, .rail-support:focus-visible { color: var(--accent); background: var(--bg); }
+
 .rail-head {
   position: sticky;
   top: 0;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Origami Folio Web</title>
+<title>Origami Folio</title>
 <link rel="icon" href="./favicon.svg">
 <link rel="stylesheet" href="./styles.css">
 </head>
@@ -13,7 +13,7 @@
   <div class="brand">
     <svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><g fill="#557A4E"><polygon points="30,40 47,40 52,11" opacity="0.45"/><polygon points="26,40 48,40 43,7" opacity="0.92"/><polygon points="44,40 62,29 47,48" opacity="0.72"/><polygon points="28,39 48,41 36,55"/><polygon points="21,44 28,39 36,55" opacity="0.7"/><polygon points="9,12 15,13 28,41 22,44" opacity="0.85"/><polygon points="9,12 15,13 14,19 2,17"/></g></svg>
     <span class="wordmark">Origami</span>
-    <span class="subbrand">Folio Web</span>
+    <span class="subbrand">Folio</span>
   </div>
 
   <div class="deck-title" data-testid="deck-name" id="deck-name">No Fold open</div>
@@ -86,6 +86,9 @@
       <div class="proposal-list" data-testid="proposal-list" id="proposal-list"></div>
       <ol class="activity-list" data-testid="activity-list" id="activity-list"></ol>
     </div>
+    <!-- The support slot (docs/SITE.md): ONE quiet line, a plain link, never a widget.
+         A sponsor unit replaces this element and nothing else. -->
+    <a class="rail-support" data-testid="rail-support" href="https://buymeacoffee.com/passingbypixels" target="_blank" rel="noopener"><span aria-hidden="true">&#9749;</span> Free forever. Coffee helps.</a>
   </aside>
 </main>
 
