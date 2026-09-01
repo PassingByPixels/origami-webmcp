@@ -22,12 +22,25 @@ dist/
 Every page links home via the brand wordmark. Tool pages keep their shell; the subbrand tag
 becomes the tool name (FOLIO · DRAW · CHARTS · GANTT).
 
-## Home
+## Home — the desk
 
-Paper ground, same tokens as the tools. Sections top to bottom:
+The home page is a desk. The ground is linen, and each object on it is a sheet of paper. The
+three static pages share the ground; the tool pages keep the app's own paper ground.
 
-1. **Header**: crane mark · "Origami" (serif) · "GRATIS" small-caps tag.
-2. **Hero — the flower.** An inline SVG, ~520px desktop, scaling by viewBox on mobile.
+Two token values are re-declared in `src/site/site.css`, for contrast only: `--bg` becomes the
+linen, and `--ink-faint` becomes `#625C51`, because the brand `#8C857A` measures 3.0:1 on linen
+and fails AA. Text that lands directly on the linen uses `--ink` or `--ink-soft`; green text on
+the linen uses `--accent-deep`, because `--accent` is only 4.1:1 there.
+
+Sections top to bottom:
+
+1. **Header**: crane mark · "Origami" (serif) · "GRATIS" small-caps tag. No bar and no rule —
+   the mark sits on the linen, on the same measure as the desk below it.
+2. **Headline**: "One file. / Every tool.", with two pencil strokes under the second line, and
+   one line of prose below it. The strokes are inline SVG, not a border.
+3. **Hero — the flower.** An inline SVG, ~460px desktop, scaling by viewBox on mobile. It lies
+   FLAT on the desk: a tight contact shadow where the paper touches, and a wider soft shadow
+   around it.
    Eight petals around a small center disc (the crane mark sits in the center). Petal =
    a kite (long diamond) pointing outward, drawn as TWO facet polygons split along its
    spine — the left facet a darker shade of the petal colour, the right lighter — plus a
@@ -43,24 +56,54 @@ Paper ground, same tokens as the tools. Sections top to bottom:
    Hover on an active petal: lift 4px along its own axis + show its name label beyond the
    tip. Whole petal is an `<a>`. Petal data lives in ONE config array (name, href, colour
    pair, active flag) — the flower renders from it.
-3. **Tool cards** (the accessible nav — petals alone are hostile): one row (wraps on
-   mobile), a card per tool: name, one-liner, status. Same order as petals. One-liners:
-   - Folio: "Decks and documents. The whole editor, in the tab."
+4. **Tool cards** (the accessible nav — petals alone are hostile). A card is a folded sheet:
+   two facets split by one hairline crease, one corner turned back, layered shadows, and its
+   own tilt of up to 2 degrees. Hover lifts the card 4px and straightens it. Contents: colour
+   swatch, name, status chip, one-liner, and the action. The action is "Open →", or
+   "Take a look →" for a tool that is not built yet. One-liners:
+   - Folio: "Decks and documents. The whole editor, in the tab." Chip LIVE.
    - Draw: "Hand-drawn sketches and diagrams."
    - Charts: "Twelve chart types and a Venn."
    - Gantt: "Roadmaps on a real calendar."
-   - Design: "Pages and posters. Coming soon."
-4. **What is this** — three short paragraphs, ASD-STE register:
+   - Design: "Pages and posters. Coming soon." Chip SOON.
+
+   **Layout of the desk.** Above 980px: three columns. Folio and Charts at the left, Draw and
+   Gantt at the right, the flower between them across both rows, and Design across the full
+   width below. Each side card is CENTRED in its row, so the slack the taller flower leaves is
+   split and no gap on the desk is more than about 120px — measured at 1440, the widest is
+   96px. From 980px down: two columns, the flower on top. From 560px down: one column — the
+   flower, then the cards in the order the flower names them, with the tilts flattened to
+   0.5 degrees.
+
+   The Design card spans the desk from 561px up, and its crease moves to the far right end
+   there: a crease at the usual 42.6% would split a wide sheet down the middle and read as two
+   sheets butted together. From 700px up — where name, blurb and action fit on one line — it
+   also lies on its side, with the action at the far end.
+
+   **The note.** One handwritten line, "start here", and a hand-drawn arrow that ends above the
+   Folio card, clear of the name and the chip. It is hidden from 980px down, where the Folio
+   card is no longer beside the flower for the arrow to reach.
+
+   **Props.** One only: a small folded paper plane at the top right of the desk. It fills the
+   band above the Draw card, which the note fills on the left. Hidden with the note.
+5. **What is on the table** — one notepad sheet, tilted, with a turned corner. It holds three
+   short explainers in the ASD-STE register:
    - One file: every tool ends in a single `.origami.html` that plays on double-click,
      renderer inside, nothing to install.
    - Agents included: every page hands its tools to an agent over WebMCP; a human can drive
-     every tool by hand in the same page. Link "connect your agent" → the enable steps
-     (reuse the popover copy, inline here).
+     every tool by hand in the same page; and the two directions join — a person folds a deck
+     here or in the extension, then opens it on a tool page and gives it to an agent. The
+     column ends with "Connect your agent" → the enable steps (reuse the popover copy).
    - Private by construction: static site, no accounts, no analytics; documents are made
      and saved on your machine.
-5. **Footer**: ☕ "Buy me a coffee" → `https://buymeacoffee.com/passingbypixels`
+
+   Below the three, one line about the Chrome extension, with a plain link to the store.
+6. **Footer**: ☕ "Buy me a coffee" → `https://buymeacoffee.com/passingbypixels`
    (`target="_blank" rel="noopener"`, plain link, NEVER the BMC script/widget) ·
-   Privacy · "Origami Labs · support@origami.gratis".
+   Privacy · Support → `https://origamilabs.nl/support` · "Origami Labs".
+   Support is a PAGE on the Labs site, not a mailbox. The URL is one constant in
+   `src/site/parts.mjs`, and the privacy page takes it from the same constant through a
+   `<!--SUPPORT-->` marker, so the two can never point at different places.
 
 ## Privacy page
 
@@ -69,8 +112,8 @@ same header/footer. The whole truth in sections: static site (no analytics, no c
 ours, no accounts); documents live in the tab and save to your disk or your browser's own
 storage, never uploaded; connecting an agent is between you and your agent host (WebMCP
 runs in your browser — we never see the traffic); external links (Buy me a coffee) apply
-their own policies after the click; contact support@origami.gratis. Effective date
-2026-09-01.
+their own policies after the click; questions go to origamilabs.nl/support, as a link, not
+as text a reader must retype. Effective date 2026-09-01.
 
 ## Design (coming soon) page
 

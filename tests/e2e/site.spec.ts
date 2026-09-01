@@ -12,6 +12,9 @@ import { expect, test } from '@playwright/test';
 /** Every href the petals and the cards carry. All of them are real pages in dist/. */
 const LIVE = ['folio/', 'draw/', 'charts/', 'gantt/', 'design/'];
 const BMC = 'https://buymeacoffee.com/passingbypixels';
+/* Support moved off a mailbox and onto the Labs site. One address, asserted in both the places
+   the site names it: the footer of every page, and the privacy copy. */
+const SUPPORT = 'https://origamilabs.nl/support';
 
 test('the flower has eight petals — five links and three left to grow into', async ({ page }) => {
   await page.goto('/');
@@ -42,6 +45,16 @@ test('every href the flower offers resolves — no petal points at a 404', async
     expect(res.status(), `${href} should be a real page in dist/`).toBe(200);
     expect(await res.text(), `${href} should be an HTML document`).toContain('<!DOCTYPE html>');
   }
+});
+
+/* The flower now lies on a .plate that draws its contact shadows as pseudo-elements. One of
+   them is painted AFTER the flower and covers the middle of it, so a petal can be present,
+   labelled and correctly linked and still be un-clickable. Only a real click proves it. */
+test('a petal is really clickable — the shadows under the flower do not cover it', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('[data-petal="folio"] a').click();
+  await expect(page).toHaveURL(/\/folio\/$/);
+  await expect(page.getByTestId('empty-state')).toBeVisible();
 });
 
 test('the ring alternates, so no two blank petals ever sit side by side', async ({ page }) => {
@@ -123,7 +136,11 @@ test('the footer links out to Buy me a coffee as a plain link, and loads nothing
   const html = await page.content();
   expect(html.match(/buymeacoffee/g)).toHaveLength(1);
   await expect(page.getByTestId('privacy-link')).toHaveAttribute('href', 'privacy/');
-  await expect(page.locator('.site-foot .colophon')).toHaveText('Origami Labs · support@origami.gratis');
+  await expect(page.getByTestId('support-link')).toHaveAttribute('href', SUPPORT);
+  await expect(page.getByTestId('support-link')).toHaveText('Support');
+  await expect(page.locator('.site-foot .colophon')).toHaveText('Origami Labs');
+  // the old mailbox is gone from the page, not just from the footer
+  expect(await page.content()).not.toContain('support@origami.gratis');
 });
 
 for (const width of [1440, 860, 390]) {
@@ -146,8 +163,11 @@ test('the privacy page states the whole truth in its own words', async ({ page }
   expect(body).toContain('We run no analytics');
   expect(body).toContain('Your document is never sent to us');
   expect(body).toContain('WebMCP runs inside your browser');
-  expect(body).toContain('support@origami.gratis');
+  expect(body).toContain('Questions about it go to origamilabs.nl/support');
   expect(body).toContain('Effective 1 September 2026');
+  // the contact is a real link out, not prose a reader has to retype
+  await expect(page.getByTestId('support-inline')).toHaveAttribute('href', SUPPORT);
+  expect(body).not.toContain('support@origami.gratis');
   await expect(page.locator('.brand')).toHaveAttribute('href', '../');
 });
 
@@ -180,7 +200,74 @@ test('the home page points at the Folio browser extension, as a plain link out',
   await expect(ext).toHaveAttribute('href', 'https://chromewebstore.google.com/detail/origami-folio/flhbdfakcooaomfaehhgenmmnlglhehk');
   await expect(ext).toHaveAttribute('target', '_blank');
   await expect(ext).toHaveAttribute('rel', 'noopener');
-  await expect(ext).toHaveText('browser extension');
+  await expect(ext).toHaveText('get Origami Folio from the Chrome Web Store');
+});
+
+test('the home page says the tools run both ways — by hand and by agent', async ({ page }) => {
+  await page.goto('/');
+  const agents = page.locator('.notes > div', { hasText: 'Agents included' });
+  const body = await agents.innerText();
+  expect(body).toContain('A human can drive the same tools by hand, on the same page, in the same order.');
+  expect(body).toContain('fold a deck yourself — here, or with the extension — then Open it on any tool page');
+  // the enable steps stay the column's last line, folded away until they are wanted
+  await expect(agents.locator('.connect summary')).toHaveText('Connect your agent');
+  expect(body.trim().endsWith('Connect your agent')).toBe(true);
+});
+
+test('every card names its action, and Design offers only a look', async ({ page }) => {
+  await page.goto('/');
+  const actions = await page.locator('[data-testid="tool-card"] .tool-go').allTextContents();
+  expect(actions).toEqual(['Open →', 'Open →', 'Open →', 'Open →', 'Take a look →']);
+  // the status chips come off the same config row as the petal colours
+  await expect(page.locator('[data-testid="tool-card"][href="folio/"] .tool-chip')).toHaveText('live');
+  await expect(page.locator('[data-testid="tool-card"][href="design/"] .tool-chip')).toHaveText('soon');
+  // and every card carries its petal's own colour, so a card can never mislabel a tool
+  const swatches = await page
+    .locator('[data-testid="tool-card"] .tool-swatch')
+    .evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+  expect(swatches).toEqual([
+    'rgb(63, 95, 57)', // Folio, accent shaded
+    'rgb(138, 69, 34)', // Draw, copper
+    'rgb(23, 23, 23)', // Charts, ink
+    'rgb(124, 150, 115)', // Gantt, sage
+    'rgb(183, 202, 176)', // Design, pale sage
+  ]);
+});
+
+test('the "start here" note aims at the Folio card, and leaves the page when the desk reflows', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/');
+  const note = page.locator('.note');
+  await expect(note).toBeVisible();
+  const arrow = (await note.locator('svg').boundingBox())!;
+  const folio = (await page.locator('.slot-folio').boundingBox())!;
+  // the arrow ends above the Folio card's top edge — over the card horizontally, clear of the
+  // name and the LIVE chip vertically
+  expect(arrow.y + arrow.height, 'arrowhead sits above the card').toBeLessThan(folio.y);
+  expect(arrow.x, 'arrow reaches over the card').toBeGreaterThan(folio.x);
+  expect(arrow.x).toBeLessThan(folio.x + folio.width);
+
+  // below 760px the cards are no longer beside the flower, so the arrow would point at nothing
+  await page.setViewportSize({ width: 759, height: 900 });
+  await expect(note).toBeHidden();
+});
+
+test('on a phone the desk stacks: the flower, then the cards in the order the flower names them', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const order = await page
+    .locator('.desk > *:not(.note):not(.prop-plane)')
+    .evaluateAll((els) => els.map((e) => e.className.replace('tool-card ', '')));
+  expect(order).toEqual(['slot-flower', 'slot-folio', 'slot-draw', 'slot-charts', 'slot-gantt', 'slot-design']);
+  // one column: every card is laid out at the same x. offsetLeft, not the bounding box — the
+  // per-card tilt moves the box by a fraction of a pixel and would make this flaky.
+  const xs = await page.getByTestId('tool-card').evaluateAll((els) => els.map((e) => (e as HTMLElement).offsetLeft));
+  expect(new Set(xs).size, `cards share one column, got ${xs}`).toBe(1);
+  // the scatter flattens in the hand, but the paper is still not printed square
+  const tilts = await page
+    .getByTestId('tool-card')
+    .evaluateAll((els) => els.map((e) => getComputedStyle(e).getPropertyValue('--tilt').trim()));
+  expect(tilts).toEqual(['-0.5deg', '0.5deg', '0.5deg', '-0.5deg', '0.5deg']);
 });
 
 test('every tool page carries the support slot — one plain link, no widget', async ({ page }) => {

@@ -12,7 +12,9 @@ export const CRANE_GROUP =
 export const CRANE_FILE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${CRANE_GROUP}</svg>`;
 
 export const BMC_URL = 'https://buymeacoffee.com/passingbypixels';
-export const SUPPORT_EMAIL = 'support@origami.gratis';
+/* Support is a PAGE on the Labs site, not a mailbox. One constant, so the footer and the privacy
+   page cannot point at two different places. The guard already allows this origin in an <a>. */
+export const SUPPORT_URL = 'https://origamilabs.nl/support';
 
 /* ------------------------------------------------------------------ the petals ------------ */
 
@@ -178,14 +180,20 @@ export function designMotif() {
 
 /* ------------------------------------------------------------------ the cards ------------- */
 
-/** The accessible nav. Same rows, same order, same hrefs as the petals — petals alone are hostile. */
+/** The accessible nav. Same rows, same order, same hrefs as the petals — petals alone are hostile.
+    On the home page each card is a sheet of folded paper lying on the desk. The parts that make
+    it one come from the SAME row as the petal: `dark` paints the swatch, `chip` decides the
+    status and the wording of the action, and `slot-<name>` is the hook the desk layout and the
+    per-card tilt hang off. No card can name a tool the flower does not. */
 export function toolCards() {
   return PETALS.filter((p) => p.href)
     .map(
       (p) =>
-        `<a class="tool-card" href="${p.href}" data-testid="tool-card">` +
-        `<span class="tool-name">${esc(p.name)}${p.chip ? `<span class="tool-chip" data-chip="${p.chip}">${p.chip}</span>` : ''}</span>` +
-        `<span class="tool-blurb">${esc(p.blurb)}</span></a>`,
+        `<a class="tool-card slot-${esc(p.name.toLowerCase())}" href="${p.href}" data-testid="tool-card">` +
+        `<span class="tool-name"><span class="tool-swatch" style="background:${p.dark}"></span>${esc(p.name)}` +
+        `${p.chip ? `<span class="tool-chip" data-chip="${p.chip}">${p.chip}</span>` : ''}</span>` +
+        `<span class="tool-blurb">${esc(p.blurb)}</span>` +
+        `<span class="tool-go">${p.chip === 'soon' ? 'Take a look' : 'Open'} &rarr;</span></a>`,
     )
     .join('');
 }
@@ -206,15 +214,23 @@ export function footer(up) {
     `<footer class="site-foot">` +
     `<a class="coffee" href="${BMC_URL}" target="_blank" rel="noopener" data-testid="bmc-link">&#9749; Buy me a coffee</a>` +
     `<a href="${up}privacy/" data-testid="privacy-link">Privacy</a>` +
-    `<span class="colophon">Origami Labs &middot; ${SUPPORT_EMAIL}</span>` +
+    `<a href="${SUPPORT_URL}" data-testid="support-link">Support</a>` +
+    `<span class="colophon">Origami Labs</span>` +
     `</footer>`
   );
+}
+
+/** The support pointer in running prose. A marker, not a literal in the page, so the footer and
+    the privacy copy cannot end up pointing at two different places. */
+export function supportLink() {
+  return `<a href="${SUPPORT_URL}" data-testid="support-inline">origamilabs.nl/support</a>`;
 }
 
 /** Fill the markers a site page carries. A page uses the ones it needs and ignores the rest. */
 export function renderPage(html, up) {
   return html
     .replace('<!--HEADER-->', header(up))
+    .replace('<!--SUPPORT-->', supportLink())
     .replace('<!--FLOWER-->', flowerSvg())
     .replace('<!--CARDS-->', toolCards())
     .replace('<!--MOTIF-->', designMotif())
