@@ -30,7 +30,7 @@ export function bakeTableInner(inner: string, now: number): string {
     } catch {
       return whole;
     }
-    const json = JSON.stringify(data, null, 2).replace(/</g, '\u003c');
+    const json = JSON.stringify(data, null, 2).replace(/</g, '\\u003c');
     return open + '\n' + json + '\n' + close;
   });
 }
