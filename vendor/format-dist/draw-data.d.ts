@@ -19,6 +19,9 @@ export declare const DRAW_FILL_STYLES: readonly ["none", "hachure", "cross", "so
 export declare const DRAW_STROKE_STYLES: readonly ["solid", "dashed", "dotted"];
 export declare const DRAW_FONTS: readonly ["playfair", "lora", "inter", "source-serif", "caveat"];
 export declare const DRAW_TEXT_ALIGNS: readonly ["left", "center", "right"];
+/** Arrowheads an arrow may carry. Absent = "end", the shape every arrow drawn before this had, so
+    no deck changes on load. A LINE with a head is an arrow, so the field is arrow-only. */
+export declare const DRAW_ARROW_HEADS: readonly ["end", "both"];
 export type DrawType = (typeof DRAW_TYPES)[number];
 export type DrawFillStyle = (typeof DRAW_FILL_STYLES)[number];
 export type DrawStrokeStyle = (typeof DRAW_STROKE_STYLES)[number];
@@ -56,6 +59,11 @@ export interface DrawElement {
     seed?: number;
     /** arrow/line/freedraw only; renderer treats points as authoritative over width/height. */
     points?: DrawPoint[];
+    /** arrow only. "end" (the default when absent) | "both" — a head at the tail as well. */
+    heads?: (typeof DRAW_ARROW_HEADS)[number];
+    /** freedraw only. How hard the ink is simplified before it is smoothed:
+        0 (raw — keeps the hand's own wobble) | 1 (the default) | 2 (extra, one corner-cut pass). */
+    smoothing?: number;
     /** arrow/line only. When set, the arrow's first/last point stays glued to the
         named element's border: moving either party re-points the arrow. */
     attach?: {

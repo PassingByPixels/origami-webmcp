@@ -15,7 +15,7 @@ export { formatCell, formatTone, typedFromBaked, } from './cell-format.js';
 export { A1_RE, a1, colA1, colIdx, a1ToRC, a1RangeToRect, isNumeric, isErrStr, trimNum, FILL_TOKEN, FILL_HEX, isFill, fmtAt, gridWidth, aggregateNumbers, mergeRects, mergeAt, rectsOverlap, rectToRange, expandRectToMerges, clipMergesToCrop, evaluateCondFmt, } from './table-core.js';
 export { validateGanttData, ganttDataJson, ganttWeekIndex, extractDataBlocks, GANTT_CARD_TYPES, GANTT_CARD_EFFORTS, } from './gantt-data.js';
 export { validateFlowData, validateGraphData, flowDataJson, graphDataJson, DIAGRAM_TONES, FLOW_SHAPES, GRAPH_SHAPES, EDGE_ARROWS, EDGE_STYLES, } from './diagram-data.js';
-export { validateDrawData, drawDataJson, DRAW_MAX_ELEMENTS, DRAW_MAX_POINTS, DRAW_TEXT_MAX, DRAW_TYPES, DRAW_FILL_STYLES, DRAW_STROKE_STYLES, DRAW_FONTS, DRAW_TEXT_ALIGNS, } from './draw-data.js';
+export { validateDrawData, drawDataJson, DRAW_MAX_ELEMENTS, DRAW_MAX_POINTS, DRAW_TEXT_MAX, DRAW_TYPES, DRAW_FILL_STYLES, DRAW_STROKE_STYLES, DRAW_FONTS, DRAW_TEXT_ALIGNS, DRAW_ARROW_HEADS, } from './draw-data.js';
 export { validateVennData, vennDataJson, VENN_MAX_CIRCLES, VENN_SIZE_MIN, VENN_SIZE_MAX, VENN_NUDGE_MAX, } from './venn-data.js';
 export { buildModel, applyOp, serializeModel, modelEquals, History, } from './model.js';
 export { validateThemeTokens, themeCssFromTokens, replaceThemeCss } from './theme.js';

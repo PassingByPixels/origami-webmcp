@@ -321,7 +321,11 @@ export interface ChartLink {
     /** Read orientation — 'row' (default, omitted) reads as-is; 'col' transposes before mapping. */
     orient?: 'row' | 'col';
 }
-/** Strict shape check for one chart data block. REJECT, never repair. */
+/** Strict shape check for one chart data block. REJECT, never repair.
+
+    The body is a DISPATCHER. Every rule lives in a named check above, and the checks run in the
+    order their violations are expected in — the rule code, the message and the ORDER are all part
+    of the format's contract, so a check is named and moved out, never reordered. */
 export declare function validateChartData(data: unknown): Violation[];
 /** Serialize chart data for embedding — "<" escaped (the carrier invariant).
     Keys are emitted in a FIXED canonical order (present-only), so a field the editor

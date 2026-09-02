@@ -200,7 +200,808 @@ export const WATERFALL_KINDS = ['total', 'increase', 'decrease'];
 const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
 /** A canonical A1 range: a single cell ("A1") or a two-cell range ("A1:C10"), uppercase only. */
 const A1_RANGE_RE = /^[A-Z]+[0-9]+(:[A-Z]+[0-9]+)?$/;
-/** Strict shape check for one chart data block. REJECT, never repair. */
+/** A picture-only FLAG that is on the wrong picture. Present means it must be a boolean AND must be
+    riding on the type that DRAWS it; absent is always legal, because every flag in this file is
+    absent-by-default. Named once because the same rule gates a dozen of them. */
+function misplacedFlag(value, drawnByThisType) {
+    return value !== undefined && (typeof value !== 'boolean' || !drawnByThisType);
+}
+/** A real number the picture can draw — NaN and the infinities are rejected everywhere. */
+function isFiniteNumber(x) {
+    return typeof x === 'number' && Number.isFinite(x);
+}
+/** A string within its cap. Used on the optional captions, each of which is absent-by-default, so
+    the caller tests `!== undefined` first. */
+function isCappedString(x, max) {
+    return typeof x === 'string' && x.length <= max;
+}
+/** An integer index into `labels` — the index-keyed discipline `highlightIndex` and a flow's
+    endpoints share. (`parents` reads [-1, n) instead, so it states its own range.) */
+function isLabelIndex(x, labelCount) {
+    return typeof x === 'number' && Number.isInteger(x) && x >= 0 && x < labelCount;
+}
+function chartShape(d) {
+    // A timeseries is keyed by numeric x per series, not by categories — so it carries no labels.
+    const isTs = d.type === 'timeseries';
+    // A scatter is keyed by (x,y) pairs — likewise category-free, but its y may be negative.
+    const isXY = d.type === 'scatter';
+    const isWf = d.type === 'waterfall';
+    const isBox = d.type === 'boxplot';
+    const isGauge = d.type === 'gauge';
+    return {
+        isTs,
+        isXY,
+        free: isTs || isXY,
+        isWf,
+        isBox,
+        isRadar: d.type === 'radar',
+        isGauge,
+        isHeat: d.type === 'heatmap',
+        // 19 Treemap — the wave-5 TYPE. Its two flags (sunburst, convex) are gated to it further down.
+        isTree: d.type === 'treemap',
+        // 27 Sankey — the wave-5b TYPE. `links` is gated to it further down, and it is the only field in
+        // this file that carries a RELATIONSHIP rather than a property of a label.
+        isFlow: d.type === 'sankey',
+        // 24 Hexagonal binning — a scatter FLAG, so it is only ever true on a scatter (the gate below
+        // rejects it anywhere else, and every rule keyed to it therefore reads a scatter).
+        isHex: isXY && d.hexbin === true,
+        // the two wave-3 bar SHAPES. Neither has a Cartesian plot box, and neither has room for a second
+        // series, so both are treated exactly like the single-series types below.
+        isFunnel: d.type === 'bar' && d.funnel === true,
+        isPolar: d.type === 'bar' && d.polar === true,
+        /* THE ONLY RELAXATION OF THE `value >= 0` RULE, and it is keyed to the TYPE, never to a flag.
+           A waterfall step is a signed delta and a box's five-number summary is a coordinate, so both
+           must carry negatives. bar / line / pie / timeseries keep the v0.4.0 rule untouched — which is
+           exactly why Waterfall and Box plot are TYPES and not bar flags: a flag would have turned this
+           into a conditional weakening INSIDE the branch that guards a plain bar, where every other bar
+           chart in every existing deck is validated. There is no tension to report; the two rules never
+           meet.
+           A GAUGE joins them for a third reason: its dial is a coordinate range, so a floor of -40 and a
+           reading of -12 are ordinary data. */
+        signed: isWf || isBox || isGauge,
+        labelCount: Array.isArray(d.labels) ? d.labels.length : 0,
+    };
+}
+/* Horizontal ranking charts read fine with many rows; a vertical/pie stays capped at 24 (thin bars
+   past that). A HEATMAP is pinned at 24 whatever `orientation` says: the key is inert on this type
+   (see the note further down), and letting an inert key widen the column cap to 60 would VALIDATE a
+   grid that normalizeChartData then truncates to 24 — a silently discarded half of the data, which
+   is the one outcome both halves of this file exist to prevent. */
+/* A TREEMAP is pinned at its own cap for the same reason a heatmap is pinned at 24: `orientation`
+   is INERT on the type (see the note further down), so letting an inert key move the cap would make
+   the legal node count depend on a field the picture never reads. TREEMAP_MAX_NODES states why 60.
+   A SANKEY is pinned the same way and for the same reason — SANKEY_MAX_NODES states why 60 there. */
+function labelCap(d, s) {
+    return s.isTree ? TREEMAP_MAX_NODES : s.isFlow ? SANKEY_MAX_NODES : !s.isHeat && d.orientation === 'horizontal' ? 60 : 24;
+}
+function checkLabels(d, s, bad) {
+    const maxLabels = labelCap(d, s);
+    if (!Array.isArray(d.labels) || (!s.free && (d.labels.length < 1 || d.labels.length > maxLabels))) {
+        bad('labels', s.free ? 'labels must be an array' : `labels must be an array of 1–${maxLabels} entries`);
+        return;
+    }
+    // A gauge shows ONE dial and its label names it; more would be silently unread. A radar needs
+    // three spokes to enclose an area — two draw a line back over itself, which is not a radar.
+    if (s.isGauge && d.labels.length !== 1)
+        bad('labels', 'a gauge takes exactly one label — the name of the dial');
+    if (s.isRadar && d.labels.length < 3)
+        bad('labels', 'a radar needs at least 3 spokes');
+    d.labels.forEach((l, i) => {
+        if (typeof l !== 'string' || l.length === 0 || l.length > 40)
+            bad('label', `label ${i}: must be a non-empty string (max 40)`);
+    });
+}
+/* Single-series types + the single-series flag. A pareto's second axis is a percentage OF a
+   total, a waterfall is one running balance and a box plot is one distribution per category —
+   none of the three has a meaning for a second series, so the count is rejected, not ignored.
+   …and a TREEMAP joins them: `parents` describes ONE tree, so a second series would be a second
+   set of node sizes for the same nodes, with nothing on the picture able to show both.
+   …and a SANKEY joins them from the other side: its series carries no sizes at all (they are
+   derived from `links`), so a second one would be a second set of nothing. */
+function singleSeriesName(d, s) {
+    return d.type === 'pie' ? 'pie chart' : s.isWf ? 'waterfall' : s.isBox ? 'box plot' : s.isGauge ? 'gauge' : s.isFunnel ? 'funnel' : s.isPolar ? 'radial bar' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : d.pareto === true ? 'pareto' : '';
+}
+function checkSeries(d, s, bad) {
+    // A HEATMAP's series are the grid's ROWS, so its cap is the label cap, not the 1-6 series cap.
+    // See the CHART_TYPES note for why that difference is what makes it a type and not a bar flag.
+    const maxSeries = s.isHeat ? HEATMAP_MAX_ROWS : 6;
+    if (!Array.isArray(d.series) || d.series.length < 1 || d.series.length > maxSeries) {
+        bad('series', `series must be an array of 1–${maxSeries} entries`);
+        return;
+    }
+    const one = singleSeriesName(d, s);
+    if (one && d.series.length !== 1) {
+        bad('series', `a ${one} takes exactly one series`);
+    }
+    d.series.forEach((entry, i) => checkSeriesEntry(entry, i, d, s, bad));
+}
+function checkSeriesEntry(entry, i, d, s, bad) {
+    const o = (entry ?? {});
+    checkSeriesStyle(o, i, d, bad);
+    checkPointMarkFields(o, i, s, bad);
+    checkDistributionFields(o, i, s, bad);
+    if (s.free)
+        checkFreeAxisSeries(o, i, s, bad);
+    else
+        checkCategoryValues(o, i, s, bad);
+}
+function checkSeriesStyle(o, i, d, bad) {
+    if (!isCappedString(o.name, 60))
+        bad('series.name', `series ${i}: name must be a string (max 60)`);
+    if (typeof o.color !== 'string' || !COLOR_RE.test(o.color))
+        bad('series.color', `series ${i}: color must be a #hex value`);
+    if (o.dash !== undefined && typeof o.dash !== 'boolean')
+        bad('series.dash', `series ${i}: dash must be a boolean`);
+    if (o.markers !== undefined && typeof o.markers !== 'boolean')
+        bad('series.markers', `series ${i}: markers must be a boolean`);
+    // `fill` is a LINE concept (the band under the stroke) — a bar/pie/scatter has no band.
+    if (misplacedFlag(o.fill, d.type === 'line'))
+        bad('series.fill', `series ${i}: fill is a boolean on a line series only`);
+}
+/* bubble sizes + point captions are scatter-only; on any other type they are meaningless — and
+   a HEXBIN is the case where "meaningless" needs saying out loud, because it IS a scatter. It
+   replaces the individual point marks with a lattice of cells, so there is no disc left to
+   size and no point left to caption; accepting either would take a value and discard it. */
+function checkPointMarkFields(o, i, s, bad) {
+    const wrong = s.isHex ? 'point-mark field a hexbin does not draw' : 'scatter-only field';
+    if (o.sizes !== undefined && (!s.isXY || s.isHex))
+        bad('series.sizes', `series ${i}: sizes is a ${wrong}`);
+    if (o.pointLabels !== undefined && (!s.isXY || s.isHex))
+        bad('series.pointLabels', `series ${i}: pointLabels is a ${wrong}`);
+}
+// distribution fields ride parallel to the CATEGORIES and mean nothing on any other type
+function checkDistributionFields(o, i, s, bad) {
+    for (const key of ['boxes', 'samples', 'outliers']) {
+        const arr = o[key];
+        if (arr === undefined)
+            continue;
+        if (!s.isBox) {
+            bad(`series.${key}`, `series ${i}: ${key} is a boxplot-only field`);
+        }
+        else if (!Array.isArray(arr) || arr.length !== s.labelCount) {
+            bad(`series.${key}`, `series ${i}: ${key} must have one array per label (${s.labelCount})`);
+        }
+        else {
+            arr.forEach((row, j) => checkDistributionRow(row, key, i, j, bad));
+        }
+    }
+    if (s.isBox && o.boxes === undefined && o.samples === undefined) {
+        bad('series.boxes', `series ${i}: a box plot needs boxes (pre-computed) or samples (raw)`);
+    }
+}
+/** One category's row of observations. `boxes` additionally carries a FIXED five-number summary. */
+function checkDistributionRow(row, key, i, j, bad) {
+    if (!Array.isArray(row) || (key === 'boxes' && row.length !== 5)) {
+        bad(`series.${key}`, `series ${i} ${key} ${j}: must be an array${key === 'boxes' ? ' of exactly 5 numbers [low, Q1, median, Q3, high]' : ''}`);
+        return;
+    }
+    row.forEach((n, k) => {
+        if (!isFiniteNumber(n))
+            bad(`series.${key}`, `series ${i} ${key} ${j}[${k}]: must be a finite number`);
+        // REJECT, never repair: an out-of-order summary draws a median outside its own box and
+        // a whisker inside it. normalizeChartData sorts it so the picture survives; the
+        // validator says so, because only the author can know which number was wrong.
+        else if (key === 'boxes' && k > 0 && typeof row[k - 1] === 'number' && n < row[k - 1])
+            bad('series.boxes', `series ${i} box ${j}: must be ascending [low ≤ Q1 ≤ median ≤ Q3 ≤ high]`);
+    });
+}
+/* xs parallel to values, per-series length. A timeseries reads left-to-right (x
+   non-decreasing, y ≥ 0); a scatter is a cloud, so neither rule applies to it. */
+function checkFreeAxisSeries(o, i, s, bad) {
+    const xs = o.xs;
+    const need = s.isXY ? 1 : 2;
+    if (!Array.isArray(xs) || xs.length < need) {
+        bad('series.xs', `series ${i}: xs must be an array of ≥${need} x-coordinates`);
+        return;
+    }
+    if (!Array.isArray(o.values) || o.values.length !== xs.length) {
+        bad('series.values', `series ${i}: values must parallel xs (${xs.length})`);
+        return;
+    }
+    checkXYPoints(xs, o.values, i, s, bad);
+    // bubble sizes + point captions ride parallel to the points
+    if (!s.isXY)
+        return;
+    checkBubbleSizes(o, i, xs.length, bad);
+    checkPointCaptions(o, i, xs.length, bad);
+}
+function checkXYPoints(xs, values, i, s, bad) {
+    for (let k = 0; k < xs.length; k++) {
+        const x = xs[k];
+        if (!isFiniteNumber(x))
+            bad('series.x', `series ${i} x ${k}: must be a finite number`);
+        else if (s.isTs && k > 0 && typeof xs[k - 1] === 'number' && x < xs[k - 1])
+            bad('series.x', `series ${i} x ${k}: must be non-decreasing`);
+        const y = values[k];
+        if (!isFiniteNumber(y) || (s.isTs && y < 0))
+            bad('series.value', `series ${i} value ${k}: must be a finite number${s.isTs ? ' ≥ 0' : ''}`);
+    }
+}
+function checkBubbleSizes(o, i, points, bad) {
+    if (o.sizes === undefined)
+        return;
+    if (!Array.isArray(o.sizes) || o.sizes.length !== points) {
+        bad('series.sizes', `series ${i}: sizes must have one number per point (${points})`);
+        return;
+    }
+    o.sizes.forEach((z, k) => {
+        if (!isFiniteNumber(z) || z < 0)
+            bad('series.size', `series ${i} size ${k}: must be a finite number ≥ 0`);
+    });
+}
+function checkPointCaptions(o, i, points, bad) {
+    if (o.pointLabels === undefined)
+        return;
+    if (!Array.isArray(o.pointLabels) || o.pointLabels.length !== points) {
+        bad('series.pointLabels', `series ${i}: pointLabels must have one string per point (${points})`);
+        return;
+    }
+    o.pointLabels.forEach((t, k) => {
+        if (!isCappedString(t, 40))
+            bad('series.pointLabel', `series ${i} pointLabel ${k}: must be a string (max 40)`);
+    });
+}
+function checkCategoryValues(o, i, s, bad) {
+    if (!Array.isArray(o.values) || o.values.length !== s.labelCount) {
+        bad('series.values', `series ${i}: values must have one number per label (${s.labelCount})`);
+        return;
+    }
+    o.values.forEach((n, j) => {
+        if (!isFiniteNumber(n) || (!s.signed && n < 0)) {
+            bad('series.value', `series ${i} value ${j}: must be a finite number${s.signed ? '' : ' ≥ 0'}`);
+        }
+        else if (s.isFlow && n !== 0) {
+            /* A SANKEY'S SERIES IS BALLAST, AND THE ZERO IS ENFORCED RATHER THAN IGNORED — the
+               rule the treemap's interior nodes once carried, applied to every node instead. A node's
+               size is its THROUGHPUT, which `links` already states in full; a number stored here
+               would be a second source for it and the two would disagree the first time a flow was
+               edited, with nothing on the picture able to say which one is being drawn. Requiring
+               the zero is what stops the file carrying a number no reader will ever see. */
+            bad('series.value', `series ${i} value ${j}: a sankey node is sized by its links, so its stored value must be 0`);
+        }
+    });
+}
+function checkYMax(d, bad) {
+    if (d.yMax !== null && d.yMax !== undefined && (typeof d.yMax !== 'number' || !Number.isFinite(d.yMax) || d.yMax <= 0)) {
+        bad('yMax', 'yMax must be null or a positive number');
+    }
+}
+// Optional per-slice pie colours: when present, one #hex per label (dense, aligned).
+function checkSliceColors(d, s, bad) {
+    if (d.sliceColors === undefined)
+        return;
+    if (!Array.isArray(d.sliceColors) || d.sliceColors.length !== s.labelCount) {
+        bad('sliceColors', `sliceColors, when present, must have one #hex per label (${s.labelCount})`);
+        return;
+    }
+    d.sliceColors.forEach((c, i) => {
+        if (typeof c !== 'string' || !COLOR_RE.test(c))
+            bad('sliceColor', `sliceColor ${i}: must be a #hex value`);
+    });
+}
+// Optional presentation fields (all absent-by-default; each: present → validate, absent → skip).
+function checkBarLayoutFields(d, s, bad) {
+    if (d.orientation !== undefined && d.orientation !== 'horizontal' && d.orientation !== 'vertical')
+        bad('orientation', "orientation must be 'horizontal' or 'vertical'");
+    if (d.barMode !== undefined && d.barMode !== 'grouped' && d.barMode !== 'overlaid' && d.barMode !== 'stacked')
+        bad('barMode', "barMode must be 'grouped', 'overlaid' or 'stacked'");
+    if (d.highlightIndex !== undefined && !isLabelIndex(d.highlightIndex, s.labelCount))
+        bad('highlightIndex', `highlightIndex must be an integer in [0, ${s.labelCount})`);
+    if (d.showValues !== undefined && typeof d.showValues !== 'boolean')
+        bad('showValues', 'showValues must be a boolean');
+}
+function checkCaptionFields(d, bad) {
+    if (d.title !== undefined && !isCappedString(d.title, 120))
+        bad('title', 'title must be a string (max 120)');
+    if (d.subtitle !== undefined && !isCappedString(d.subtitle, 120))
+        bad('subtitle', 'subtitle must be a string (max 120)');
+    if (d.xTitle !== undefined && !isCappedString(d.xTitle, 60))
+        bad('xTitle', 'xTitle must be a string (max 60)');
+    if (d.yTitle !== undefined && !isCappedString(d.yTitle, 60))
+        bad('yTitle', 'yTitle must be a string (max 60)');
+}
+/* 0.4.1 wave-2 display flags. Each is a picture-only variant of the type it rides on, so each is
+   gated to that type — a histogram on a pie means nothing and must not be quietly accepted. */
+function checkDisplayFlags(d, bad) {
+    // Sparkline is a LINE display mode — it has no meaning on a bar/pie/timeseries/scatter.
+    if (misplacedFlag(d.spark, d.type === 'line'))
+        bad('spark', 'spark is a boolean on a line chart only');
+    if (misplacedFlag(d.histogram, d.type === 'bar'))
+        bad('histogram', 'histogram is a boolean on a bar chart only');
+    if (misplacedFlag(d.pareto, d.type === 'bar'))
+        bad('pareto', 'pareto is a boolean on a bar chart only');
+    // A pareto's second axis runs up the RIGHT of a vertical plot; a horizontal bar's value axis is
+    // already along the bottom, so there is nowhere honest to put it.
+    else if (d.pareto === true && d.orientation === 'horizontal')
+        bad('pareto', 'pareto needs a vertical bar chart (orientation must not be horizontal)');
+    if (misplacedFlag(d.stream, d.type === 'line'))
+        bad('stream', 'stream is a boolean on a line chart only');
+    // A sparkline strips the whole frame; a stream IS the frame. Asking for both is a contradiction.
+    else if (d.stream === true && d.spark === true)
+        bad('stream', 'stream and spark cannot both be set');
+}
+// Waterfall step kinds — parallel to the categories (a waterfall has exactly one series).
+function checkWaterfallKinds(d, s, bad) {
+    if (d.kinds === undefined)
+        return;
+    if (!s.isWf || !Array.isArray(d.kinds) || d.kinds.length !== s.labelCount) {
+        bad('kinds', `kinds is a waterfall-only array of one step kind per label (${s.labelCount})`);
+        return;
+    }
+    d.kinds.forEach((k, i) => {
+        if (!WATERFALL_KINDS.includes(k))
+            bad('kind', `kind ${i}: must be one of ${WATERFALL_KINDS.join('|')}`);
+    });
+}
+/* 0.4.1 WAVE-3 display flags — the same gating as wave 2: each is a picture-only variant of the
+   type it rides on, so each is rejected anywhere else rather than quietly accepted. */
+function checkPolarFamilyFlags(d, bad) {
+    if (misplacedFlag(d.donut, d.type === 'pie'))
+        bad('donut', 'donut is a boolean on a pie chart only');
+    if (misplacedFlag(d.rose, d.type === 'pie'))
+        bad('rose', 'rose is a boolean on a pie chart only');
+    if (misplacedFlag(d.funnel, d.type === 'bar'))
+        bad('funnel', 'funnel is a boolean on a bar chart only');
+    if (misplacedFlag(d.polar, d.type === 'bar'))
+        bad('polar', 'polar is a boolean on a bar chart only');
+}
+/** The bar fields a funnel and a radial bar REPLACE rather than reinterpret — the key, and the
+    reason the shape has nothing to apply it to. */
+const SHAPE_REPLACED_FIELDS = [
+    ['orientation', 'has no bar orientation'],
+    ['barMode', 'has no bar grouping mode'],
+    ['highlightIndex', 'has no category band to highlight'],
+    ['histogram', 'cannot also be a histogram'],
+    ['pareto', 'cannot also be a pareto'],
+];
+/* A funnel and a radial bar each REPLACE the bar's plot box with a shape of their own, so every
+   field that describes that plot box is a contradiction rather than a preference. Rejected, not
+   ignored: a chart that accepted "Horizontal" and then drew a funnel would be discarding a choice
+   the author made and telling them nothing. */
+function checkShapeReplacements(d, s, bad) {
+    if (s.isFunnel || s.isPolar) {
+        const shape = s.isFunnel ? 'funnel' : 'radial bar';
+        if (s.isFunnel && s.isPolar)
+            bad('funnel', 'funnel and polar cannot both be set');
+        for (const [key, why] of SHAPE_REPLACED_FIELDS) {
+            if (d[key] !== undefined)
+                bad(key, `a ${shape} ${why}`);
+        }
+    }
+    // A funnel NAMES AND VALUES every stage unconditionally (chart/funnel.ts says why), so the flag
+    // has nothing left to switch; a gauge's centre readout is the value. Both would be discarded.
+    if (d.showValues !== undefined && (s.isFunnel || s.isGauge))
+        bad('showValues', `a ${s.isFunnel ? 'funnel' : 'gauge'} always prints its own value — showValues has no meaning`);
+}
+function axislessShapeName(s) {
+    return s.isRadar ? 'radar' : s.isGauge ? 'gauge' : s.isFunnel ? 'funnel' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : 'radial bar';
+}
+/* NO x/y AXIS, SO NO AXIS TITLE. A polar chart's spokes and rings are its axes and they are named
+   on the chart itself; a funnel and a gauge have no axis at all. This is the stream-graph trap
+   that cost wave 2 a defect — a title that validates, saves, round-trips and is never drawn.
+   …and a TREEMAP joins the four: its cells are nested areas, not positions on a pair of scales,
+   so there is no axis anywhere on the picture for a title to name.
+   …and a SANKEY joins them as the sixth. Its columns look like an axis and are not one: a column
+   is a position in a topological ORDER, not a value on a scale, and the vertical extent is a stack
+   of throughputs with no origin. Naming either would name a measurement the picture never makes. */
+function checkAxisTitles(d, s, bad) {
+    if (!s.isRadar && !s.isGauge && !s.isFunnel && !s.isPolar && !s.isTree && !s.isFlow)
+        return;
+    if (d.xTitle !== undefined || d.yTitle !== undefined)
+        bad('xTitle', `a ${axislessShapeName(s)} has no x/y axis to title`);
+}
+// Radar spoke ceilings — parallel to the spokes, each strictly positive (a spoke with a ceiling of
+// zero has no scale, and every value on it would land on the centre).
+function checkRadarMaxes(d, s, bad) {
+    if (d.maxes === undefined)
+        return;
+    if (!s.isRadar || !Array.isArray(d.maxes) || d.maxes.length !== s.labelCount) {
+        bad('maxes', `maxes is a radar-only array of one ceiling per spoke (${s.labelCount})`);
+        return;
+    }
+    d.maxes.forEach((m, i) => {
+        if (!isFiniteNumber(m) || m <= 0)
+            bad('max', `max ${i}: must be a finite number > 0`);
+    });
+}
+// Gauge bounds + unit suffix.
+function checkGaugeBounds(d, s, bad) {
+    for (const key of ['gaugeMin', 'gaugeMax']) {
+        if (d[key] === undefined)
+            continue;
+        if (!s.isGauge || !isFiniteNumber(d[key]))
+            bad(key, `${key} is a gauge-only finite number`);
+    }
+    if (s.isGauge && typeof d.gaugeMin === 'number' && typeof d.gaugeMax === 'number' && d.gaugeMax <= d.gaugeMin) {
+        bad('gaugeMax', 'gaugeMax must be greater than gaugeMin');
+    }
+    if (d.unit !== undefined && (!s.isGauge || !isCappedString(d.unit, 8)))
+        bad('unit', 'unit is a gauge-only string (max 8)');
+}
+/* ── 0.4.1 WAVE 4 ────────────────────────────────────────────────────────────────────────────
+   24 Hexagonal binning is a scatter FLAG, gated to its type exactly like every flag before it.
+   `hexBins` is meaningless without it — a bin count with nothing to bin — so it is refused on a
+   plain scatter rather than stored and ignored. */
+function checkHexbin(d, s, bad) {
+    if (misplacedFlag(d.hexbin, s.isXY))
+        bad('hexbin', 'hexbin is a boolean on a scatter chart only');
+    if (d.hexBins !== undefined && (!s.isHex || typeof d.hexBins !== 'number' || !Number.isInteger(d.hexBins) || d.hexBins < 4 || d.hexBins > 60)) {
+        bad('hexBins', 'hexBins is a hexbin-only integer in [4, 60] — the number of hex columns across the plot');
+    }
+}
+/* 17 Heatmap refuses exactly ONE shared field, and the line it draws is deliberate.
+   `showValues` is REJECTED, on the funnel's precedent: chart/heatmap.ts prints the value in every
+   cell that has room for one, unconditionally, because a printed grid with no numbers can only be
+   estimated from colour. There is nothing left for the flag to switch.
+   The BAR-LAYOUT fields — orientation, barMode, highlightIndex — and `sliceColors` are NOT
+   rejected, and that is the pie's precedent rather than the funnel's. A funnel IS a bar, so a bar
+   orientation on one is a contradiction inside a single type; a heatmap is a different type
+   entirely, where those keys are as inert as `orientation` has been on a pie since v0.4.0.
+   Rejecting them would also make a bar → heatmap switch produce a chart the author cannot save
+   and has no control left to repair. Inert and legal beats rejected and unreachable. */
+function checkHeatmapShowValues(d, s, bad) {
+    if (s.isHeat && d.showValues !== undefined) {
+        bad('showValues', 'a heatmap always prints the value in every cell that fits one — showValues has no meaning');
+    }
+}
+/** One entry of `parents`: an index in [-1, n) that is not the node itself. */
+function checkParentIndex(n, i, labelCount, bad) {
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < -1 || n >= labelCount) {
+        bad('parent', `parent ${i}: must be an integer in [-1, ${labelCount}) — -1 means a root`);
+        return false;
+    }
+    if (n === i) {
+        bad('parent', `parent ${i}: a node cannot be its own parent`);
+        return false;
+    }
+    return true;
+}
+/* ACYCLICITY, checked by WALKING UP from every node under a step budget of one hop per node.
+   A forest of n nodes has at most n-1 edges above any node, so a walk that has not reached a
+   root in n steps is inside a cycle — there is no other way to spend that many steps.
+   This is ALSO the "at least one root" rule, and it is not checked twice on purpose: every
+   entry is already in [-1, n), so a parents array with no -1 gives all n nodes an out-edge,
+   and n out-edges over n nodes always close a cycle. A separate root test could therefore
+   never fail on its own, and a condition that cannot be false is worse than no condition. */
+function firstCyclicNode(par, labelCount) {
+    for (let i = 0; i < labelCount; i++) {
+        let at = par[i];
+        for (let steps = 0; at >= 0; steps++) {
+            if (steps >= labelCount)
+                return i;
+            at = par[at];
+        }
+    }
+    return -1;
+}
+/* ── 0.4.1 WAVE 5 — the TREE, and the two flags that only change how it is drawn ───────────────
+   `parents` is the one genuinely new carrier this wave adds, and every rule on it REJECTS rather
+   than repairs. A tree is the one shape in this format where a single wrong number is not a wrong
+   VALUE but a wrong STRUCTURE: an index one out of range moves a whole branch, and only the author
+   knows which branch it was meant to hang from. normalizeChartData repairs the same faults so the
+   picture survives an old or hand-edited file; the validator says so, because a repaired tree is a
+   different tree and nothing on the drawing says which one you are looking at.
+
+   AN INTERIOR NODE'S VALUE IS ITS OWN, ON EXACTLY A LEAF'S TERMS — there is no rule here, and
+   the absence is the decision.
+
+   WHAT THIS REPLACES demanded a stored ZERO on every node with children, on the ground that a
+   branch's size was DERIVED from the leaves under it and a stored number would be a second
+   source for one figure. The premise was the defect. A parent that owned 40 and held a child
+   of 50 drew a box of 50, so a sibling of 80 looked BIGGER than a group the data said was 90 —
+   a treemap's only claim is that area is share, and it was stating a false one.
+
+   A parent now KEEPS its own value and its box holds that value PLUS everything under it,
+   drawn as a self-cell among the children (runtime chart/treemap.ts states the picture). The
+   stored number is the OWN share, so there is still exactly one source for it, and the general
+   `>= 0` finite rule above already covers it — a second rule here could only disagree.
+
+   A STORED ZERO IS STILL LEGAL, which is what makes every deck written under the old rule load
+   and draw exactly as it always did: no own value, no self-cell, the same picture. */
+function checkTreemapParents(d, s, bad) {
+    if (d.parents === undefined)
+        return;
+    if (!s.isTree || !Array.isArray(d.parents) || d.parents.length !== s.labelCount) {
+        bad('parents', `parents is a treemap-only array of one parent index per label (${s.labelCount})`);
+        return;
+    }
+    const p = d.parents;
+    let shaped = true;
+    p.forEach((n, i) => {
+        if (!checkParentIndex(n, i, s.labelCount, bad))
+            shaped = false;
+    });
+    if (!shaped)
+        return;
+    const cyclic = firstCyclicNode(p, s.labelCount);
+    if (cyclic >= 0)
+        bad('parents', `parents must form a forest — node ${cyclic} is inside a cycle`);
+}
+/* The two picture-only flags, gated to the type exactly like every flag before them, and mutually
+   exclusive on the funnel/polar precedent: `convex` rounds and insets a RECTANGLE, and a sunburst
+   has no rectangles to round.
+   A TREEMAP NAMES AND SIZES EVERY CELL IT HAS ROOM FOR, unconditionally — the funnel's and the
+   heatmap's precedent. There is no axis beside a cell to measure its area against, so a cell with
+   no number can only be estimated by eye, and the flag would have nothing left to switch. */
+function checkTreemapFlags(d, s, bad) {
+    if (misplacedFlag(d.sunburst, s.isTree))
+        bad('sunburst', 'sunburst is a boolean on a treemap only');
+    if (misplacedFlag(d.convex, s.isTree))
+        bad('convex', 'convex is a boolean on a treemap only');
+    else if (d.convex === true && d.sunburst === true)
+        bad('convex', 'sunburst and convex cannot both be set');
+    if (s.isTree && d.showValues !== undefined) {
+        bad('showValues', 'a treemap prints the name and value in every cell that fits them — showValues has no meaning');
+    }
+}
+/** A flow's `from` and `to` — both indices into `labels`, on `parents`' index-keyed discipline. */
+function checkFlowEndpoints(o, i, labelCount, bad) {
+    let ok = true;
+    for (const key of ['from', 'to']) {
+        if (!isLabelIndex(o[key], labelCount)) {
+            bad(`links.${key}`, `link ${i}: ${key} must be an integer in [0, ${labelCount}) — an index into labels`);
+            ok = false;
+        }
+    }
+    return ok;
+}
+/** Validate one flow and, when it is sound, record its endpoints for the graph checks below. */
+function collectFlow(l, i, labelCount, from, to, bad) {
+    if (l === null || typeof l !== 'object' || Array.isArray(l)) {
+        bad('links', `link ${i}: must be an object { from, to, value }`);
+        return false;
+    }
+    const o = l;
+    let ok = checkFlowEndpoints(o, i, labelCount, bad);
+    // A SELF-LOOP IS NOT A SMALL CYCLE, it is a ribbon that starts and ends on the same bar and
+    // so encloses no flow at all. It is named separately from the acyclicity rule below because
+    // an author who typed one row twice needs to be told which row, not that the graph is cyclic.
+    if (ok && o.from === o.to) {
+        bad('links.from', `link ${i}: a flow cannot start and end at the same node`);
+        ok = false;
+    }
+    const v = o.value;
+    // > 0, NOT >= 0: a zero-value ribbon is not a thin ribbon but nothing at all, and a flow of
+    // nothing between two nodes states a connection that is not there. A negative flow would draw
+    // its ribbon backwards through the node it leaves.
+    if (!isFiniteNumber(v) || v <= 0) {
+        bad('links.value', `link ${i}: value must be a finite number > 0`);
+        ok = false;
+    }
+    if (!ok)
+        return false;
+    from.push(o.from);
+    to.push(o.to);
+    return true;
+}
+/* ACYCLICITY BY A REAL TOPOLOGICAL SORT (Kahn), and not by the walk-up-under-a-budget the
+   treemap uses. A tree node has exactly one parent, so there is one chain to walk; a sankey
+   node has any number of predecessors, so there is no single chain and the walk would have
+   to branch. Kahn instead repeatedly removes a node with no remaining incoming edge: what is
+   left when nothing can be removed is exactly the part of the graph that is inside a cycle. */
+function checkFlowsAcyclic(from, to, labelCount, bad) {
+    const indeg = new Array(labelCount).fill(0);
+    const out = Array.from({ length: labelCount }, () => []);
+    for (let i = 0; i < from.length; i++) {
+        out[from[i]].push(to[i]);
+        indeg[to[i]]++;
+    }
+    const queue = [];
+    for (let i = 0; i < labelCount; i++)
+        if (indeg[i] === 0)
+            queue.push(i);
+    let seen = 0;
+    for (let q = 0; q < queue.length; q++) {
+        seen++;
+        for (const t of out[queue[q]])
+            if (--indeg[t] === 0)
+                queue.push(t);
+    }
+    if (seen >= labelCount)
+        return;
+    // the lowest-indexed node still carrying an incoming edge — the entry point into the ring
+    const stuck = indeg.findIndex((n) => n > 0);
+    bad('links', `the flows must be ACYCLIC — node ${stuck} is inside a cycle, and a cycle has no column to sit in`);
+}
+/* EVERY NODE IN AT LEAST ONE FLOW. A node with no edge has no throughput, so no height; no
+   edge, so no column; and nothing on the picture at all. It is rejected rather than dropped
+   because a silently missing name is the one fault a reader of a printed deck cannot see. */
+function checkEveryNodeLinked(from, to, labelCount, bad) {
+    const linked = new Set([...from, ...to]);
+    for (let i = 0; i < labelCount; i++) {
+        if (!linked.has(i))
+            bad('links', `node ${i} appears in no flow — a sankey node with no link has no place in the diagram`);
+    }
+}
+/* ── 0.4.1 WAVE 5b — 27 SANKEY, the flows ────────────────────────────────────────────────────
+   `links` is REQUIRED here and rejected everywhere else. Required, because a sankey with no flows
+   is not a plainer sankey — it is a column of unconnected names, which is a list and not a
+   diagram; and every rule below rejects rather than repairs, on `parents`' precedent: a wrong
+   index in a graph is a wrong STRUCTURE, and only the author knows which node was meant.
+   normalizeChartData repairs the same faults so a hand-edited file still draws something.
+   A SANKEY NAMES AND VALUES EVERY NODE IT HAS ROOM FOR, unconditionally — the funnel's, the
+   heatmap's and the treemap's precedent, now the fourth time it is reached. A node bar is a
+   throughput with no axis beside it, so a bar with no number can only be estimated against the
+   other bars, and the flag would have nothing left to switch. */
+function checkSankeyLinks(d, s, bad) {
+    if (s.isFlow && d.showValues !== undefined) {
+        bad('showValues', 'a sankey prints each node’s name and throughput wherever there is room — showValues has no meaning');
+    }
+    if (d.links !== undefined && !s.isFlow) {
+        bad('links', 'links is a sankey-only array of { from, to, value } flows');
+        return;
+    }
+    if (!s.isFlow)
+        return;
+    const raw = d.links;
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > SANKEY_MAX_LINKS) {
+        bad('links', `a sankey needs a links array of 1–${SANKEY_MAX_LINKS} { from, to, value } flows`);
+        return;
+    }
+    let shaped = true;
+    const from = [];
+    const to = [];
+    raw.forEach((l, i) => {
+        if (!collectFlow(l, i, s.labelCount, from, to, bad))
+            shaped = false;
+    });
+    if (!shaped)
+        return;
+    checkFlowsAcyclic(from, to, s.labelCount, bad);
+    checkEveryNodeLinked(from, to, s.labelCount, bad);
+}
+/* ── 0.4.1 WAVE 6 — the two NAMING flags ─────────────────────────────────────────────────────
+   `legend` is gated on what the PICTURE draws rather than on one type, which is new here and is
+   argued in full above CHART_TYPES. The four refusals are exactly the four types renderChart gives
+   an empty swatch list: a gauge names its one dial in the middle of itself, a heatmap and a hexbin
+   are decoded by the colour SCALE each draws inside its own SVG (a scale is not a series key), and
+   a sankey's palette repeats past eight nodes, so a swatch row there would claim a colour stands
+   for one name when it stands for two. On all four there is no row to suppress, and a flag that
+   switches off something never drawn is this arc's cardinal sin. */
+function checkLegend(d, s, bad) {
+    if (d.legend === undefined)
+        return;
+    if (typeof d.legend !== 'boolean') {
+        bad('legend', 'legend must be a boolean');
+        return;
+    }
+    if (!s.isGauge && !s.isHeat && !s.isFlow && !s.isHex)
+        return;
+    const what = s.isGauge ? 'gauge' : s.isHeat ? 'heatmap' : s.isFlow ? 'sankey' : 'hexbin';
+    bad('legend', `a ${what} draws no swatch legend — legend has nothing to switch`);
+}
+/* `pieLabels` is an ordinary one-type flag: only a pie has slices with room inside them for a
+   name. Every other picture already prints its categories along an axis, in its own cells, or has
+   no categorical key at all. */
+function checkPieLabels(d, bad) {
+    if (misplacedFlag(d.pieLabels, d.type === 'pie')) {
+        bad('pieLabels', 'pieLabels is a boolean on a pie chart only');
+    }
+}
+/* `plotHeight` is a GEOMETRY field rather than a flag, so it is bracketed rather than type-keyed:
+   it is legal on every picture (a value typed on a bar chart has to survive a trip through the
+   horizontal switch and be honoured again on the way back), and the three pictures that cannot
+   draw it — a horizontal bar, a heatmap, a sparkline — WITHHOLD the control instead of rejecting
+   the key, which is the rule the arc has kept since `yMax` on a stream graph.
+
+   Bracketed and not clamped: a number outside [CHART_PLOT_H_MIN, CHART_PLOT_H_MAX] is not a
+   smaller mistake than a string, and silently pulling it to the nearest bound would draw a chart
+   the file does not describe. */
+function checkPlotHeight(d, bad) {
+    if (d.plotHeight !== undefined &&
+        (typeof d.plotHeight !== 'number' ||
+            !Number.isFinite(d.plotHeight) ||
+            d.plotHeight < CHART_PLOT_H_MIN ||
+            d.plotHeight > CHART_PLOT_H_MAX)) {
+        bad('plotHeight', `plotHeight is the plot box height in viewBox units — a number in [${CHART_PLOT_H_MIN}, ${CHART_PLOT_H_MAX}]`);
+    }
+}
+/* 0.4.1h CHART TEXT — three fields, legal on every picture (never type-keyed), on the same
+   withhold-the-control-keep-the-value rule plotHeight and legend already keep: the panel decides
+   per picture which of the FREE surfaces exist to colour, this schema only checks the shape. */
+function checkChartText(d, bad) {
+    if (d.textColor !== undefined && (typeof d.textColor !== 'string' || !COLOR_RE.test(d.textColor))) {
+        bad('textColor', 'textColor must be a #hex value');
+    }
+    if (d.textFont !== undefined && d.textFont !== 'playfair' && d.textFont !== 'lora' && d.textFont !== 'inter' && d.textFont !== 'source-serif') {
+        bad('textFont', "textFont must be one of 'playfair', 'lora', 'inter', 'source-serif'");
+    }
+    if (d.textScale !== undefined &&
+        (typeof d.textScale !== 'number' || !Number.isFinite(d.textScale) || d.textScale < TEXT_SCALE_MIN || d.textScale > TEXT_SCALE_MAX)) {
+        bad('textScale', `textScale is a multiplier on the free surfaces' own size — a number in [${TEXT_SCALE_MIN}, ${TEXT_SCALE_MAX}]`);
+    }
+}
+function checkQuadrantCorners(q, bad) {
+    if (q.corners === undefined)
+        return;
+    if (!Array.isArray(q.corners) || q.corners.length > 4) {
+        bad('quadrant.corners', 'quadrant.corners must be an array of up to 4 captions');
+        return;
+    }
+    q.corners.forEach((c, i) => {
+        if (!isCappedString(c, 60))
+            bad('quadrant.corner', `quadrant corner ${i}: must be a string (max 60)`);
+    });
+}
+// Quadrant split + corner captions (scatter only) — and NOT on a hexbin, whose lattice replaces
+// the very point marks the split lines are there to divide.
+function checkQuadrant(d, s, bad) {
+    if (d.quadrant === undefined)
+        return;
+    if (s.isHex) {
+        bad('quadrant', 'a hexbin bins the whole cloud — a quadrant split has no point marks to divide');
+        return;
+    }
+    const q = d.quadrant;
+    if (!s.isXY || q === null || typeof q !== 'object' || Array.isArray(q)) {
+        bad('quadrant', 'quadrant is a scatter-only object { x, y, corners? }');
+        return;
+    }
+    if (!isFiniteNumber(q.x))
+        bad('quadrant.x', 'quadrant.x must be a finite number');
+    if (!isFiniteNumber(q.y))
+        bad('quadrant.y', 'quadrant.y must be a finite number');
+    checkQuadrantCorners(q, bad);
+}
+/** The picture named in the link refusal — the type that cannot read a ledger range. */
+function unlinkableChartName(s) {
+    return s.isTs ? 'timeseries' : s.isBox ? 'box plot' : s.isGauge ? 'gauge' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : 'scatter';
+}
+function checkLinkFields(l, bad) {
+    if (typeof l.ledgerId !== 'string' || l.ledgerId.length === 0 || l.ledgerId.length > 64)
+        bad('link.ledgerId', 'link.ledgerId must be a non-empty string (max 64)');
+    if (l.tab !== undefined && (typeof l.tab !== 'string' || l.tab.length === 0 || l.tab.length > 64))
+        bad('link.tab', 'link.tab must be a non-empty string (max 64)');
+    if (typeof l.range !== 'string' || !A1_RANGE_RE.test(l.range))
+        bad('link.range', 'link.range must be an A1 range like "A1:C10"');
+    if (typeof l.header !== 'boolean')
+        bad('link.header', 'link.header must be a boolean');
+    if (l.orient !== undefined && l.orient !== 'row' && l.orient !== 'col')
+        bad('link.orient', "link.orient must be 'row' or 'col'");
+}
+// Optional ledger link (present → strict shape check, absent → skip). A timeseries and a scatter
+// can't link — the range→series mapper only emits bar/line/pie (a categorical range has no second
+// numeric axis to map x onto), so reject a link on either.
+// A BOX PLOT joins the ban for a different reason: a ledger cell yields ONE number, and a box
+// needs five (or a whole sample column) per category — the range→series mapper has no shape to
+// map onto. A WATERFALL is NOT banned: labels + one signed column is exactly what the mapper
+// already emits, and the step kinds default from the sign.
+// A GAUGE joins the ban, and for the sharpest version of the box plot's reason: a gauge takes ONE
+// number, while a range is a rectangle of cells that the mapper turns into labels plus a column
+// per series. There is no range a gauge could read — and its floor and ceiling are not in the
+// grid at all. A RADAR is NOT banned: labels plus one column per series is exactly what the mapper
+// emits, and absent `maxes` simply means every spoke shares one ceiling.
+// A HEATMAP is not merely allowed to link — it is the BEST fit in the suite. Every other picture
+// collapses a range into bars or slices and throws the rectangle away; a heatmap draws the whole
+// rectangle, one cell per ledger cell, with the header row naming the rows. `link.orient:col`
+// transposes it, and the mapper's clamp to >= 0 costs it nothing (its own schema requires that).
+// A TREEMAP joins the ban, on the BOX PLOT's reason rather than the gauge's: the range→series
+// mapper emits labels plus one column per series and has no shape that says which label is INSIDE
+// which. A linked treemap could therefore only ever be a flat forest — a bar chart in rectangles —
+// so the door is shut rather than opened onto half the type. Lifting it needs a mapper that can
+// read a second key column as a parent name, which is a wave of its own.
+// A SANKEY joins the ban on the treemap's reason at its sharpest: the mapper emits labels plus one
+// COLUMN PER SERIES, and a flow is not a column — it is a pair of node names and a magnitude, which
+// a categorical range has no shape for. A linked sankey could only be a set of nodes with no edges,
+// which is the one thing this type rejects outright.
+function checkLedgerLink(d, s, bad) {
+    if (d.link === undefined)
+        return;
+    if (s.free || s.isBox || s.isGauge || s.isTree || s.isFlow) {
+        bad('link', `a ${unlinkableChartName(s)} chart cannot link to a ledger`);
+        return;
+    }
+    if (d.link === null || typeof d.link !== 'object' || Array.isArray(d.link)) {
+        bad('link', 'link must be an object { ledgerId, range, header }');
+        return;
+    }
+    checkLinkFields(d.link, bad);
+}
+/** Strict shape check for one chart data block. REJECT, never repair.
+
+    The body is a DISPATCHER. Every rule lives in a named check above, and the checks run in the
+    order their violations are expected in — the rule code, the message and the ORDER are all part
+    of the format's contract, so a check is named and moved out, never reordered. */
 export function validateChartData(data) {
     const v = [];
     const bad = (rule, detail) => v.push({ rule: `chart.${rule}`, detail });
@@ -212,653 +1013,31 @@ export function validateChartData(data) {
     if (!CHART_TYPES.includes(d.type)) {
         bad('type', `type must be one of ${CHART_TYPES.join('|')}`);
     }
-    // A timeseries is keyed by numeric x per series, not by categories — so it carries no labels.
-    const isTs = d.type === 'timeseries';
-    // A scatter is keyed by (x,y) pairs — likewise category-free, but its y may be negative.
-    const isXY = d.type === 'scatter';
-    const free = isTs || isXY;
-    const isWf = d.type === 'waterfall';
-    const isBox = d.type === 'boxplot';
-    const isRadar = d.type === 'radar';
-    const isGauge = d.type === 'gauge';
-    const isHeat = d.type === 'heatmap';
-    // 19 Treemap — the wave-5 TYPE. Its two flags (sunburst, convex) are gated to it further down.
-    const isTree = d.type === 'treemap';
-    // 27 Sankey — the wave-5b TYPE. `links` is gated to it further down, and it is the only field in
-    // this file that carries a RELATIONSHIP rather than a property of a label.
-    const isFlow = d.type === 'sankey';
-    // 24 Hexagonal binning — a scatter FLAG, so it is only ever true on a scatter (the gate below
-    // rejects it anywhere else, and every rule keyed to it therefore reads a scatter).
-    const isHex = isXY && d.hexbin === true;
-    // the two wave-3 bar SHAPES. Neither has a Cartesian plot box, and neither has room for a second
-    // series, so both are treated exactly like the single-series types below.
-    const isFunnel = d.type === 'bar' && d.funnel === true;
-    const isPolar = d.type === 'bar' && d.polar === true;
-    /* THE ONLY RELAXATION OF THE `value >= 0` RULE, and it is keyed to the TYPE, never to a flag.
-       A waterfall step is a signed delta and a box's five-number summary is a coordinate, so both
-       must carry negatives. bar / line / pie / timeseries keep the v0.4.0 rule untouched — which is
-       exactly why Waterfall and Box plot are TYPES and not bar flags: a flag would have turned this
-       into a conditional weakening INSIDE the branch that guards a plain bar, where every other bar
-       chart in every existing deck is validated. There is no tension to report; the two rules never
-       meet. */
-    // A GAUGE joins them for a third reason: its dial is a coordinate range, so a floor of -40 and a
-    // reading of -12 are ordinary data.
-    const signed = isWf || isBox || isGauge;
-    /* Horizontal ranking charts read fine with many rows; a vertical/pie stays capped at 24 (thin bars
-       past that). A HEATMAP is pinned at 24 whatever `orientation` says: the key is inert on this type
-       (see the note further down), and letting an inert key widen the column cap to 60 would VALIDATE a
-       grid that normalizeChartData then truncates to 24 — a silently discarded half of the data, which
-       is the one outcome both halves of this file exist to prevent. */
-    /* A TREEMAP is pinned at its own cap for the same reason a heatmap is pinned at 24: `orientation`
-       is INERT on the type (see the note further down), so letting an inert key move the cap would make
-       the legal node count depend on a field the picture never reads. TREEMAP_MAX_NODES states why 60.
-       A SANKEY is pinned the same way and for the same reason — SANKEY_MAX_NODES states why 60 there. */
-    const maxLabels = isTree ? TREEMAP_MAX_NODES : isFlow ? SANKEY_MAX_NODES : !isHeat && d.orientation === 'horizontal' ? 60 : 24;
-    if (!Array.isArray(d.labels) || (!free && (d.labels.length < 1 || d.labels.length > maxLabels))) {
-        bad('labels', free ? 'labels must be an array' : `labels must be an array of 1–${maxLabels} entries`);
-    }
-    else {
-        // A gauge shows ONE dial and its label names it; more would be silently unread. A radar needs
-        // three spokes to enclose an area — two draw a line back over itself, which is not a radar.
-        if (isGauge && d.labels.length !== 1)
-            bad('labels', 'a gauge takes exactly one label — the name of the dial');
-        if (isRadar && d.labels.length < 3)
-            bad('labels', 'a radar needs at least 3 spokes');
-        d.labels.forEach((l, i) => {
-            if (typeof l !== 'string' || l.length === 0 || l.length > 40)
-                bad('label', `label ${i}: must be a non-empty string (max 40)`);
-        });
-    }
-    const labelCount = Array.isArray(d.labels) ? d.labels.length : 0;
-    // A HEATMAP's series are the grid's ROWS, so its cap is the label cap, not the 1-6 series cap.
-    // See the CHART_TYPES note for why that difference is what makes it a type and not a bar flag.
-    const maxSeries = isHeat ? HEATMAP_MAX_ROWS : 6;
-    if (!Array.isArray(d.series) || d.series.length < 1 || d.series.length > maxSeries) {
-        bad('series', `series must be an array of 1–${maxSeries} entries`);
-    }
-    else {
-        // Single-series types + the single-series flag. A pareto's second axis is a percentage OF a
-        // total, a waterfall is one running balance and a box plot is one distribution per category —
-        // none of the three has a meaning for a second series, so the count is rejected, not ignored.
-        // …and a TREEMAP joins them: `parents` describes ONE tree, so a second series would be a second
-        // set of node sizes for the same nodes, with nothing on the picture able to show both.
-        // …and a SANKEY joins them from the other side: its series carries no sizes at all (they are
-        // derived from `links`), so a second one would be a second set of nothing.
-        const one = d.type === 'pie' ? 'pie chart' : isWf ? 'waterfall' : isBox ? 'box plot' : isGauge ? 'gauge' : isFunnel ? 'funnel' : isPolar ? 'radial bar' : isTree ? 'treemap' : isFlow ? 'sankey' : d.pareto === true ? 'pareto' : '';
-        if (one && d.series.length !== 1) {
-            bad('series', `a ${one} takes exactly one series`);
-        }
-        d.series.forEach((s, i) => {
-            const o = (s ?? {});
-            if (typeof o.name !== 'string' || o.name.length > 60)
-                bad('series.name', `series ${i}: name must be a string (max 60)`);
-            if (typeof o.color !== 'string' || !COLOR_RE.test(o.color))
-                bad('series.color', `series ${i}: color must be a #hex value`);
-            if (o.dash !== undefined && typeof o.dash !== 'boolean')
-                bad('series.dash', `series ${i}: dash must be a boolean`);
-            if (o.markers !== undefined && typeof o.markers !== 'boolean')
-                bad('series.markers', `series ${i}: markers must be a boolean`);
-            // `fill` is a LINE concept (the band under the stroke) — a bar/pie/scatter has no band.
-            if (o.fill !== undefined && (typeof o.fill !== 'boolean' || d.type !== 'line'))
-                bad('series.fill', `series ${i}: fill is a boolean on a line series only`);
-            /* bubble sizes + point captions are scatter-only; on any other type they are meaningless — and
-               a HEXBIN is the case where "meaningless" needs saying out loud, because it IS a scatter. It
-               replaces the individual point marks with a lattice of cells, so there is no disc left to
-               size and no point left to caption; accepting either would take a value and discard it. */
-            if (o.sizes !== undefined && (!isXY || isHex))
-                bad('series.sizes', `series ${i}: sizes is a ${isHex ? 'point-mark field a hexbin does not draw' : 'scatter-only field'}`);
-            if (o.pointLabels !== undefined && (!isXY || isHex))
-                bad('series.pointLabels', `series ${i}: pointLabels is a ${isHex ? 'point-mark field a hexbin does not draw' : 'scatter-only field'}`);
-            // distribution fields ride parallel to the CATEGORIES and mean nothing on any other type
-            for (const key of ['boxes', 'samples', 'outliers']) {
-                const arr = o[key];
-                if (arr === undefined)
-                    continue;
-                if (!isBox) {
-                    bad(`series.${key}`, `series ${i}: ${key} is a boxplot-only field`);
-                }
-                else if (!Array.isArray(arr) || arr.length !== labelCount) {
-                    bad(`series.${key}`, `series ${i}: ${key} must have one array per label (${labelCount})`);
-                }
-                else {
-                    arr.forEach((row, j) => {
-                        if (!Array.isArray(row) || (key === 'boxes' && row.length !== 5)) {
-                            bad(`series.${key}`, `series ${i} ${key} ${j}: must be an array${key === 'boxes' ? ' of exactly 5 numbers [low, Q1, median, Q3, high]' : ''}`);
-                            return;
-                        }
-                        row.forEach((n, k) => {
-                            if (typeof n !== 'number' || !Number.isFinite(n))
-                                bad(`series.${key}`, `series ${i} ${key} ${j}[${k}]: must be a finite number`);
-                            // REJECT, never repair: an out-of-order summary draws a median outside its own box and
-                            // a whisker inside it. normalizeChartData sorts it so the picture survives; the
-                            // validator says so, because only the author can know which number was wrong.
-                            else if (key === 'boxes' && k > 0 && typeof row[k - 1] === 'number' && n < row[k - 1])
-                                bad('series.boxes', `series ${i} box ${j}: must be ascending [low ≤ Q1 ≤ median ≤ Q3 ≤ high]`);
-                        });
-                    });
-                }
-            }
-            if (isBox && o.boxes === undefined && o.samples === undefined) {
-                bad('series.boxes', `series ${i}: a box plot needs boxes (pre-computed) or samples (raw)`);
-            }
-            if (free) {
-                // xs parallel to values, per-series length. A timeseries reads left-to-right (x
-                // non-decreasing, y ≥ 0); a scatter is a cloud, so neither rule applies to it.
-                const xs = o.xs;
-                const need = isXY ? 1 : 2;
-                if (!Array.isArray(xs) || xs.length < need) {
-                    bad('series.xs', `series ${i}: xs must be an array of ≥${need} x-coordinates`);
-                }
-                else if (!Array.isArray(o.values) || o.values.length !== xs.length) {
-                    bad('series.values', `series ${i}: values must parallel xs (${xs.length})`);
-                }
-                else {
-                    for (let k = 0; k < xs.length; k++) {
-                        const x = xs[k];
-                        if (typeof x !== 'number' || !Number.isFinite(x))
-                            bad('series.x', `series ${i} x ${k}: must be a finite number`);
-                        else if (isTs && k > 0 && typeof xs[k - 1] === 'number' && x < xs[k - 1])
-                            bad('series.x', `series ${i} x ${k}: must be non-decreasing`);
-                        const y = o.values[k];
-                        if (typeof y !== 'number' || !Number.isFinite(y) || (isTs && y < 0))
-                            bad('series.value', `series ${i} value ${k}: must be a finite number${isTs ? ' ≥ 0' : ''}`);
-                    }
-                    // bubble sizes + point captions ride parallel to the points
-                    if (isXY && o.sizes !== undefined) {
-                        if (!Array.isArray(o.sizes) || o.sizes.length !== xs.length)
-                            bad('series.sizes', `series ${i}: sizes must have one number per point (${xs.length})`);
-                        else
-                            o.sizes.forEach((z, k) => { if (typeof z !== 'number' || !Number.isFinite(z) || z < 0)
-                                bad('series.size', `series ${i} size ${k}: must be a finite number ≥ 0`); });
-                    }
-                    if (isXY && o.pointLabels !== undefined) {
-                        if (!Array.isArray(o.pointLabels) || o.pointLabels.length !== xs.length)
-                            bad('series.pointLabels', `series ${i}: pointLabels must have one string per point (${xs.length})`);
-                        else
-                            o.pointLabels.forEach((t, k) => { if (typeof t !== 'string' || t.length > 40)
-                                bad('series.pointLabel', `series ${i} pointLabel ${k}: must be a string (max 40)`); });
-                    }
-                }
-            }
-            else if (!Array.isArray(o.values) || o.values.length !== labelCount) {
-                bad('series.values', `series ${i}: values must have one number per label (${labelCount})`);
-            }
-            else {
-                o.values.forEach((n, j) => {
-                    if (typeof n !== 'number' || !Number.isFinite(n) || (!signed && n < 0)) {
-                        bad('series.value', `series ${i} value ${j}: must be a finite number${signed ? '' : ' ≥ 0'}`);
-                    }
-                    else if (isFlow && n !== 0) {
-                        /* A SANKEY'S SERIES IS BALLAST, AND THE ZERO IS ENFORCED RATHER THAN IGNORED — the
-                           rule the treemap's interior nodes once carried, applied to every node instead. A node's
-                           size is its THROUGHPUT, which `links` already states in full; a number stored here
-                           would be a second source for it and the two would disagree the first time a flow was
-                           edited, with nothing on the picture able to say which one is being drawn. Requiring
-                           the zero is what stops the file carrying a number no reader will ever see. */
-                        bad('series.value', `series ${i} value ${j}: a sankey node is sized by its links, so its stored value must be 0`);
-                    }
-                });
-            }
-        });
-    }
-    if (d.yMax !== null && d.yMax !== undefined && (typeof d.yMax !== 'number' || !Number.isFinite(d.yMax) || d.yMax <= 0)) {
-        bad('yMax', 'yMax must be null or a positive number');
-    }
-    // Optional per-slice pie colours: when present, one #hex per label (dense, aligned).
-    if (d.sliceColors !== undefined) {
-        if (!Array.isArray(d.sliceColors) || d.sliceColors.length !== labelCount) {
-            bad('sliceColors', `sliceColors, when present, must have one #hex per label (${labelCount})`);
-        }
-        else {
-            d.sliceColors.forEach((c, i) => {
-                if (typeof c !== 'string' || !COLOR_RE.test(c))
-                    bad('sliceColor', `sliceColor ${i}: must be a #hex value`);
-            });
-        }
-    }
-    // Optional presentation fields (all absent-by-default; each: present → validate, absent → skip).
-    if (d.orientation !== undefined && d.orientation !== 'horizontal' && d.orientation !== 'vertical')
-        bad('orientation', "orientation must be 'horizontal' or 'vertical'");
-    if (d.barMode !== undefined && d.barMode !== 'grouped' && d.barMode !== 'overlaid' && d.barMode !== 'stacked')
-        bad('barMode', "barMode must be 'grouped', 'overlaid' or 'stacked'");
-    if (d.highlightIndex !== undefined && (typeof d.highlightIndex !== 'number' || !Number.isInteger(d.highlightIndex) || d.highlightIndex < 0 || d.highlightIndex >= labelCount))
-        bad('highlightIndex', `highlightIndex must be an integer in [0, ${labelCount})`);
-    if (d.showValues !== undefined && typeof d.showValues !== 'boolean')
-        bad('showValues', 'showValues must be a boolean');
-    if (d.title !== undefined && (typeof d.title !== 'string' || d.title.length > 120))
-        bad('title', 'title must be a string (max 120)');
-    if (d.subtitle !== undefined && (typeof d.subtitle !== 'string' || d.subtitle.length > 120))
-        bad('subtitle', 'subtitle must be a string (max 120)');
-    if (d.xTitle !== undefined && (typeof d.xTitle !== 'string' || d.xTitle.length > 60))
-        bad('xTitle', 'xTitle must be a string (max 60)');
-    if (d.yTitle !== undefined && (typeof d.yTitle !== 'string' || d.yTitle.length > 60))
-        bad('yTitle', 'yTitle must be a string (max 60)');
-    // Sparkline is a LINE display mode — it has no meaning on a bar/pie/timeseries/scatter.
-    if (d.spark !== undefined && (typeof d.spark !== 'boolean' || d.type !== 'line'))
-        bad('spark', 'spark is a boolean on a line chart only');
-    // 0.4.1 wave-2 display flags. Each is a picture-only variant of the type it rides on, so each is
-    // gated to that type — a histogram on a pie means nothing and must not be quietly accepted.
-    if (d.histogram !== undefined && (typeof d.histogram !== 'boolean' || d.type !== 'bar'))
-        bad('histogram', 'histogram is a boolean on a bar chart only');
-    if (d.pareto !== undefined && (typeof d.pareto !== 'boolean' || d.type !== 'bar'))
-        bad('pareto', 'pareto is a boolean on a bar chart only');
-    // A pareto's second axis runs up the RIGHT of a vertical plot; a horizontal bar's value axis is
-    // already along the bottom, so there is nowhere honest to put it.
-    else if (d.pareto === true && d.orientation === 'horizontal')
-        bad('pareto', 'pareto needs a vertical bar chart (orientation must not be horizontal)');
-    if (d.stream !== undefined && (typeof d.stream !== 'boolean' || d.type !== 'line'))
-        bad('stream', 'stream is a boolean on a line chart only');
-    // A sparkline strips the whole frame; a stream IS the frame. Asking for both is a contradiction.
-    else if (d.stream === true && d.spark === true)
-        bad('stream', 'stream and spark cannot both be set');
-    // Waterfall step kinds — parallel to the categories (a waterfall has exactly one series).
-    if (d.kinds !== undefined) {
-        if (!isWf || !Array.isArray(d.kinds) || d.kinds.length !== labelCount) {
-            bad('kinds', `kinds is a waterfall-only array of one step kind per label (${labelCount})`);
-        }
-        else {
-            d.kinds.forEach((k, i) => {
-                if (!WATERFALL_KINDS.includes(k))
-                    bad('kind', `kind ${i}: must be one of ${WATERFALL_KINDS.join('|')}`);
-            });
-        }
-    }
-    /* 0.4.1 WAVE-3 display flags — the same gating as wave 2: each is a picture-only variant of the
-       type it rides on, so each is rejected anywhere else rather than quietly accepted. */
-    if (d.donut !== undefined && (typeof d.donut !== 'boolean' || d.type !== 'pie'))
-        bad('donut', 'donut is a boolean on a pie chart only');
-    if (d.rose !== undefined && (typeof d.rose !== 'boolean' || d.type !== 'pie'))
-        bad('rose', 'rose is a boolean on a pie chart only');
-    if (d.funnel !== undefined && (typeof d.funnel !== 'boolean' || d.type !== 'bar'))
-        bad('funnel', 'funnel is a boolean on a bar chart only');
-    if (d.polar !== undefined && (typeof d.polar !== 'boolean' || d.type !== 'bar'))
-        bad('polar', 'polar is a boolean on a bar chart only');
-    /* A funnel and a radial bar each REPLACE the bar's plot box with a shape of their own, so every
-       field that describes that plot box is a contradiction rather than a preference. Rejected, not
-       ignored: a chart that accepted "Horizontal" and then drew a funnel would be discarding a choice
-       the author made and telling them nothing. */
-    if (isFunnel || isPolar) {
-        const shape = isFunnel ? 'funnel' : 'radial bar';
-        if (isFunnel && isPolar)
-            bad('funnel', 'funnel and polar cannot both be set');
-        if (d.orientation !== undefined)
-            bad('orientation', `a ${shape} has no bar orientation`);
-        if (d.barMode !== undefined)
-            bad('barMode', `a ${shape} has no bar grouping mode`);
-        if (d.highlightIndex !== undefined)
-            bad('highlightIndex', `a ${shape} has no category band to highlight`);
-        if (d.histogram !== undefined)
-            bad('histogram', `a ${shape} cannot also be a histogram`);
-        if (d.pareto !== undefined)
-            bad('pareto', `a ${shape} cannot also be a pareto`);
-    }
-    // A funnel NAMES AND VALUES every stage unconditionally (chart/funnel.ts says why), so the flag
-    // has nothing left to switch; a gauge's centre readout is the value. Both would be discarded.
-    if (d.showValues !== undefined && (isFunnel || isGauge))
-        bad('showValues', `a ${isFunnel ? 'funnel' : 'gauge'} always prints its own value — showValues has no meaning`);
-    /* NO x/y AXIS, SO NO AXIS TITLE. A polar chart's spokes and rings are its axes and they are named
-       on the chart itself; a funnel and a gauge have no axis at all. This is the stream-graph trap
-       that cost wave 2 a defect — a title that validates, saves, round-trips and is never drawn. */
-    // …and a TREEMAP joins the four: its cells are nested areas, not positions on a pair of scales,
-    // so there is no axis anywhere on the picture for a title to name.
-    // …and a SANKEY joins them as the sixth. Its columns look like an axis and are not one: a column
-    // is a position in a topological ORDER, not a value on a scale, and the vertical extent is a stack
-    // of throughputs with no origin. Naming either would name a measurement the picture never makes.
-    if (isRadar || isGauge || isFunnel || isPolar || isTree || isFlow) {
-        const what = isRadar ? 'radar' : isGauge ? 'gauge' : isFunnel ? 'funnel' : isTree ? 'treemap' : isFlow ? 'sankey' : 'radial bar';
-        if (d.xTitle !== undefined || d.yTitle !== undefined)
-            bad('xTitle', `a ${what} has no x/y axis to title`);
-    }
-    // Radar spoke ceilings — parallel to the spokes, each strictly positive (a spoke with a ceiling of
-    // zero has no scale, and every value on it would land on the centre).
-    if (d.maxes !== undefined) {
-        if (!isRadar || !Array.isArray(d.maxes) || d.maxes.length !== labelCount) {
-            bad('maxes', `maxes is a radar-only array of one ceiling per spoke (${labelCount})`);
-        }
-        else {
-            d.maxes.forEach((m, i) => {
-                if (typeof m !== 'number' || !Number.isFinite(m) || m <= 0)
-                    bad('max', `max ${i}: must be a finite number > 0`);
-            });
-        }
-    }
-    // Gauge bounds + unit suffix.
-    for (const key of ['gaugeMin', 'gaugeMax']) {
-        if (d[key] === undefined)
-            continue;
-        if (!isGauge || typeof d[key] !== 'number' || !Number.isFinite(d[key]))
-            bad(key, `${key} is a gauge-only finite number`);
-    }
-    if (isGauge && typeof d.gaugeMin === 'number' && typeof d.gaugeMax === 'number' && d.gaugeMax <= d.gaugeMin) {
-        bad('gaugeMax', 'gaugeMax must be greater than gaugeMin');
-    }
-    if (d.unit !== undefined && (!isGauge || typeof d.unit !== 'string' || d.unit.length > 8))
-        bad('unit', 'unit is a gauge-only string (max 8)');
-    /* ── 0.4.1 WAVE 4 ────────────────────────────────────────────────────────────────────────────
-       24 Hexagonal binning is a scatter FLAG, gated to its type exactly like every flag before it.
-       `hexBins` is meaningless without it — a bin count with nothing to bin — so it is refused on a
-       plain scatter rather than stored and ignored. */
-    if (d.hexbin !== undefined && (typeof d.hexbin !== 'boolean' || !isXY))
-        bad('hexbin', 'hexbin is a boolean on a scatter chart only');
-    if (d.hexBins !== undefined && (!isHex || typeof d.hexBins !== 'number' || !Number.isInteger(d.hexBins) || d.hexBins < 4 || d.hexBins > 60)) {
-        bad('hexBins', 'hexBins is a hexbin-only integer in [4, 60] — the number of hex columns across the plot');
-    }
-    /* 17 Heatmap refuses exactly ONE shared field, and the line it draws is deliberate.
-       `showValues` is REJECTED, on the funnel's precedent: chart/heatmap.ts prints the value in every
-       cell that has room for one, unconditionally, because a printed grid with no numbers can only be
-       estimated from colour. There is nothing left for the flag to switch.
-       The BAR-LAYOUT fields — orientation, barMode, highlightIndex — and `sliceColors` are NOT
-       rejected, and that is the pie's precedent rather than the funnel's. A funnel IS a bar, so a bar
-       orientation on one is a contradiction inside a single type; a heatmap is a different type
-       entirely, where those keys are as inert as `orientation` has been on a pie since v0.4.0.
-       Rejecting them would also make a bar → heatmap switch produce a chart the author cannot save
-       and has no control left to repair. Inert and legal beats rejected and unreachable. */
-    if (isHeat && d.showValues !== undefined) {
-        bad('showValues', 'a heatmap always prints the value in every cell that fits one — showValues has no meaning');
-    }
-    /* ── 0.4.1 WAVE 5 — the TREE, and the two flags that only change how it is drawn ───────────────
-       `parents` is the one genuinely new carrier this wave adds, and every rule on it REJECTS rather
-       than repairs. A tree is the one shape in this format where a single wrong number is not a wrong
-       VALUE but a wrong STRUCTURE: an index one out of range moves a whole branch, and only the author
-       knows which branch it was meant to hang from. normalizeChartData repairs the same faults so the
-       picture survives an old or hand-edited file; the validator says so, because a repaired tree is a
-       different tree and nothing on the drawing says which one you are looking at. */
-    if (d.parents !== undefined) {
-        if (!isTree || !Array.isArray(d.parents) || d.parents.length !== labelCount) {
-            bad('parents', `parents is a treemap-only array of one parent index per label (${labelCount})`);
-        }
-        else {
-            const p = d.parents;
-            let shaped = true;
-            p.forEach((n, i) => {
-                if (typeof n !== 'number' || !Number.isInteger(n) || n < -1 || n >= labelCount) {
-                    bad('parent', `parent ${i}: must be an integer in [-1, ${labelCount}) — -1 means a root`);
-                    shaped = false;
-                }
-                else if (n === i) {
-                    bad('parent', `parent ${i}: a node cannot be its own parent`);
-                    shaped = false;
-                }
-            });
-            /* ACYCLICITY, checked by WALKING UP from every node under a step budget of one hop per node.
-               A forest of n nodes has at most n-1 edges above any node, so a walk that has not reached a
-               root in n steps is inside a cycle — there is no other way to spend that many steps.
-               This is ALSO the "at least one root" rule, and it is not checked twice on purpose: every
-               entry is already in [-1, n), so a parents array with no -1 gives all n nodes an out-edge,
-               and n out-edges over n nodes always close a cycle. A separate root test could therefore
-               never fail on its own, and a condition that cannot be false is worse than no condition. */
-            if (shaped) {
-                const par = p;
-                let cyclic = -1;
-                for (let i = 0; i < labelCount && cyclic < 0; i++) {
-                    let at = par[i];
-                    for (let steps = 0; at >= 0; steps++) {
-                        if (steps >= labelCount) {
-                            cyclic = i;
-                            break;
-                        }
-                        at = par[at];
-                    }
-                }
-                if (cyclic >= 0)
-                    bad('parents', `parents must form a forest — node ${cyclic} is inside a cycle`);
-            }
-            /* AN INTERIOR NODE'S VALUE IS ITS OWN, ON EXACTLY A LEAF'S TERMS — there is no rule here, and
-               the absence is the decision.
-      
-               WHAT THIS REPLACES demanded a stored ZERO on every node with children, on the ground that a
-               branch's size was DERIVED from the leaves under it and a stored number would be a second
-               source for one figure. The premise was the defect. A parent that owned 40 and held a child
-               of 50 drew a box of 50, so a sibling of 80 looked BIGGER than a group the data said was 90 —
-               a treemap's only claim is that area is share, and it was stating a false one.
-      
-               A parent now KEEPS its own value and its box holds that value PLUS everything under it,
-               drawn as a self-cell among the children (runtime chart/treemap.ts states the picture). The
-               stored number is the OWN share, so there is still exactly one source for it, and the general
-               `>= 0` finite rule above already covers it — a second rule here could only disagree.
-      
-               A STORED ZERO IS STILL LEGAL, which is what makes every deck written under the old rule load
-               and draw exactly as it always did: no own value, no self-cell, the same picture. */
-        }
-    }
-    /* The two picture-only flags, gated to the type exactly like every flag before them, and mutually
-       exclusive on the funnel/polar precedent: `convex` rounds and insets a RECTANGLE, and a sunburst
-       has no rectangles to round. */
-    if (d.sunburst !== undefined && (typeof d.sunburst !== 'boolean' || !isTree))
-        bad('sunburst', 'sunburst is a boolean on a treemap only');
-    if (d.convex !== undefined && (typeof d.convex !== 'boolean' || !isTree))
-        bad('convex', 'convex is a boolean on a treemap only');
-    else if (d.convex === true && d.sunburst === true)
-        bad('convex', 'sunburst and convex cannot both be set');
-    /* A TREEMAP NAMES AND SIZES EVERY CELL IT HAS ROOM FOR, unconditionally — the funnel's and the
-       heatmap's precedent. There is no axis beside a cell to measure its area against, so a cell with
-       no number can only be estimated by eye, and the flag would have nothing left to switch. */
-    if (isTree && d.showValues !== undefined) {
-        bad('showValues', 'a treemap prints the name and value in every cell that fits them — showValues has no meaning');
-    }
-    /* ── 0.4.1 WAVE 5b — 27 SANKEY, the flows ────────────────────────────────────────────────────
-       `links` is REQUIRED here and rejected everywhere else. Required, because a sankey with no flows
-       is not a plainer sankey — it is a column of unconnected names, which is a list and not a
-       diagram; and every rule below rejects rather than repairs, on `parents`' precedent: a wrong
-       index in a graph is a wrong STRUCTURE, and only the author knows which node was meant.
-       normalizeChartData repairs the same faults so a hand-edited file still draws something. */
-    /* A SANKEY NAMES AND VALUES EVERY NODE IT HAS ROOM FOR, unconditionally — the funnel's, the
-       heatmap's and the treemap's precedent, now the fourth time it is reached. A node bar is a
-       throughput with no axis beside it, so a bar with no number can only be estimated against the
-       other bars, and the flag would have nothing left to switch. */
-    if (isFlow && d.showValues !== undefined) {
-        bad('showValues', 'a sankey prints each node’s name and throughput wherever there is room — showValues has no meaning');
-    }
-    if (d.links !== undefined && !isFlow) {
-        bad('links', 'links is a sankey-only array of { from, to, value } flows');
-    }
-    else if (isFlow) {
-        const raw = d.links;
-        if (!Array.isArray(raw) || raw.length < 1 || raw.length > SANKEY_MAX_LINKS) {
-            bad('links', `a sankey needs a links array of 1–${SANKEY_MAX_LINKS} { from, to, value } flows`);
-        }
-        else {
-            let shaped = true;
-            const from = [];
-            const to = [];
-            raw.forEach((l, i) => {
-                const o = (l ?? {});
-                if (l === null || typeof l !== 'object' || Array.isArray(l)) {
-                    bad('links', `link ${i}: must be an object { from, to, value }`);
-                    shaped = false;
-                    return;
-                }
-                let ok = true;
-                for (const key of ['from', 'to']) {
-                    const n = o[key];
-                    if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n >= labelCount) {
-                        bad(`links.${key}`, `link ${i}: ${key} must be an integer in [0, ${labelCount}) — an index into labels`);
-                        ok = false;
-                    }
-                }
-                // A SELF-LOOP IS NOT A SMALL CYCLE, it is a ribbon that starts and ends on the same bar and
-                // so encloses no flow at all. It is named separately from the acyclicity rule below because
-                // an author who typed one row twice needs to be told which row, not that the graph is cyclic.
-                if (ok && o.from === o.to) {
-                    bad('links.from', `link ${i}: a flow cannot start and end at the same node`);
-                    ok = false;
-                }
-                const v = o.value;
-                // > 0, NOT >= 0: a zero-value ribbon is not a thin ribbon but nothing at all, and a flow of
-                // nothing between two nodes states a connection that is not there. A negative flow would draw
-                // its ribbon backwards through the node it leaves.
-                if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) {
-                    bad('links.value', `link ${i}: value must be a finite number > 0`);
-                    ok = false;
-                }
-                if (ok) {
-                    from.push(o.from);
-                    to.push(o.to);
-                }
-                else {
-                    shaped = false;
-                }
-            });
-            if (shaped) {
-                /* ACYCLICITY BY A REAL TOPOLOGICAL SORT (Kahn), and not by the walk-up-under-a-budget the
-                   treemap uses. A tree node has exactly one parent, so there is one chain to walk; a sankey
-                   node has any number of predecessors, so there is no single chain and the walk would have
-                   to branch. Kahn instead repeatedly removes a node with no remaining incoming edge: what is
-                   left when nothing can be removed is exactly the part of the graph that is inside a cycle. */
-                const indeg = new Array(labelCount).fill(0);
-                const out = Array.from({ length: labelCount }, () => []);
-                for (let i = 0; i < from.length; i++) {
-                    out[from[i]].push(to[i]);
-                    indeg[to[i]]++;
-                }
-                const queue = [];
-                for (let i = 0; i < labelCount; i++)
-                    if (indeg[i] === 0)
-                        queue.push(i);
-                let seen = 0;
-                for (let q = 0; q < queue.length; q++) {
-                    seen++;
-                    for (const t of out[queue[q]])
-                        if (--indeg[t] === 0)
-                            queue.push(t);
-                }
-                if (seen < labelCount) {
-                    // the lowest-indexed node still carrying an incoming edge — the entry point into the ring
-                    const stuck = indeg.findIndex((n) => n > 0);
-                    bad('links', `the flows must be ACYCLIC — node ${stuck} is inside a cycle, and a cycle has no column to sit in`);
-                }
-                /* EVERY NODE IN AT LEAST ONE FLOW. A node with no edge has no throughput, so no height; no
-                   edge, so no column; and nothing on the picture at all. It is rejected rather than dropped
-                   because a silently missing name is the one fault a reader of a printed deck cannot see. */
-                const linked = new Set([...from, ...to]);
-                for (let i = 0; i < labelCount; i++) {
-                    if (!linked.has(i))
-                        bad('links', `node ${i} appears in no flow — a sankey node with no link has no place in the diagram`);
-                }
-            }
-        }
-    }
-    /* ── 0.4.1 WAVE 6 — the two NAMING flags ─────────────────────────────────────────────────────
-       `legend` is gated on what the PICTURE draws rather than on one type, which is new here and is
-       argued in full above CHART_TYPES. The four refusals are exactly the four types renderChart gives
-       an empty swatch list: a gauge names its one dial in the middle of itself, a heatmap and a hexbin
-       are decoded by the colour SCALE each draws inside its own SVG (a scale is not a series key), and
-       a sankey's palette repeats past eight nodes, so a swatch row there would claim a colour stands
-       for one name when it stands for two. On all four there is no row to suppress, and a flag that
-       switches off something never drawn is this arc's cardinal sin. */
-    if (d.legend !== undefined) {
-        if (typeof d.legend !== 'boolean')
-            bad('legend', 'legend must be a boolean');
-        else if (isGauge || isHeat || isFlow || isHex) {
-            const what = isGauge ? 'gauge' : isHeat ? 'heatmap' : isFlow ? 'sankey' : 'hexbin';
-            bad('legend', `a ${what} draws no swatch legend — legend has nothing to switch`);
-        }
-    }
-    /* `pieLabels` is an ordinary one-type flag: only a pie has slices with room inside them for a
-       name. Every other picture already prints its categories along an axis, in its own cells, or has
-       no categorical key at all. */
-    if (d.pieLabels !== undefined && (typeof d.pieLabels !== 'boolean' || d.type !== 'pie')) {
-        bad('pieLabels', 'pieLabels is a boolean on a pie chart only');
-    }
-    /* `plotHeight` is a GEOMETRY field rather than a flag, so it is bracketed rather than type-keyed:
-       it is legal on every picture (a value typed on a bar chart has to survive a trip through the
-       horizontal switch and be honoured again on the way back), and the three pictures that cannot
-       draw it — a horizontal bar, a heatmap, a sparkline — WITHHOLD the control instead of rejecting
-       the key, which is the rule the arc has kept since `yMax` on a stream graph.
-  
-       Bracketed and not clamped: a number outside [CHART_PLOT_H_MIN, CHART_PLOT_H_MAX] is not a
-       smaller mistake than a string, and silently pulling it to the nearest bound would draw a chart
-       the file does not describe. */
-    if (d.plotHeight !== undefined &&
-        (typeof d.plotHeight !== 'number' ||
-            !Number.isFinite(d.plotHeight) ||
-            d.plotHeight < CHART_PLOT_H_MIN ||
-            d.plotHeight > CHART_PLOT_H_MAX)) {
-        bad('plotHeight', `plotHeight is the plot box height in viewBox units — a number in [${CHART_PLOT_H_MIN}, ${CHART_PLOT_H_MAX}]`);
-    }
-    /* 0.4.1h CHART TEXT — three fields, legal on every picture (never type-keyed), on the same
-       withhold-the-control-keep-the-value rule plotHeight and legend already keep: the panel decides
-       per picture which of the FREE surfaces exist to colour, this schema only checks the shape. */
-    if (d.textColor !== undefined && (typeof d.textColor !== 'string' || !COLOR_RE.test(d.textColor))) {
-        bad('textColor', 'textColor must be a #hex value');
-    }
-    if (d.textFont !== undefined && d.textFont !== 'playfair' && d.textFont !== 'lora' && d.textFont !== 'inter' && d.textFont !== 'source-serif') {
-        bad('textFont', "textFont must be one of 'playfair', 'lora', 'inter', 'source-serif'");
-    }
-    if (d.textScale !== undefined &&
-        (typeof d.textScale !== 'number' || !Number.isFinite(d.textScale) || d.textScale < TEXT_SCALE_MIN || d.textScale > TEXT_SCALE_MAX)) {
-        bad('textScale', `textScale is a multiplier on the free surfaces' own size — a number in [${TEXT_SCALE_MIN}, ${TEXT_SCALE_MAX}]`);
-    }
-    // Quadrant split + corner captions (scatter only) — and NOT on a hexbin, whose lattice replaces
-    // the very point marks the split lines are there to divide.
-    if (d.quadrant !== undefined && isHex) {
-        bad('quadrant', 'a hexbin bins the whole cloud — a quadrant split has no point marks to divide');
-    }
-    else if (d.quadrant !== undefined) {
-        const q = d.quadrant;
-        if (!isXY || q === null || typeof q !== 'object' || Array.isArray(q)) {
-            bad('quadrant', 'quadrant is a scatter-only object { x, y, corners? }');
-        }
-        else {
-            if (typeof q.x !== 'number' || !Number.isFinite(q.x))
-                bad('quadrant.x', 'quadrant.x must be a finite number');
-            if (typeof q.y !== 'number' || !Number.isFinite(q.y))
-                bad('quadrant.y', 'quadrant.y must be a finite number');
-            if (q.corners !== undefined) {
-                if (!Array.isArray(q.corners) || q.corners.length > 4)
-                    bad('quadrant.corners', 'quadrant.corners must be an array of up to 4 captions');
-                else
-                    q.corners.forEach((c, i) => { if (typeof c !== 'string' || c.length > 60)
-                        bad('quadrant.corner', `quadrant corner ${i}: must be a string (max 60)`); });
-            }
-        }
-    }
-    // Optional ledger link (present → strict shape check, absent → skip). A timeseries and a scatter
-    // can't link — the range→series mapper only emits bar/line/pie (a categorical range has no second
-    // numeric axis to map x onto), so reject a link on either.
-    // A BOX PLOT joins the ban for a different reason: a ledger cell yields ONE number, and a box
-    // needs five (or a whole sample column) per category — the range→series mapper has no shape to
-    // map onto. A WATERFALL is NOT banned: labels + one signed column is exactly what the mapper
-    // already emits, and the step kinds default from the sign.
-    // A GAUGE joins the ban, and for the sharpest version of the box plot's reason: a gauge takes ONE
-    // number, while a range is a rectangle of cells that the mapper turns into labels plus a column
-    // per series. There is no range a gauge could read — and its floor and ceiling are not in the
-    // grid at all. A RADAR is NOT banned: labels plus one column per series is exactly what the mapper
-    // emits, and absent `maxes` simply means every spoke shares one ceiling.
-    // A HEATMAP is not merely allowed to link — it is the BEST fit in the suite. Every other picture
-    // collapses a range into bars or slices and throws the rectangle away; a heatmap draws the whole
-    // rectangle, one cell per ledger cell, with the header row naming the rows. `link.orient:col`
-    // transposes it, and the mapper's clamp to >= 0 costs it nothing (its own schema requires that).
-    // A TREEMAP joins the ban, on the BOX PLOT's reason rather than the gauge's: the range→series
-    // mapper emits labels plus one column per series and has no shape that says which label is INSIDE
-    // which. A linked treemap could therefore only ever be a flat forest — a bar chart in rectangles —
-    // so the door is shut rather than opened onto half the type. Lifting it needs a mapper that can
-    // read a second key column as a parent name, which is a wave of its own.
-    // A SANKEY joins the ban on the treemap's reason at its sharpest: the mapper emits labels plus one
-    // COLUMN PER SERIES, and a flow is not a column — it is a pair of node names and a magnitude, which
-    // a categorical range has no shape for. A linked sankey could only be a set of nodes with no edges,
-    // which is the one thing this type rejects outright.
-    if (d.link !== undefined) {
-        if (free || isBox || isGauge || isTree || isFlow) {
-            bad('link', `a ${isTs ? 'timeseries' : isBox ? 'box plot' : isGauge ? 'gauge' : isTree ? 'treemap' : isFlow ? 'sankey' : 'scatter'} chart cannot link to a ledger`);
-        }
-        else if (d.link === null || typeof d.link !== 'object' || Array.isArray(d.link)) {
-            bad('link', 'link must be an object { ledgerId, range, header }');
-        }
-        else {
-            const l = d.link;
-            if (typeof l.ledgerId !== 'string' || l.ledgerId.length === 0 || l.ledgerId.length > 64)
-                bad('link.ledgerId', 'link.ledgerId must be a non-empty string (max 64)');
-            if (l.tab !== undefined && (typeof l.tab !== 'string' || l.tab.length === 0 || l.tab.length > 64))
-                bad('link.tab', 'link.tab must be a non-empty string (max 64)');
-            if (typeof l.range !== 'string' || !A1_RANGE_RE.test(l.range))
-                bad('link.range', 'link.range must be an A1 range like "A1:C10"');
-            if (typeof l.header !== 'boolean')
-                bad('link.header', 'link.header must be a boolean');
-            if (l.orient !== undefined && l.orient !== 'row' && l.orient !== 'col')
-                bad('link.orient', "link.orient must be 'row' or 'col'");
-        }
-    }
+    const s = chartShape(d);
+    checkLabels(d, s, bad);
+    checkSeries(d, s, bad);
+    checkYMax(d, bad);
+    checkSliceColors(d, s, bad);
+    checkBarLayoutFields(d, s, bad);
+    checkCaptionFields(d, bad);
+    checkDisplayFlags(d, bad);
+    checkWaterfallKinds(d, s, bad);
+    checkPolarFamilyFlags(d, bad);
+    checkShapeReplacements(d, s, bad);
+    checkAxisTitles(d, s, bad);
+    checkRadarMaxes(d, s, bad);
+    checkGaugeBounds(d, s, bad);
+    checkHexbin(d, s, bad);
+    checkHeatmapShowValues(d, s, bad);
+    checkTreemapParents(d, s, bad);
+    checkTreemapFlags(d, s, bad);
+    checkSankeyLinks(d, s, bad);
+    checkLegend(d, s, bad);
+    checkPieLabels(d, bad);
+    checkPlotHeight(d, bad);
+    checkChartText(d, bad);
+    checkQuadrant(d, s, bad);
+    checkLedgerLink(d, s, bad);
     return v;
 }
 /** Serialize chart data for embedding — "<" escaped (the carrier invariant).

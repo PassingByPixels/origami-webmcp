@@ -22,6 +22,9 @@ export const DRAW_FILL_STYLES = ['none', 'hachure', 'cross', 'solid'];
 export const DRAW_STROKE_STYLES = ['solid', 'dashed', 'dotted'];
 export const DRAW_FONTS = ['playfair', 'lora', 'inter', 'source-serif', 'caveat'];
 export const DRAW_TEXT_ALIGNS = ['left', 'center', 'right'];
+/** Arrowheads an arrow may carry. Absent = "end", the shape every arrow drawn before this had, so
+    no deck changes on load. A LINE with a head is an arrow, so the field is arrow-only. */
+export const DRAW_ARROW_HEADS = ['end', 'both'];
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 const isHex = (x) => typeof x === 'string' && HEX.test(x);
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
@@ -102,6 +105,21 @@ export function validateDrawData(data) {
         }
         if (e.roughness !== undefined && ![0, 1, 2].includes(e.roughness))
             at('roughness', 'roughness must be 0, 1 or 2');
+        // heads and smoothing each belong to ONE element type, like attach below and text/fontSize
+        // above — a head on a rect or a smoothing on a text is confused data, so it is rejected
+        if (e.heads !== undefined) {
+            if (e.type !== 'arrow')
+                at('heads', 'heads is only valid on arrow elements');
+            else if (!DRAW_ARROW_HEADS.includes(e.heads)) {
+                at('heads', `heads must be one of ${DRAW_ARROW_HEADS.join('|')}`);
+            }
+        }
+        if (e.smoothing !== undefined) {
+            if (e.type !== 'freedraw')
+                at('smoothing', 'smoothing is only valid on freedraw elements');
+            else if (![0, 1, 2].includes(e.smoothing))
+                at('smoothing', 'smoothing must be 0, 1 or 2');
+        }
         if (e.opacity !== undefined && !inRange(e.opacity, 0, 100))
             at('opacity', 'opacity must be 0-100');
         const seed = e.seed;
