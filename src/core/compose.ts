@@ -20,11 +20,18 @@
         card — eyebrow + h2 + one chart — FITS a 1280x720 screen instead of overflowing it. The
         chart schema's own default (318) does not; the number below was measured, not guessed
         (tests/e2e/app.spec.ts asserts fits:true on the real render).
-     2. A stat card's number is only wrapped in data-count-to when it is a plain integer. The
-        runtime's count-up does parseInt(attr) and writes String(Math.round(...)) into the
-        element every frame, so "2.1%" would animate as "2" and "€48k" as "0"; both land right
-        only at finalize. A decorated value is written as literal text instead, which renders
-        correctly at every frame AND stays inline-editable (the editor skips [data-count-to]). */
+     2. A stat card's number is wrapped in data-count-to whenever it holds at least one digit.
+        The vendored runtime (vendor/runtime-dist/index.js) parses the value with a regex that
+        finds the numeric core and keeps whatever sits before/after it as a literal prefix/suffix
+        (decimals and thousands grouping read off the matched digits too), so "€48k" counts up
+        as "€0k" .. "€48k" and "2.1%" as "0.0%" .. "2.1%" — MEASURED through the real render
+        (tools/agent-bridge.mjs, 2026-09-02): a mid-animation frame read "€26k"/"667"/"1.1%" for
+        target values "€48k"/"1,240"/"2.1%", and the settled frame was byte-exact to all three.
+        A value with NO digit at all (a plain label used as a "value") is passed through as
+        literal text unanimated, which the parse falls back to safely. The trade a decorated
+        value now makes is the same one an integer stat always made: [data-count-to] elements
+        are skipped by the inline editor, so the number is edited with set_block, not by clicking
+        the rendered text. */
 
 import { escText, blockFigure, validatorFor } from './block-tools.js';
 import { fillDiagramDefaults } from './data-blocks.js';
@@ -82,8 +89,8 @@ export function chartPlotHeight(blocks: unknown[]): number {
   return Math.max(MIN_PLOT_HEIGHT, COMPOSED_PLOT_HEIGHT - prose * PROSE_COST);
 }
 
-/** A plain integer is the only value the runtime's count-up animates correctly. */
-const INTEGER = /^-?\d+$/;
+/** Any value the runtime's count-up can find a number inside of — see the header comment. */
+const HAS_DIGIT = /\d/;
 
 export interface ComposedBlock {
   kind: string;
@@ -102,7 +109,7 @@ export type ComposeResult = { error: string; extra?: Record<string, unknown> } |
 
 const statCard = (value: unknown, label: unknown): string => {
   const v = String(value ?? '').trim();
-  const big = INTEGER.test(v)
+  const big = HAS_DIGIT.test(v)
     ? `<div class="big" data-count-to="${escText(v)}">0</div>`
     : `<div class="big">${escText(v)}</div>`;
   return `<div class="stat-card">${big}<div class="lbl">${escText(String(label ?? ''))}</div></div>`;

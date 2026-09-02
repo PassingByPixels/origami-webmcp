@@ -304,13 +304,12 @@ test('inspect_render measures a REAL layout and names two real defects', async (
 });
 
 test('inspect_render is viewport-dependent, and says which viewport it used', async ({ page }) => {
-  /* MEASURED, and it corrects the brief this work started from. The claim under test was that a
-     flow-KIND fold's figure "starts ~26px with a 100px masthead" and so loses its top behind the
-     bar. The figure BOX does sit high — its top edge measured 42px under a 100px header — but the
-     figure's top is empty padding: the topmost element that actually PAINTS measured 121-253px
-     across every viewport height from 240 to 720, always below the bar. So no ink is hidden, and
-     inspect_render correctly declines to warn. What is real is that geometry moves a lot with the
-     screen, which is why the viewport is a parameter and is named in every result. */
+  /* MEASURED. This fold is a plain free-kind card (a heading plus body copy), and at these
+     sizes it never paints above the masthead, so inspect_render correctly declines to warn.
+     A BARE flow/graph-kind fold is a separate, now-real case — see
+     knownIssues.flowKindMastheadClip in origami_guide, re-measured after the 2026-09-02 runtime
+     refresh. What is real here is that geometry moves a lot with the screen, which is why the
+     viewport is a parameter and is named in every result. */
   await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Viewport', discard: true });
   await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
@@ -512,10 +511,10 @@ test('a fold composed by add_fold FITS a 1280x720 screen — measured, not asser
      default (318) puts it 22px past 720, which is exactly what a cold agent hit in trial; the
      composer's default was measured against this test, not chosen.
 
-     The diagram case is here too, and it FAILS the same bar on purpose. A flow figure is drawn
-     on the runtime's fixed 1200x660 viewBox, so at 1280 wide it alone is ~640px and nothing the
-     composer does shrinks it. The number is printed rather than hidden, and add_fold hands the
-     same fact back in layoutWarning. */
+     The diagram case is here too, and — since the 2026-09-02 runtime refresh — it now PASSES
+     the same bar instead of failing it on purpose. The runtime's flow layout sizes its viewBox
+     to content instead of a fixed 1200x660, so a small flow composed on its own fold fits
+     alongside the chart and the ledger. add_fold no longer hands back a layoutWarning for it. */
   await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Composed fit', discard: true });
 
@@ -541,7 +540,7 @@ test('a fold composed by add_fold FITS a 1280x720 screen — measured, not asser
     eyebrow: 'Process',
     blocks: [{ flow: { nodes: [{ id: 'draft', label: 'Draft', shape: 'pill', tone: 'accent' }, { id: 'review', label: 'Review', shape: 'diamond', tone: 'amber' }, { id: 'ship', label: 'Ship', shape: 'pill', tone: 'green' }], edges: [{ from: 'draft', to: 'review', label: '' }, { from: 'review', to: 'ship', label: 'yes' }] }, caption: 'Three steps' }],
   });
-  expect(flow.body.layoutWarning, 'the diagram trap is handed back, not hidden').toMatch(/1200x660/);
+  expect(flow.body.layoutWarning, 'the diagram trap is gone — the runtime sizes to content now').toBeUndefined();
 
   const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
   expect(res.body.measured).toBe(true);
@@ -552,12 +551,13 @@ test('a fold composed by add_fold FITS a 1280x720 screen — measured, not asser
   expect(fold(ledger.body.chunkId).fits, `ledger fold measured ${fold(ledger.body.chunkId).contentHeight}px`).toBe(true);
   expect(fold(ledger.body.chunkId).rendersAnything).toBe(true);
 
-  // the diagram fold is reported as it really is
+  // the diagram fold FITS too, now that the runtime sizes the flow's viewBox to content
   const flowGeo = fold(flow.body.chunkId);
   console.log(
     `  add_fold @1280x720: chart fits=${fold(chart.body.chunkId).fits}, ledger fits=${fold(ledger.body.chunkId).fits}, ` +
-      `flow fits=${flowGeo.fits} (content ${flowGeo.contentHeight}px vs 720px — runtime viewBox, out of the composer's reach)`
+      `flow fits=${flowGeo.fits} (content ${flowGeo.contentHeight}px vs 720px — content-fit viewBox)`
   );
+  expect(flowGeo.fits, `flow fold measured ${flowGeo.contentHeight}px`).toBe(true);
   expect(flowGeo.rendersAnything).toBe(true);
 
   // every fold the composer built carries a real label, so the tabs read as words

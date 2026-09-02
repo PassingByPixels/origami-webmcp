@@ -46,14 +46,11 @@ export function withCurrency(columns: unknown, currency: unknown): unknown {
 export function buildComposeTools(deps: ToolDeps): ToolDef[] {
   const { deck } = deps;
 
-  /* MEASURED at 1280x720 through the real render (tools/agent-bridge.mjs, 2026-09-02): a card
-     holding an eyebrow, a heading and ONE flow figure comes out 875px tall against 720px of
-     screen. The cause is the runtime's own diagram viewBox, which is a fixed 1200x660 — at a
-     1160px content width that figure alone is ~640px, and no composer choice shrinks it. It is
-     not this tool's to fix, and an agent cannot see it, so the fact is handed back instead of
-     hidden. inspect_render still has the real number for the deck actually built. */
-  const DIAGRAM_WARNING =
-    'a flow/graph figure is drawn on a FIXED 1200x660 viewBox, so at 1280px wide it alone is about 640px tall — this card measured 875px against a 720px screen in testing. Keep the diagram alone on its fold, keep the heading short, and confirm with inspect_render.';
+  /* MEASURED at 1280x720 through the real render (tools/agent-bridge.mjs, 2026-09-02): the
+     runtime's diagram layout now sizes its viewBox to content (a one-row flow measured well
+     under half the old fixed 660), so a composed flow/graph card fits alongside everything
+     else the composer builds. There is no longer a diagram-specific trap to hand back here —
+     inspect_render is the arbiter for any fold, this kind included. */
 
   /** Both tools answer the same way: what landed, and how to address what is on it. */
   const added = (out: { id: string; index: number; inner: string; grants: string[] }, label: string, blocks: Array<{ kind: string; nth: number }>) =>
@@ -64,7 +61,6 @@ export function buildComposeTools(deps: ToolDeps): ToolDef[] {
       blocks,
       capabilitiesGranted: out.grants,
       activeContent: activeContentFlags(out.inner).map((v) => v.rule),
-      ...(blocks.some((b) => b.kind === 'flow' || b.kind === 'graph') ? { layoutWarning: DIAGRAM_WARNING } : {}),
       note: 'added to the open Fold as ONE fold and re-rendered — not yet on disk (the human saves). Edit any block above with set_block({chunkId, kind, nth, data}); check the layout with inspect_render.',
     });
 

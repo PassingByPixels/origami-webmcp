@@ -787,11 +787,11 @@ describe('the kind catalog steers, and knownIssues is measured', () => {
   it('knownIssues records what was MEASURED, not what was reported', async () => {
     const guide = await harness().json('origami_guide');
     const clip = guide.knownIssues.flowKindMastheadClip;
-    // the number that was actually observed, and the correction to the original claim
-    expect(clip).toMatch(/measured at 42px/);
-    expect(clip).toMatch(/121px to 253px/);
-    expect(clip).toMatch(/no rendered content is hidden/);
-    // and it does not tell an agent to work around a defect that is not there
+    // the numbers actually observed after the 2026-09-02 runtime refresh changed them
+    expect(clip).toMatch(/90-97px/);
+    expect(clip).toMatch(/116-185px/);
+    expect(clip).toMatch(/wrap a flow\/graph figure in a free card/);
+    // and it does not tell an agent to work around it any other way
     expect(clip).not.toMatch(/avoid the flow kind|do not use/i);
 
     // the empty-data-block trap is FIXED, so the entry states the new behaviour: the gate
@@ -2086,7 +2086,7 @@ describe('origami_guide by topic', () => {
 
     // everything else is still there in full
     expect(Object.keys(guide.kinds).sort()).toEqual(Object.keys(KINDS).sort());
-    expect(guide.knownIssues.flowKindMastheadClip).toMatch(/measured at 42px/);
+    expect(guide.knownIssues.flowKindMastheadClip).toMatch(/90-97px/);
     expect(guide.editProtocol.length).toBeGreaterThan(4);
     expect(guide.topics.howToUse).toMatch(/origami_guide\(\{ topic \}\)/);
   });
@@ -2610,24 +2610,25 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
     expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(420);
   });
 
-  it('animates a stat card only when the number is one the runtime can count', async () => {
-    /* The runtime's count-up is parseInt(attr) + String(Math.round(v*t)) written into the
-       element every frame, so data-count-to="2.1%" animates as "2" and "€48k" as "0"; both are
-       only right at finalize. A decorated value is written as literal text instead — correct at
-       every frame, and inline-editable, because the editor skips [data-count-to]. */
+  it('animates a stat card whenever the value holds a digit, decorated or not', async () => {
+    /* MEASURED through the real render (tools/agent-bridge.mjs, 2026-09-02): the vendored
+       runtime's count-up now finds the numeric core of a decorated value with a regex, keeps
+       the prefix/suffix around it, and lands the settled frame byte-exact to the attribute —
+       "€48k" and "2.1%" animate correctly the same way "48" always did. Only a value with no
+       digit at all (a plain label, not a countable number) stays literal text. */
     const h = harness();
     await h.json('create_deck', { title: 'Stats' });
     const res = await h.json('add_fold', {
       title: 'Numbers',
-      blocks: [{ stats: [{ value: '48', label: 'Decks' }, { value: '2.1%', label: 'Churn' }, { value: '€48k', label: 'MRR' }] }],
+      blocks: [{ stats: [{ value: '48', label: 'Decks' }, { value: '2.1%', label: 'Churn' }, { value: '€48k', label: 'MRR' }, { value: 'n/a', label: 'Target' }] }],
     });
     const inner = innerOf(h, res.chunkId);
     expect(inner).toContain('<div class="big" data-count-to="48">0</div>');
-    expect(inner).toContain('<div class="big">2.1%</div>');
-    expect(inner).toContain('<div class="big">€48k</div>');
-    expect(inner).not.toContain('data-count-to="2.1%"');
-    expect(inner).not.toContain('data-count-to="€48k"');
-    expect(inner).toContain('data-ocols="3"');
+    expect(inner).toContain('<div class="big" data-count-to="2.1%">0</div>');
+    expect(inner).toContain('<div class="big" data-count-to="€48k">0</div>');
+    expect(inner).toContain('<div class="big">n/a</div>');
+    expect(inner).not.toContain('data-count-to="n/a"');
+    expect(inner).toContain('data-ocols="4"');
   });
 
   it('lays two columns out with the attribute the runtime CSS actually targets', async () => {
@@ -2680,16 +2681,20 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
     expect((after.blocks[2].data as any).labels).toEqual(['Z1', 'Z2']);
   });
 
-  it('warns about the diagram viewBox, which is the one overflow the composer cannot size away', async () => {
+  it('add_fold carries no diagram layoutWarning — the runtime now sizes flow/graph to content', async () => {
+    /* Before the 2026-09-02 runtime refresh the diagram viewBox was fixed at 1200x660, so a
+       flow/graph block alone overflowed 720px and add_fold handed the fact back as
+       layoutWarning. The refreshed runtime sizes the viewBox to content instead (a one-row
+       flow measures well under half the old height — tests/unit/flow-fit.test.ts), so there is
+       no longer a diagram-specific trap to warn about; inspect_render is the arbiter for any
+       fold, this kind included. */
     const h = harness();
     await h.json('create_deck', { title: 'Diagram' });
     const flow = await h.json('add_fold', {
       title: 'How a fold ships',
       blocks: [{ flow: { nodes: [{ id: 'a', label: 'Draft', shape: 'pill', tone: 'accent' }, { id: 'b', label: 'Ship', shape: 'pill', tone: 'green' }], edges: [{ from: 'a', to: 'b', label: '' }] } }],
     });
-    expect(flow.layoutWarning).toMatch(/1200x660/);
-    expect(flow.layoutWarning).toMatch(/inspect_render/);
-    // and it is not attached to folds that do not have the problem
+    expect(flow.layoutWarning).toBeUndefined();
     expect((await h.json('add_fold', { title: 'Chart', blocks: [{ chart: CHART }] })).layoutWarning).toBeUndefined();
   });
 
