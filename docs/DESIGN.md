@@ -45,9 +45,18 @@ The old 34px status bar row is gone. Its tenants move:
 - Left: crane mark 26px · "Origami" (serif 20px) · "FOLIO WEB" small-caps tag (the tag is
   one string — swap when the product name lands).
 - Center: deck title only (serif 15px, ink-soft, ellipsis). No filename here.
-- Right: status dot · `New` · `Open…` · `Save` (primary, with a chevron menu).
+- Right: status dot · **Theme** · `New` · `Open…` · `Save` (primary, with a chevron menu).
+  - **Theme**: a small dot in the deck's own `accent` token, plus the matching theme's label
+    ("Paper", "Boardroom", …, a saved theme's own name, or "Custom" when the tokens on the deck
+    match none of them). Disabled with no Fold open. Click → the popover primitive lists every
+    preset and saved theme (a 3-swatch strip, the label, a `saved` tag, the current one marked);
+    a row applies it, a saved row's quiet Delete forgets it. Both go through the registry as a
+    `human` call — the same list_themes / apply_theme / delete_theme an agent has — so the rail
+    narrates it and apply_theme's Undo works the normal way. `/folio/` only: a mini page's
+    registry never gets the theme tools (mode-registry.ts), so there is nothing here to show.
   - **Status dot**: 8px circle. Green = agent access on (popover: "Agent access is on —
-    29 tools registered. An agent in this browser can author this Fold."), grey = off
+    N tools registered. An agent in this browser can author this Fold." — N is THIS page's
+    registry, never a constant: a mini tool page registers a different set), grey = off
     (popover: what WebMCP is in one line + how to enable: `chrome://flags/#enable-webmcp-testing`
     or `--enable-features=WebMCP`, then reload), amber = partial (some tools refused).
   - **Save menu** (chevron on the Save button): filename + save-state line ("Unsaved
@@ -127,7 +136,7 @@ Centered column, max-width 560px:
 
 - Visible label: **"Tool console"** (testids unchanged).
 - Collapsed by default.
-- The flat 24→29 tool list gains small-caps group headers: **Learn** (origami_guide,
+- The flat tool list gains small-caps group headers: **Learn** (origami_guide,
   get_kind_schema, list_starters, list_block_defs, list_chunks, read_chunk,
   inspect_render, list_proposals, list_activity) · **Author** (create_deck, add_chunk,
   add_custom_fold, write_chunk, move_chunk, set_chunk_meta, delete_chunk, define_block,

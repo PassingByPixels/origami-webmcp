@@ -561,11 +561,19 @@ describe('a Fold the human opened, rather than the one the page minted', () => {
   });
 
   it('refuses a block whose JSON has been corrupted, instead of throwing something opaque', async () => {
+    /* The corruption is put in through the FILE, not through a tool: every write path now runs
+       the data gate, so write_chunk refuses to lay down unparseable JSON (asserted below). A
+       Fold the human opened is the only way this state still arises — and it does arise, so the
+       block reader still has to answer it with a sentence rather than a stack trace. */
     const h = await miniHarness(GANTT_MODE);
     const chunkId = h.deck.model().order[0]!;
     const broken = h.deck.model().slides.get(chunkId)!.inner.replace('"totalWeeks": 16,', '"totalWeeks": ,');
-    await h.json('write_chunk', { chunkId, html: broken });
 
+    const refused = await h.call('write_chunk', { chunkId, html: broken });
+    expect(refused.isError, 'the gate refuses the corruption at write time').toBe(true);
+    expect(JSON.parse(refused.content[0]!.text).violations.map((v: any) => v.rule)).toContain('kind-data.json');
+
+    h.deck.open(h.deck.serialize().replace('"totalWeeks": 16,', '"totalWeeks": ,'), 'hand-edited.origami.html');
     const res = await h.call('get_roadmap');
     expect(res.isError).toBe(true);
     expect(JSON.parse(res.content[0]!.text).error).toMatch(/not valid JSON/);

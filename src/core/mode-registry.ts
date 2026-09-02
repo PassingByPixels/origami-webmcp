@@ -7,7 +7,10 @@
    would report the wrong count in its own status line and nobody would know why. */
 
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
-import { buildBlockTools } from './block-tools.js';
+import { buildBlockTools, buildFolioBlockTools } from './block-tools.js';
+import { buildComposeTools } from './compose-tools.js';
+import { buildBatchTool } from './batch-tool.js';
+import { buildThemeTools } from './theme-tools.js';
 import type { DeckStore } from './deck-store.js';
 import { pageGuideTool } from './mode-guide.js';
 import type { ToolMode } from './modes.js';
@@ -22,6 +25,15 @@ export function createModeRegistry(deps: ToolDeps, mode: ToolMode): ToolRegistry
 
   if (!mode.tools) {
     for (const t of all) registry.register(t);
+    // /folio/ also gets the typed block writers, addressed by chunk, and the one-call fold
+    // composer. A mini page gets neither: it edits exactly one block on one fold, so its own
+    // writers need no address and there is no second fold to compose.
+    for (const t of buildFolioBlockTools(d)) registry.register(t);
+    for (const t of buildComposeTools(d)) registry.register(t);
+    for (const t of buildThemeTools(d)) registry.register(t);
+    // LAST: run_batch drives the registry it lives in, and it checks every call's tool name
+    // before running anything - so every other tool has to be registered before it is.
+    registry.register(buildBatchTool(registry));
     return registry;
   }
 

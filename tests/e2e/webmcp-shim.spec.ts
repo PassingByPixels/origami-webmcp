@@ -36,7 +36,7 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
   await installFakeHost(page, ['document']);
   await page.goto('/folio/index.html');
 
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 29 tools');
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 38 tools');
 
   const defs = await page.evaluate(() =>
     (window as any).__mcp.registered.map((d: any) => ({
@@ -47,7 +47,7 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
       annotations: d.annotations,
     }))
   );
-  expect(defs).toHaveLength(29);
+  expect(defs).toHaveLength(38);
   const names = defs.map((d: any) => d.name);
   // the whole loop is reachable from the host — propose, review, resolve, save
   expect(names).toEqual(
@@ -66,23 +66,23 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
   expect(byName.delete_chunk).toEqual({ destructiveHint: true });
   expect(byName.create_deck).toEqual({ destructiveHint: true });
   expect(byName.write_chunk, 'an unannotated tool must send no annotations key at all').toBeUndefined();
-  expect(defs.filter((d: any) => d.annotations?.readOnlyHint)).toHaveLength(10);
-  expect(defs.filter((d: any) => d.annotations?.destructiveHint)).toHaveLength(3);
+  expect(defs.filter((d: any) => d.annotations?.readOnlyHint)).toHaveLength(12);
+  expect(defs.filter((d: any) => d.annotations?.destructiveHint)).toHaveLength(4);
 });
 
 test('falls back to navigator.modelContext when document has none', async ({ page }) => {
   await installFakeHost(page, ['navigator']);
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 29 tools');
-  expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(29);
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 38 tools');
+  expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(38);
 });
 
 test('prefers document.modelContext when BOTH surfaces exist', async ({ page }) => {
   await installFakeHost(page, ['document', 'navigator']);
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 29 tools');
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 38 tools');
   // registered once, on the spec surface only — never double-registered across both
-  expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(29);
+  expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(38);
   expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(0);
 });
 

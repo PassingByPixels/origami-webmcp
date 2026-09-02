@@ -236,7 +236,7 @@ function buildInsert(
     else if (kind === 'table') inner = TABLE_STARTER_INNER;
     else return { error: `no built-in starter for kind "${kind}" — call get_kind_schema("${kind}") and supply html (or use block + fields for a composite)` };
   }
-  if (slideKind === 'table') inner = bakeTableInner(inner, Date.now());
+  inner = bakeTableInner(inner, Date.now());
   const violations = validateSlideContent(inner);
   if (violations.length > 0) return { error: 'the slide would break the deck structure', extra: { violations } };
   const id = 's' + randomBytes(4).toString('hex');
@@ -485,8 +485,9 @@ export function buildServer(
           if (violations.length > 0) {
             refuse('the edit would break the deck structure — nothing was applied', { violations });
           }
-          // bake-at-write: a table chunk's formulas -> values (within-block; structure unchanged)
-          const inner = slide!.kind === 'table' ? bakeTableInner(reply.inner, Date.now()) : reply.inner;
+          // bake-at-write: every table block's formulas -> values (within-block; structure unchanged).
+          // Kind-blind on purpose: a ledger is usually a FREE card holding a table figure.
+          const inner = bakeTableInner(reply.inner, Date.now());
 
           const caps = videoCapsNeeded(inner).filter((c) => !m.capabilities.includes(c));
           const op: Op =
@@ -851,7 +852,7 @@ export function buildServer(
         if (violations.length > 0) {
           return fail('the edit would break the deck structure — not staged', { violations });
         }
-        const inner = slide.kind === 'table' ? bakeTableInner(reply.inner, Date.now()) : reply.inner;
+        const inner = bakeTableInner(reply.inner, Date.now());
         const id = 'p' + randomBytes(4).toString('hex');
         const proposals = await loadProposals(key);
         proposals.push({

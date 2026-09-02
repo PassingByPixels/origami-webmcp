@@ -209,6 +209,47 @@ button.danger:hover:not(:disabled) { background: var(--warn-soft); border-color:
 .savemenu button { display: block; width: 100%; text-align: left; border-color: transparent; margin-top: 3px; }
 .savemenu button:hover:not(:disabled) { background: var(--accent-soft); border-color: #CFD9CB; }
 
+/* ---------- theme button ---------- */
+
+/* Same rhythm as New / Open — border, radius, padding, height — plus the one thing those don't
+   carry: a dot in the deck's OWN colour. The colour is the Fold's, not the shell's, so it can
+   only ever be set inline (see theme-control.ts); the shell still contributes nothing to the
+   palette, it just frames one. */
+.themebtn { display: inline-flex; align-items: center; gap: 7px; }
+.themebtn .swatch {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.thememenu { width: 264px; padding: 8px; max-height: 340px; overflow-y: auto; }
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.theme-row:hover, .theme-row:focus-visible { background: var(--bg); }
+.theme-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.theme-row[aria-current="true"] { background: var(--accent-soft); }
+.theme-swatches { display: flex; flex: none; }
+.theme-swatches i {
+  display: block;
+  width: 11px;
+  height: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  margin-left: -4px;
+}
+.theme-swatches i:first-child { margin-left: 0; border-radius: 3px 0 0 3px; }
+.theme-swatches i:last-child { border-radius: 0 3px 3px 0; }
+.theme-row-label { flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-tag { flex: none; }
+.theme-row-del { flex: none; font-size: 11px; padding: 2px 8px; }
+
 /* ---------- toasts ---------- */
 
 .toasts {

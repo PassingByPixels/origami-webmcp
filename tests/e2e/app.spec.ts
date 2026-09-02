@@ -28,6 +28,9 @@ async function invoke(page: Page, tool: string, args: unknown): Promise<any> {
 
 const preview = (page: Page) => page.frameLocator('[data-testid="preview"]').locator('body');
 
+/** The bytes the preview is rendering right now — the deck as it stands, without a tool call. */
+const deckTextNow = async (page: Page): Promise<string> => (await page.getByTestId('preview').getAttribute('srcdoc')) ?? '';
+
 async function openSample(page: Page) {
   await page.goto('/folio/index.html');
   await expect(page.getByTestId('empty-state')).toBeVisible();
@@ -47,10 +50,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('29');
+  await expect(page.getByTestId('tool-count')).toHaveText('38');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('29 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('38 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);
@@ -219,10 +222,11 @@ test('inspect_render measures a REAL layout and names two real defects', async (
      are real: a deck is built with two defects that genuinely render wrong, and inspect_render
      has to find both by laying the actual Fold out in an actual browser.
 
-     Defect 2 is the one a validator cannot help with in time. An empty flow data block
-     (nodes: []) passes the content policy and add_chunk accepts it, so the agent gets an "ok"
-     and a fold that draws NOTHING. save_deck does eventually refuse it — asserted below — but
-     only at the very end, with a schema violation rather than "this fold is blank". */
+     Defect 2 is the one no VALIDATOR can catch: a fold whose markup is perfectly legal and
+     whose data blocks all pass their schemas, and which still paints nothing — here an empty
+     .slide-inner. (The other route to a blank fold, an empty data block, is now refused at
+     write time by the data gate; that refusal is asserted below and in tests/unit/tools.test.ts.
+     Layout, not schema, is what is left, and only a real render can see it.) */
   await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Inspect Me', discard: true });
   await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
@@ -230,12 +234,18 @@ test('inspect_render measures a REAL layout and names two real defects', async (
   const dataBlock = (kind: string, data: unknown) =>
     `<script type="application/json" data-odata="${kind}">${JSON.stringify(data).replace(/</g, '\u003c')}</script>`;
 
-  const blank = await invoke(page, 'add_chunk', {
+  // an empty data block is REFUSED now — same verdict, same rule, at authoring time
+  const refused = await invoke(page, 'add_chunk', {
     kind: 'flow',
     label: 'Blank flow',
     html: `<figure class="o-flowfig anim">${dataBlock('flow', { nodes: [], edges: [] })}<div class="o-flow" data-flow-mount></div></figure>`,
   });
-  expect(blank.state, 'an empty data block is ACCEPTED — that is the point').toContain('ok');
+  expect(refused.state).toContain('error');
+  expect(JSON.stringify(refused.body.violations)).toContain('flow.nodes.count');
+
+  // what a validator still cannot see: legal markup that paints nothing
+  const blank = await invoke(page, 'add_chunk', { kind: 'free', label: 'Blank card', html: '<div class="slide-inner"></div>' });
+  expect(blank.state, 'an empty card is legal markup — that is the point').toContain('ok');
 
   const tall = await invoke(page, 'add_chunk', {
     kind: 'free',
@@ -283,23 +293,23 @@ test('inspect_render measures a REAL layout and names two real defects', async (
       `blank flow paints nothing; overflowing fold contentHeight=${tallGeo.contentHeight}px`
   );
 
-  // save_deck refuses the same deck, but only at the end and only as a schema violation
+  // and this deck SAVES: every data block passes its schema. A blank fold is a layout defect,
+  // which is why inspect_render is the only thing that reports it.
   const saved = await invoke(page, 'save_deck', {});
-  expect(saved.state).toContain('error');
-  expect(JSON.stringify(saved.body.violations)).toContain('flow.nodes.count');
+  expect(saved.state).toContain('ok');
+  expect(saved.body.validated).toBe(true);
 
   // and the measuring frame cleaned itself up — it must never linger next to the preview
   await expect(page.locator('[data-testid="measure-frame"]')).toHaveCount(0);
 });
 
 test('inspect_render is viewport-dependent, and says which viewport it used', async ({ page }) => {
-  /* MEASURED, and it corrects the brief this work started from. The claim under test was that a
-     flow-KIND fold's figure "starts ~26px with a 100px masthead" and so loses its top behind the
-     bar. The figure BOX does sit high — its top edge measured 42px under a 100px header — but the
-     figure's top is empty padding: the topmost element that actually PAINTS measured 121-253px
-     across every viewport height from 240 to 720, always below the bar. So no ink is hidden, and
-     inspect_render correctly declines to warn. What is real is that geometry moves a lot with the
-     screen, which is why the viewport is a parameter and is named in every result. */
+  /* MEASURED. This fold is a plain free-kind card (a heading plus body copy), and at these
+     sizes it never paints above the masthead, so inspect_render correctly declines to warn.
+     A BARE flow/graph-kind fold is a separate, now-real case — see
+     knownIssues.flowKindMastheadClip in origami_guide, re-measured after the 2026-09-02 runtime
+     refresh. What is real here is that geometry moves a lot with the screen, which is why the
+     viewport is a parameter and is named in every result. */
   await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Viewport', discard: true });
   await invoke(page, 'set_header', { subtitle: 'A masthead subtitle line', chips: ['Chip one', 'Chip two', 'Q3 2026'] });
@@ -345,12 +355,16 @@ test('inspect_render reports a clean deck as clean, and never touches the previe
 
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
   await page.goto('/folio/index.html');
-  const created = await invoke(page, 'create_deck', { title: 'Playwright Deck' });
+  const created = await invoke(page, 'create_deck', { title: 'Playwright Deck', subtitle: 'A real cover line' });
   expect(created.state).toContain('ok');
   expect(created.body.title).toBe('Playwright Deck');
   await expect(page.getByTestId('deck-name')).toHaveText('Playwright Deck');
   await expect(page.getByTestId('save-file')).toHaveText('playwright-deck.origami.html');
-  await expect(preview(page)).toContainText('New fold');
+  // the first fold is a real COVER carrying the deck's own title, not a placeholder to overwrite
+  expect(created.body.chunks[0].kind).toBe('cover');
+  await expect(preview(page)).toContainText('Playwright Deck');
+  await expect(preview(page)).toContainText('A real cover line');
+  await expect(preview(page)).not.toContainText('New fold');
 
   const marker = `Second fold ${Date.now()}`;
   const added = await invoke(page, 'add_chunk', {
@@ -489,4 +503,147 @@ test('save_deck banks the Fold in browser storage, and the human can get it back
   expect(Buffer.byteLength(text, 'utf8')).toBe(saved.body.bytes);
   expect(text).toContain('data-odata="flow"');
   expect(text).toContain('id="origami-manifest"');
+});
+
+test('a fold composed by add_fold FITS a 1280x720 screen — measured, not asserted from a model', async ({ page }) => {
+  /* The composer's one visual promise: the reference card — an eyebrow, a heading and ONE
+     chart — has to be inside the screen it is read on. The chart schema's own plotHeight
+     default (318) puts it 22px past 720, which is exactly what a cold agent hit in trial; the
+     composer's default was measured against this test, not chosen.
+
+     The diagram case is here too, and — since the 2026-09-02 runtime refresh — it now PASSES
+     the same bar instead of failing it on purpose. The runtime's flow layout sizes its viewBox
+     to content instead of a fixed 1200x660, so a small flow composed on its own fold fits
+     alongside the chart and the ledger. add_fold no longer hands back a layoutWarning for it. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Composed fit', discard: true });
+
+  const chart = await invoke(page, 'add_fold', {
+    title: 'Revenue by quarter',
+    eyebrow: 'Q3 review',
+    blocks: [{ chart: { type: 'bar', labels: ['Q1', 'Q2', 'Q3', 'Q4'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19, 15, 24] }], yMax: null }, caption: 'Revenue by quarter, EUR m' }],
+  });
+  expect(chart.state).toContain('ok');
+
+  const ledger = await invoke(page, 'add_ledger', {
+    title: 'Q3 budget',
+    eyebrow: 'Ledger',
+    columns: [{ label: 'Line' }, { label: 'Plan', align: 'right' }, { label: 'Actual', align: 'right' }, { label: 'Delta', align: 'right' }],
+    rows: [['Engineering', '120000', '118400', ''], ['Design', '42000', '39800', ''], ['Marketing', '55000', '61200', ''], ['Ops', '28000', '27100', ''], ['Total', '', '', '']],
+    formulas: { D1: '=B1-C1', D2: '=B2-C2', D3: '=B3-C3', D4: '=B4-C4', B5: '=SUM(B1:B4)', C5: '=SUM(C1:C4)', D5: '=SUM(D1:D4)' },
+    caption: 'Plan against actual, EUR',
+  });
+  expect(ledger.state).toContain('ok');
+
+  const flow = await invoke(page, 'add_fold', {
+    title: 'How a fold ships',
+    eyebrow: 'Process',
+    blocks: [{ flow: { nodes: [{ id: 'draft', label: 'Draft', shape: 'pill', tone: 'accent' }, { id: 'review', label: 'Review', shape: 'diamond', tone: 'amber' }, { id: 'ship', label: 'Ship', shape: 'pill', tone: 'green' }], edges: [{ from: 'draft', to: 'review', label: '' }, { from: 'review', to: 'ship', label: 'yes' }] }, caption: 'Three steps' }],
+  });
+  expect(flow.body.layoutWarning, 'the diagram trap is gone — the runtime sizes to content now').toBeUndefined();
+
+  const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
+  expect(res.body.measured).toBe(true);
+  const fold = (id: string) => res.body.folds.find((f: any) => f.id === id);
+
+  expect(fold(chart.body.chunkId).fits, `chart fold measured ${fold(chart.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(chart.body.chunkId).rendersAnything).toBe(true);
+  expect(fold(ledger.body.chunkId).fits, `ledger fold measured ${fold(ledger.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(ledger.body.chunkId).rendersAnything).toBe(true);
+
+  // the diagram fold FITS too, now that the runtime sizes the flow's viewBox to content
+  const flowGeo = fold(flow.body.chunkId);
+  console.log(
+    `  add_fold @1280x720: chart fits=${fold(chart.body.chunkId).fits}, ledger fits=${fold(ledger.body.chunkId).fits}, ` +
+      `flow fits=${flowGeo.fits} (content ${flowGeo.contentHeight}px vs 720px — content-fit viewBox)`
+  );
+  expect(flowGeo.fits, `flow fold measured ${flowGeo.contentHeight}px`).toBe(true);
+  expect(flowGeo.rendersAnything).toBe(true);
+
+  // every fold the composer built carries a real label, so the tabs read as words
+  const chunks = await invoke(page, 'list_chunks', {});
+  expect(chunks.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'Revenue by quarter', 'Q3 budget', 'How a fold ships']);
+
+  // and the whole thing is a saveable Fold
+  const saved = await invoke(page, 'save_deck', {});
+  expect(saved.body.validated).toBe(true);
+});
+
+test('a saved theme survives a real page reload, and apply_theme restyles the deck on screen', async ({ page }) => {
+  /* save_theme is the only tool whose result outlives the session, so it is the only one whose
+     promise a unit test cannot keep: the store is injected there. This drives the REAL page,
+     which puts it in localStorage, and reloads the browser to check. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Theme persistence', discard: true });
+
+  const saved = await invoke(page, 'save_theme', { name: 'house-navy', label: 'House navy', tokens: { accent: '#1F3A5F' }, basedOn: 'boardroom' });
+  expect(saved.state).toContain('ok');
+  expect(saved.body.tokens.bg, 'basedOn brought the rest of boardroom with it').toBe('#F3F5F8');
+  expect(saved.body.contrast.warnings).toEqual([]);
+
+  // the tool never touched the deck
+  expect(await deckTextNow(page)).toContain('#3F7268');
+
+  await page.reload();
+  await expect(page.getByTestId('mcp-status')).toBeVisible();
+  const listed = await invoke(page, 'list_themes', {});
+  const mine = listed.body.themes.find((t: any) => t.name === 'house-navy');
+  expect(mine, 'the saved theme came back after a reload').toBeTruthy();
+  expect(mine.source).toBe('saved');
+  expect(mine.tokens.accent).toBe('#1F3A5F');
+
+  // and it restyles the Fold the human is looking at
+  await invoke(page, 'create_deck', { title: 'Theme persistence', discard: true });
+  const applied = await invoke(page, 'apply_theme', { name: 'house-navy' });
+  expect(applied.body.applied).toBe('house-navy');
+  await expect.poll(() => deckTextNow(page), { timeout: 5000 }).toContain('#1F3A5F');
+  await expect(page.frameLocator('[data-testid="preview"]').locator('#origami-theme-css')).toBeAttached();
+
+  const gone = await invoke(page, 'delete_theme', { name: 'house-navy' });
+  expect(gone.body.deleted).toBe('house-navy');
+  expect((await invoke(page, 'list_themes', {})).body.themes.some((t: any) => t.name === 'house-navy')).toBe(false);
+  // the deck keeps the colours: a theme is applied by value
+  expect(await deckTextNow(page)).toContain('#1F3A5F');
+});
+
+test('a composed chart fold fits 1280x720 even when the card also carries prose', async ({ page }) => {
+  /* S6. Haiku's trial fold added a lede above its chart and went over: the paragraph is height
+     the chart no longer has. MEASURED at 1280x720 on the same fold: 849px at plotHeight 318,
+     781 at 250, 751 at 220, 731 at 200, and it FITS at 180. So a paragraph costs the chart
+     107px, which is more than the distance from the no-prose default to the floor — any prose on
+     the card puts the chart at the 180 floor, and that is what has to fit. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Prose fit', subtitle: 'A cover, not a placeholder', eyebrow: 'S6', discard: true });
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2', 'Q3', 'Q4'], series: [{ name: 'Revenue', color: '#38628F', values: [12, 19, 15, 24] }], yMax: null };
+
+  const withProse = await invoke(page, 'add_fold', {
+    title: 'Revenue by quarter',
+    eyebrow: 'Q3 review',
+    blocks: [
+      { text: '<p class="lede">Revenue held; the cost of delivery did not. This is the paragraph that pushed the trial fold over.</p>' },
+      { chart: CHART, caption: 'EUR m' },
+    ],
+  });
+  expect(withProse.state).toContain('ok');
+
+  const alone = await invoke(page, 'add_fold', { title: 'Chart only', eyebrow: 'Control', blocks: [{ chart: CHART, caption: 'EUR m' }] });
+
+  const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
+  expect(res.body.measured).toBe(true);
+  const fold = (id: string) => res.body.folds.find((f: any) => f.id === id);
+
+  expect(fold(withProse.body.chunkId).fits, `prose+chart measured ${fold(withProse.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(withProse.body.chunkId).rendersAnything).toBe(true);
+  expect(fold(alone.body.chunkId).fits).toBe(true);
+
+  // the cover is a real fold with real content on it, and it fits too
+  const cover = res.body.folds[0];
+  expect(cover.rendersAnything).toBe(true);
+  expect(cover.fits).toBe(true);
+  expect(await deckTextNow(page)).not.toContain('New fold');
+  expect(await deckTextNow(page)).toContain('A cover, not a placeholder');
+
+  console.log(`  add_fold @1280x720: prose+chart fits=${fold(withProse.body.chunkId).fits}, chart alone fits=${fold(alone.body.chunkId).fits}, cover fits=${cover.fits}`);
+  expect((await invoke(page, 'save_deck', {})).body.validated).toBe(true);
 });

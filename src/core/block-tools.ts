@@ -22,10 +22,14 @@
 
 import {
   KINDS,
+  extractDataBlocks,
   kindSchemaComment,
   validateChartData,
   validateDrawData,
+  validateFlowData,
   validateGanttData,
+  validateGraphData,
+  validateTableData,
   validateVennData,
   CHART_TYPES,
   DRAW_FILL_STYLES,
@@ -37,8 +41,9 @@ import {
   type DeckModel,
   type Violation,
 } from '../../vendor/format-dist/index.js';
+import { fillDiagramDefaults } from './data-blocks.js';
 import type { DeckStore } from './deck-store.js';
-import { dataFigure } from './fold-starters.js';
+import { blockJson, dataFigure } from './fold-starters.js';
 import { randomHex } from './ids.js';
 import type { ToolMode } from './modes.js';
 import type { JsonSchemaProp, ToolDef } from './registry.js';
@@ -51,14 +56,26 @@ const VALIDATORS: Record<string, (data: unknown) => Violation[]> = {
   chart: validateChartData as (data: unknown) => Violation[],
   venn: validateVennData as (data: unknown) => Violation[],
   gantt: validateGanttData as (data: unknown) => Violation[],
+  flow: validateFlowData as (data: unknown) => Violation[],
+  graph: validateGraphData as (data: unknown) => Violation[],
+  table: validateTableData as (data: unknown) => Violation[],
 };
+
+/** The data kinds /folio/'s typed block tools address, in the order get_block reports them.
+    Every one of them is a FIGURE this app knows how to rebuild (dataFigure), which is what
+    makes set_block safe to point at a whole block rather than at markup. */
+export const FOLIO_BLOCK_KINDS = ['chart', 'venn', 'flow', 'graph', 'gantt', 'draw', 'table'] as const;
+
+/** The one validator for a data kind, for callers outside this file (the fold composer). There
+    is no second opinion about what a chart is, so there is no second map either. */
+export const validatorFor = (kind: string): ((data: unknown) => Violation[]) | undefined => VALIDATORS[kind];
 
 const DATA_OPEN = (kind: string): string => `<script type="application/json" data-odata="${kind}">`;
 
 /** A figcaption is TEXT. Escaping is not politeness: an unescaped "<" in a caption could open a
     tag inside the figure, and one of those tags is <template>, which the content policy rejects
     — so an un-escaped caption would turn a caption into a refusal, or worse into markup. */
-const escText = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export const escText = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Where a block lives right now: which fold, which kind, its data, and the exact span of the
     <figure> that carries it, so a rewrite is one splice and everything around it survives. */
@@ -75,26 +92,44 @@ export interface BlockSite {
   end: number;
 }
 
-/** The <figure> that encloses this kind's data block, found from the block OUTWARD — keyed on
-    the carrier the format actually enforces, never on a class name a hand edit could restyle. */
-function figureAround(inner: string, kind: string): Omit<BlockSite, 'chunkId' | 'inner'> | null {
+/** The data block itself — the exact span of `<script … data-odata="KIND">…</script>` and the
+    JSON inside it. `nth` counts blocks of that kind in the fold from 0, which is how a fold
+    holding two charts is addressed. This is the ONE scan; figureAround widens its answer to the
+    enclosing figure, and the folio writers fall back to it when a block has no figure at all. */
+function dataScript(inner: string, kind: string, nth: number): { data: unknown; start: number; bodyEnd: number; end: number } | null {
   const open = DATA_OPEN(kind);
-  const at = inner.indexOf(open);
-  if (at < 0) return null;
-  const figStart = inner.lastIndexOf('<figure', at);
-  const scriptEnd = inner.indexOf('</script>', at);
-  const figEnd = inner.indexOf('</figure>', at);
-  if (figStart < 0 || scriptEnd < 0 || figEnd < 0) return null;
-  const end = figEnd + '</figure>'.length;
-  const figure = inner.slice(figStart, end);
+  let at = -1;
+  for (let i = 0; i <= nth; i++) {
+    at = inner.indexOf(open, at + 1);
+    if (at < 0) return null;
+  }
+  const bodyEnd = inner.indexOf('</script>', at);
+  if (bodyEnd < 0) return null;
   let data: unknown;
   try {
-    data = JSON.parse(inner.slice(at + open.length, scriptEnd));
+    data = JSON.parse(inner.slice(at + open.length, bodyEnd));
   } catch (e) {
     refuse(`the ${kind} block in this Fold is not valid JSON (${(e as Error).message}) — repair it with write_chunk, or press New for a fresh one`);
   }
+  return { data, start: at, bodyEnd, end: bodyEnd + '</script>'.length };
+}
+
+/** The <figure> that encloses this kind's data block, found from the block OUTWARD — keyed on
+    the carrier the format actually enforces, never on a class name a hand edit could restyle. */
+function figureAround(inner: string, kind: string, nth = 0): Omit<BlockSite, 'chunkId' | 'inner'> | null {
+  const s = dataScript(inner, kind, nth);
+  if (!s) return null;
+  const figStart = inner.lastIndexOf('<figure', s.start);
+  const figEnd = inner.indexOf('</figure>', s.start);
+  if (figStart < 0 || figEnd < 0) return null;
+  /* A fold may hold SEVERAL figures (add_fold builds those). The nearest "<figure" before this
+     block is only its carrier if no "</figure>" closed in between — otherwise it belongs to the
+     figure before this one, and splicing that span would delete a sibling block. */
+  if (inner.lastIndexOf('</figure>', s.start) > figStart) return null;
+  const end = figEnd + '</figure>'.length;
+  const figure = inner.slice(figStart, end);
   const cap = /<figcaption[^>]*>([\s\S]*?)<\/figcaption>/.exec(figure);
-  return { kind, data, caption: cap ? cap[1]! : '', figure, start: figStart, end };
+  return { kind, data: s.data, caption: cap ? cap[1]! : '', figure, start: figStart, end };
 }
 
 /** The first fold carrying a block of one of this page's kinds. */
@@ -451,6 +486,130 @@ function captionTool(deck: DeckStore, mode: ToolMode): ToolDef {
     },
   };
 }
+
+/* ---------------------------------------------------------------- folio --------------------
+   The mini pages each scope the shell to ONE block, so their writers need no address: there is
+   exactly one figure and requireSite finds it. /folio/ holds a whole deck, so the same two
+   operations — read a block's JSON, replace a block's JSON — need one: a chunk id, the kind,
+   and which of that kind (nth). Everything else is shared: the same VALIDATORS, the same
+   dataFigure, the same writeFoldInner. */
+
+/** Every data block in a fold inner, in document order, with its index among blocks of its own
+    kind — the (kind, nth) pair get_block and set_block address. */
+export function blockIndex(inner: string): Array<{ kind: string; nth: number }> {
+  const seen: Record<string, number> = {};
+  return extractDataBlocks(inner).map((b) => {
+    seen[b.kind] = (seen[b.kind] ?? -1) + 1;
+    return { kind: b.kind, nth: seen[b.kind]! };
+  });
+}
+
+const inventory = (inner: string): string => {
+  const list = blockIndex(inner);
+  return list.length === 0 ? 'no data blocks at all' : list.map((b) => `${b.kind}[${b.nth}]`).join(', ');
+};
+
+function folioTools(deck: DeckStore): ToolDef[] {
+  const KIND_LIST = FOLIO_BLOCK_KINDS.join(' | ');
+
+  /** The fold, or a refusal naming the tool that lists them. */
+  const innerOf = (chunkId: string): string => {
+    const slide = deck.model().slides.get(chunkId);
+    if (!slide) refuse(`unknown chunk "${chunkId}" — call list_chunks`);
+    return slide!.inner;
+  };
+
+  return [
+    {
+      name: 'get_block',
+      annotations: { readOnlyHint: true },
+      description: "READ A DATA BLOCK BEFORE YOU REPLACE IT. Returns one data block's JSON exactly as stored, plus its caption and kind schema. Address it by chunkId + kind (chart | venn | flow | graph | gantt | draw | table) and nth when the fold holds more than one of that kind (0 = first, the default). Leave kind out to get EVERY data block on the fold — one call instead of one per block. set_block REPLACES a block rather than patching it, so read here, edit what you read, send the whole thing back. Changes nothing.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
+          kind: { type: 'string', enum: FOLIO_BLOCK_KINDS, description: `One block kind: ${KIND_LIST}. Omit for every block on the fold` },
+          nth: { type: 'integer', minimum: 0, description: 'Which block of that kind, 0-based (default 0)' },
+        },
+        required: ['chunkId'],
+      },
+      execute: async ({ chunkId, kind, nth }) => {
+        const inner = innerOf(chunkId);
+        if (kind === undefined) {
+          const blocks = blockIndex(inner).map((b) => {
+            const site = figureAround(inner, b.kind, b.nth);
+            const script = site ?? dataScript(inner, b.kind, b.nth);
+            return { kind: b.kind, nth: b.nth, caption: site?.caption ?? '', data: script?.data ?? null };
+          });
+          return ok({
+            chunkId,
+            count: blocks.length,
+            blocks,
+            note: blocks.length === 0 ? 'this fold carries no data blocks — it is prose, or empty.' : `edit one with set_block({chunkId:"${chunkId}", kind, data}).`,
+          });
+        }
+        const site = figureAround(inner, kind, nth ?? 0);
+        const script = site ?? dataScript(inner, kind, nth ?? 0);
+        if (!script) {
+          return fail(`this fold carries no ${kind} block at nth ${nth ?? 0}. It holds: ${inventory(inner)}`, { blocks: blockIndex(inner) });
+        }
+        return ok({ chunkId, kind, nth: nth ?? 0, caption: site?.caption ?? '', data: script.data, schema: kindSchemaComment(kind) });
+      },
+    },
+
+    {
+      name: 'set_block',
+      description: "Replace the WHOLE JSON of one data block on one fold — this CHANGES THE DECK the human is looking at and re-renders it. Address it by chunkId + kind (chart | venn | flow | graph | gantt | draw | table) + nth (0 = first, the default) and pass the COMPLETE data: it REPLACES what is there, so call get_block first to keep part of it. The kind's validator runs before anything is applied and a bad shape is refused with the violation named; a table's formulas are baked; a flow/graph node with no `tone` and an edge with no `label` get \"\" (their legal blank, no meaning changes). A fold with no block of that kind is refused with the kinds it has — this never CREATES one, use add_fold. One undo step.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chunkId: { type: 'string', description: 'Chunk id from list_chunks' },
+          kind: { type: 'string', enum: FOLIO_BLOCK_KINDS, description: `The block kind to replace: ${KIND_LIST}` },
+          data: { type: 'object', description: "The block's COMPLETE JSON — call get_kind_schema(kind) for the shape" },
+          caption: { type: 'string', maxLength: 200, description: 'Optional: the caption under the figure ("" clears it; left alone when absent)' },
+          nth: { type: 'integer', minimum: 0, description: 'Which block of that kind, 0-based (default 0)' },
+        },
+        required: ['chunkId', 'kind', 'data'],
+      },
+      execute: async ({ chunkId, kind, data: raw, caption, nth }) => {
+        const inner = innerOf(chunkId);
+        // flow/graph tone and edge label are required with "" as their blank — a pure default
+        const data = fillDiagramDefaults(kind, raw);
+        const n = nth ?? 0;
+        const site = figureAround(inner, kind, n);
+        const script = site ?? dataScript(inner, kind, n);
+        if (!script) {
+          return fail(`this fold carries no ${kind} block at nth ${n}. It holds: ${inventory(inner)}`, { blocks: blockIndex(inner) });
+        }
+        const violations = VALIDATORS[kind]!(data);
+        if (violations.length > 0) {
+          return fail(`the ${kind} data breaks its own schema — NOTHING was applied and the Fold is unchanged`, { violations });
+        }
+        /* Two carriers exist. Every figure this app builds is a <figure>, and that whole figure
+           is rebuilt so the mount div and the caption stay in step with the data. A block in a
+           hand-rolled wrapper (the table starter's .o-table-shell) has no figure to rebuild, so
+           only the JSON is replaced — the wrapper the human is looking at is left exactly as it is. */
+        const next = site
+          ? inner.slice(0, site.start) + blockFigure(kind, data, caption ?? site.caption) + inner.slice(site.end)
+          : inner.slice(0, script.start) + `${DATA_OPEN(kind)}\n${blockJson(data)}\n</script>` + inner.slice(script.end);
+        writeFoldInner(deck, chunkId, next);
+        return ok({
+          chunkId,
+          kind,
+          nth: n,
+          ...(site ? { caption: caption ?? site.caption } : { captionApplied: false, why: 'this block has no <figure>/<figcaption> carrier, so only its JSON was replaced' }),
+          note: APPLIED,
+        });
+      },
+    },
+  ];
+}
+
+/** The two typed block tools /folio/ adds on top of buildTools. Mini pages do not get them:
+    each of those edits exactly one block and has a writer that needs no address. */
+export const buildFolioBlockTools = (deps: ToolDeps): ToolDef[] => folioTools(deps.deck);
 
 const BUILDERS: Record<string, (deck: DeckStore, mode: ToolMode) => ToolDef[]> = {
   draw: drawTools,

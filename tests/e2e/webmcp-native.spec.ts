@@ -162,7 +162,7 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
     expect(withFlag.navigator).toBe(true);
   });
 
-  test('the app registers all 29 tools on Chrome\'s own modelContext', async () => {
+  test('the app registers all 38 tools on Chrome\'s own modelContext', async () => {
     const launched = await launchChrome(FEATURE_ARGS);
     if ('skip' in launched) skipLoudly(launched.skip);
     const c = launched as Chrome;
@@ -170,19 +170,19 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
       await c.page.goto(URL);
 
       // the app's own status line, read from the real browser
-      await expect(c.page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 29 tools');
+      await expect(c.page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 38 tools');
 
       // and Chrome agrees: its registry holds them
       const tools = await c.page.evaluate(async () => {
         const t = await (document as any).modelContext.getTools();
         return t.map((x: any) => ({ name: x.name, hasDescription: typeof x.description === 'string' && x.description.length > 40, schema: typeof x.inputSchema }));
       });
-      expect(tools).toHaveLength(29);
+      expect(tools).toHaveLength(38);
       expect(tools.map((t: any) => t.name).sort()).toEqual([
-        'accept_proposal', 'add_chunk', 'add_custom_fold', 'create_deck', 'define_block', 'delete_block',
-        'delete_chunk', 'export_deck', 'get_kind_schema', 'inspect_render', 'list_activity', 'list_block_defs', 'list_chunks', 'list_proposals', 'list_starters',
-        'move_chunk', 'origami_guide', 'propose_add', 'propose_chunk', 'propose_delete', 'read_chunk', 'reject_proposal', 'save_deck',
-        'set_chunk_meta', 'set_deck_meta', 'set_fold_type', 'set_header', 'undo', 'write_chunk',
+        'accept_proposal', 'add_chunk', 'add_custom_fold', 'add_fold', 'add_ledger', 'apply_theme', 'create_deck', 'define_block', 'delete_block',
+        'delete_chunk', 'delete_theme', 'export_deck', 'get_block', 'get_kind_schema', 'inspect_render', 'list_activity', 'list_block_defs', 'list_chunks', 'list_proposals', 'list_starters', 'list_themes',
+        'move_chunk', 'origami_guide', 'propose_add', 'propose_chunk', 'propose_delete', 'read_chunk', 'reject_proposal', 'run_batch', 'save_deck',
+        'save_theme', 'set_block', 'set_chunk_meta', 'set_deck_meta', 'set_fold_type', 'set_header', 'undo', 'write_chunk',
       ]);
       expect(tools.every((t: any) => t.hasDescription)).toBe(true);
       console.log(`  Chrome ${c.version} getTools() -> ${tools.length} tools; inputSchema arrives as "${tools[0].schema}"`);
@@ -193,7 +193,7 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
 
   test('does Chrome hand tool ANNOTATIONS back to the agent?', async () => {
     /* An empirical question, not an assertion about this app. The app registers readOnlyHint /
-       destructiveHint on 11 tools (proved against a recording host in webmcp-shim.spec.ts). What
+       destructiveHint on 14 tools (proved against a recording host in webmcp-shim.spec.ts). What
        a real host DOES with them is the browser's business, and the honest thing is to measure it
        and print the answer rather than assume either way. Whatever the result, the annotations
        stay: a host that reads them gets them, and one that drops them is no worse off. */

@@ -33,7 +33,7 @@ describe('the recorded demo run', () => {
     // six folds, in the order the demo claims, and no proposal left hanging
     expect(bodies.list_chunks.chunks).toHaveLength(DEMO_FOLDS);
     expect(DEMO_FOLDS).toBe(6);
-    expect(bodies.list_chunks.chunks.map((c: any) => c.kind)).toEqual(['free', 'venn', 'draw', 'free', 'free', 'document']);
+    expect(bodies.list_chunks.chunks.map((c: any) => c.kind)).toEqual(['cover', 'venn', 'draw', 'free', 'free', 'document']);
     expect(h.proposals.count()).toBe(0);
 
     // the review loop LANDED — the accepted wording, not the proposed-against one

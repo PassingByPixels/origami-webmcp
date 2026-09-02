@@ -100,5 +100,8 @@ export interface CondOverlay {
     never match; merged COVERED cells are skipped (they hold no value); ties in top/bot all match; a
     single-value scale range resolves to the `to` colour. When two rules paint the same cell+channel,
     the LATER rule wins. Rows beyond the grid contribute nothing (the range is clamped to the value
-    grid, so a hostile/oversized range can never loop past the data). */
+    grid, so a hostile/oversized range can never loop past the data).
+
+    The body is a DISPATCHER: each kind's semantics live in its own painter above, and the rules run
+    in file order, so the later-rule-wins overwrite is preserved by the loop and nothing else. */
 export declare function evaluateCondFmt(values: ReadonlyArray<ReadonlyArray<string>>, rules: readonly CondRule[] | undefined, merges?: readonly MergeRect[]): Map<string, CondOverlay>;

@@ -178,32 +178,24 @@ function pseudoAdvance(leaf, cs) {
   tip.remove();
   return { pre: Math.max(0, pre), post: Math.max(0, post) };
 }
-function mountRuns(leaf, exclusions, minRun) {
-  if (runsMounted(leaf)) releaseRuns(leaf);
-  if (!runnable(leaf)) return null;
+function leafMetrics(leaf) {
   const cs = getComputedStyle(leaf);
-  const padL = parseFloat(cs.paddingLeft) || 0;
-  const padT = parseFloat(cs.paddingTop) || 0;
-  const padR = parseFloat(cs.paddingRight) || 0;
-  const padB = parseFloat(cs.paddingBottom) || 0;
-  const bT = parseFloat(cs.borderTopWidth) || 0;
-  const bB = parseFloat(cs.borderBottomWidth) || 0;
+  const px = (v) => parseFloat(v) || 0;
+  const padL = px(cs.paddingLeft);
+  const padR = px(cs.paddingRight);
   const measure = leaf.clientWidth - padL - padR;
   if (!(measure > 0)) return null;
-  const lh = lineHeightOf(cs);
-  const clone = leaf.cloneNode(true);
-  const stash = document.createDocumentFragment();
-  while (leaf.firstChild) stash.appendChild(leaf.firstChild);
-  const gen = pseudoAdvance(leaf, cs);
-  if (gen.post > 0.5) {
-    leaf.appendChild(stash);
-    return null;
-  }
+  return { cs, padL, padT: px(cs.paddingTop), padR, padB: px(cs.paddingBottom), bT: px(cs.borderTopWidth), bB: px(cs.borderBottomWidth), measure, lh: lineHeightOf(cs) };
+}
+function buildProbe(leaf, clone) {
   const probe = document.createElement("span");
   probe.setAttribute("aria-hidden", "true");
   probe.style.cssText = "position:absolute;left:0;top:0;visibility:hidden;white-space:pre;width:max-content;max-width:none;pointer-events:none;";
   while (clone.firstChild) probe.appendChild(clone.firstChild);
   leaf.appendChild(probe);
+  return probe;
+}
+function textMeasure(probe) {
   const nodes = [];
   const walk = document.createTreeWalker(probe, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n !== null; n = walk.nextNode()) nodes.push(n);
@@ -244,71 +236,115 @@ function mountRuns(leaf, exclusions, minRun) {
     cache.set(key, w);
     return w;
   };
-  const toks = tokenize(text);
+  return { text, rangeOver, widthOf };
+}
+function seatGenerated(ivs, pre, firstW) {
+  let genX = -1;
+  const seated = [];
+  for (const [a, b] of ivs) {
+    if (genX < 0) {
+      if (b - (a + pre) >= firstW - 0.5) {
+        genX = a;
+        seated.push([a + pre, b]);
+      }
+    } else seated.push([a, b]);
+  }
+  return genX < 0 ? null : { genX, ivs: seated };
+}
+function fillBand(ivs, toks, from, widthOf) {
+  const runs = [];
+  let ti = from;
+  for (const [a, b] of ivs) {
+    if (ti >= toks.length) break;
+    const runStart = ti;
+    let end = -1;
+    while (ti < toks.length) {
+      const w = widthOf(toks[runStart].start, toks[ti].end);
+      if (a + w <= b + 0.5) {
+        end = toks[ti].end;
+        ti++;
+      } else break;
+    }
+    if (end < 0) continue;
+    runs.push({ s: toks[runStart].start, e: end, emitS: 0, emitE: 0, x: a });
+  }
+  return { runs, ti };
+}
+function overflowBand(ivs, toks, ti, y, measure, blocked, lines) {
+  let wide = null;
+  for (const iv of ivs) if (!wide || iv[1] - iv[0] > wide[1] - wide[0]) wide = iv;
+  const full = wide !== null && wide[1] - wide[0] >= measure - 0.5;
+  if (!full && blocked + 1 <= MAX_BLOCKED_RUN) return { ti, blocked: blocked + 1 };
+  const t = toks[ti++];
+  lines.push({ y, runs: [{ s: t.start, e: t.end, emitS: 0, emitE: 0, x: wide ? wide[0] : 0 }] });
+  return { ti, blocked: 0 };
+}
+function tileRuns(lines, textLen) {
+  const flat = [];
+  for (const ln of lines) for (const r of ln.runs) flat.push(r);
+  for (let i = 0; i < flat.length; i++) {
+    flat[i].emitS = i === 0 ? 0 : flat[i].s;
+    flat[i].emitE = i === flat.length - 1 ? textLen : flat[i + 1].s;
+  }
+  return flat;
+}
+function genLanded(lines, genX, pre) {
+  return lines.length > 0 && lines[0].y === 0 && Math.abs(lines[0].runs[0].x - (genX + pre)) < 0.5;
+}
+function layoutLines(p) {
   const lines = [];
-  const mr = Math.min(minRun, measure);
   let ti = 0;
   let y = 0;
   let blocked = 0;
   let genX = -1;
-  const firstW = toks.length ? widthOf(toks[0].start, toks[0].end) : 0;
-  while (ti < toks.length) {
-    let ivs = usable(freeIntervals(y, y + lh, 0, measure, exclusions), mr);
-    if (gen.pre > 0 && y === 0) {
-      const seated = [];
-      for (const [a, b] of ivs) {
-        if (genX < 0) {
-          if (b - (a + gen.pre) >= firstW - 0.5) {
-            genX = a;
-            seated.push([a + gen.pre, b]);
-          }
-        } else seated.push([a, b]);
-      }
-      if (genX < 0) break;
-      ivs = seated;
+  const firstW = p.toks.length ? p.widthOf(p.toks[0].start, p.toks[0].end) : 0;
+  while (ti < p.toks.length) {
+    let ivs = usable(freeIntervals(y, y + p.lh, 0, p.measure, p.exclusions), p.minRun);
+    if (p.pre > 0 && y === 0) {
+      const seat = seatGenerated(ivs, p.pre, firstW);
+      if (!seat) break;
+      genX = seat.genX;
+      ivs = seat.ivs;
     }
-    const runs = [];
-    for (const [a, b] of ivs) {
-      if (ti >= toks.length) break;
-      const runStart = ti;
-      let end = -1;
-      while (ti < toks.length) {
-        const w = widthOf(toks[runStart].start, toks[ti].end);
-        if (a + w <= b + 0.5) {
-          end = toks[ti].end;
-          ti++;
-        } else break;
-      }
-      if (end < 0) continue;
-      runs.push({ s: toks[runStart].start, e: end, emitS: 0, emitE: 0, x: a });
-    }
-    if (runs.length) {
-      lines.push({ y, runs });
+    const band = fillBand(ivs, p.toks, ti, p.widthOf);
+    ti = band.ti;
+    if (band.runs.length) {
+      lines.push({ y, runs: band.runs });
       blocked = 0;
     } else {
-      let wide = null;
-      for (const iv of ivs) if (!wide || iv[1] - iv[0] > wide[1] - wide[0]) wide = iv;
-      const full = wide !== null && wide[1] - wide[0] >= measure - 0.5;
-      if (full || ++blocked > MAX_BLOCKED_RUN) {
-        const t = toks[ti++];
-        lines.push({ y, runs: [{ s: t.start, e: t.end, emitS: 0, emitE: 0, x: wide ? wide[0] : 0 }] });
-        blocked = 0;
-      }
+      const over = overflowBand(ivs, p.toks, ti, y, p.measure, blocked, lines);
+      ti = over.ti;
+      blocked = over.blocked;
     }
-    y += lh;
+    y += p.lh;
   }
-  if (gen.pre > 0 && !(lines.length && lines[0].y === 0 && Math.abs(lines[0].runs[0].x - (genX + gen.pre)) < 0.5)) {
+  return { lines, genX };
+}
+function mountRuns(leaf, exclusions, minRun) {
+  if (runsMounted(leaf)) releaseRuns(leaf);
+  if (!runnable(leaf)) return null;
+  const box = leafMetrics(leaf);
+  if (!box) return null;
+  const { cs, padL, padT, padB, bT, bB, measure, lh } = box;
+  const clone = leaf.cloneNode(true);
+  const stash = document.createDocumentFragment();
+  while (leaf.firstChild) stash.appendChild(leaf.firstChild);
+  const gen = pseudoAdvance(leaf, cs);
+  if (gen.post > 0.5) {
+    leaf.appendChild(stash);
+    return null;
+  }
+  const probe = buildProbe(leaf, clone);
+  const { text, rangeOver, widthOf } = textMeasure(probe);
+  const toks = tokenize(text);
+  const { lines, genX } = layoutLines({ toks, exclusions, measure, lh, minRun: Math.min(minRun, measure), pre: gen.pre, widthOf });
+  if (gen.pre > 0 && !genLanded(lines, genX, gen.pre)) {
     probe.remove();
     leaf.appendChild(stash);
     return null;
   }
   const height = lines.length ? lines[lines.length - 1].y + lh : lh;
-  const flat = [];
-  for (const ln of lines) for (const r of ln.runs) flat.push(r);
-  for (let i2 = 0; i2 < flat.length; i2++) {
-    flat[i2].emitS = i2 === 0 ? 0 : flat[i2].s;
-    flat[i2].emitE = i2 === flat.length - 1 ? text.length : flat[i2 + 1].s;
-  }
+  const flat = tileRuns(lines, text.length);
   if (flat.length) flat[0].x -= widthOf(0, flat[0].s);
   const frags = flat.map((r) => rangeOver(r.emitS, r.emitE).cloneContents());
   probe.remove();
@@ -1764,40 +1800,81 @@ var el = (tag, className, parent) => {
   parent?.appendChild(e);
   return e;
 };
-function renderGantt(slide, data, opts = {}) {
-  const mount = slide.querySelector("[data-gantt-mount]");
-  if (!mount) return;
-  mount.textContent = "";
-  const ppw = opts.fitPx ? Math.max(4, Math.floor(opts.fitPx / data.totalWeeks)) : Math.min(GANTT_PX_MAX, Math.max(GANTT_PX_MIN, opts.pxPerWeek ?? GANTT_PX_PER_WEEK));
-  const trackWidth = data.totalWeeks * ppw;
-  let activeLens = opts.activeLens ?? "all";
-  const bar = el("div", "o-gantt-bar", mount);
-  const chips = el("span", "o-gantt-chips", bar);
-  const drawChips = () => {
-    chips.textContent = "";
-    const mk = (label, val) => {
-      const chip = el("button", "o-gantt-chip" + (activeLens === val ? " active" : ""), chips);
-      chip.setAttribute("type", "button");
-      chip.textContent = label;
-      if (activeLens === val && val !== "all") {
-        chip.style.background = ganttLensColor(data, val);
-        chip.style.borderColor = ganttLensColor(data, val);
-        chip.style.color = "#fff";
-      }
-      if (opts.interactive) {
-        chip.addEventListener("click", () => {
-          activeLens = val;
-          drawChips();
-          applyFilter();
-        });
-      }
-    };
-    mk("All", "all");
-    for (const l of data.lenses) mk(l.name, l.name);
+function axisPen(axisTrack, ppw) {
+  return {
+    tick(xWeeks, kind, label) {
+      const t = el("div", "o-gantt-tick" + kind, axisTrack);
+      t.style.left = `${xWeeks * ppw}px`;
+      if (label) el("span", "o-gantt-tick-label", t).textContent = label;
+    },
+    label(xWeeks, widthWeeks, cls, text) {
+      const d = el("div", cls, axisTrack);
+      d.style.left = `${xWeeks * ppw}px`;
+      if (widthWeeks) d.style.width = `${widthWeeks * ppw}px`;
+      d.textContent = text;
+    }
   };
-  const wrap = el("div", "o-gantt-wrap", mount);
-  const grid = el("div", "o-gantt-grid", wrap);
-  grid.style.setProperty("--gantt-w", `${trackWidth}px`);
+}
+function monthTicks({ pen, data, monthCols }) {
+  for (const c of monthCols) pen.tick(c.off, " major");
+  pen.tick(data.totalWeeks, " major");
+}
+function weekTicks({ pen, data }) {
+  for (let w = 0; w < data.totalWeeks; w++) pen.tick(w, w % 4 === 0 ? " major" : "");
+}
+function dayTicks({ pen, data, ppw }) {
+  const totalDays = Math.ceil(data.totalWeeks * 7);
+  const narrow = ppw / 7 < 34;
+  for (let dy = 0; dy < totalDays; dy++) {
+    const weekStart = dy % 7 === 0;
+    const dt = dateAfter(data.startDate, dy);
+    pen.tick(dy / 7, weekStart ? " major" : " minor");
+    const dow = dt ? dt.getDay() : (dy % 7 + 1) % 7;
+    pen.label(dy / 7, 1 / 7, "o-gantt-axis-day", (narrow ? DOW_NARROW : DOW_SHORT)[dow]);
+    if (weekStart) pen.label(dy / 7, 0, "o-gantt-axis-wk", dt ? dt.toLocaleDateString(void 0, { month: "short", day: "numeric" }) : `W${dy / 7 + 1}`);
+  }
+}
+function hourTicks({ pen, data, ppw }) {
+  const totalDays = Math.ceil(data.totalWeeks * 7);
+  const hourPx = ppw / 7 / 24;
+  const hourStep = hourPx >= 26 ? 1 : hourPx >= 13 ? 3 : hourPx >= 7 ? 6 : 0;
+  for (let dy = 0; dy < totalDays; dy++) {
+    const dt = dateAfter(data.startDate, dy);
+    pen.tick(dy / 7, " major");
+    pen.label(dy / 7, 0, "o-gantt-axis-wk", dt ? dt.toLocaleDateString(void 0, { month: "short", day: "numeric" }) : `D${dy + 1}`);
+    for (let h = 1; h < 24; h++) {
+      const x = (dy + h / 24) / 7;
+      pen.tick(x, " minor");
+      if (hourStep && h % hourStep === 0) pen.label(x, 0, "o-gantt-axis-hr", `${String(h).padStart(2, "0")}:00`);
+    }
+  }
+}
+var GANTT_AXIS_TICKS = {
+  month: monthTicks,
+  week: weekTicks,
+  day: dayTicks,
+  hour: hourTicks
+};
+function renderMilestoneTags(axisTrack, data, ppw) {
+  data.milestones.forEach((ms, idx) => {
+    const tag = el("div", "o-gantt-ms-tag", axisTrack);
+    tag.style.left = `${(ms.week - 1) * ppw}px`;
+    tag.style.color = ms.color;
+    tag.setAttribute("data-ms", String(idx));
+    tag.textContent = ms.label;
+  });
+}
+function renderZoneBanners(axisTrack, data, ppw) {
+  (data.zones ?? []).forEach((z) => {
+    if (!z.label) return;
+    const zl = el("div", "o-gantt-zone-axis", axisTrack);
+    zl.style.left = `${(z.startWeek - 1) * ppw}px`;
+    zl.style.width = `${(z.endWeek - z.startWeek + 1) * ppw}px`;
+    zl.style.color = z.color;
+    zl.textContent = z.label;
+  });
+}
+function renderGanttAxis(grid, data, ppw) {
   const axis = el("div", "o-gantt-axis", grid);
   const corner = el("div", "o-gantt-corner", axis);
   corner.textContent = "Owner";
@@ -1813,111 +1890,65 @@ function renderGantt(slide, data, opts = {}) {
   const unit = ganttAxisUnit(ppw);
   const fine = unit === "day" || unit === "hour";
   if (fine) axis.classList.add("o-gantt-axis-fine");
-  const addTick = (xWeeks, kind, label) => {
-    const t = el("div", "o-gantt-tick" + kind, axisTrack);
-    t.style.left = `${xWeeks * ppw}px`;
-    if (label) el("span", "o-gantt-tick-label", t).textContent = label;
-  };
-  const addLabel = (xWeeks, widthWeeks, cls, text) => {
-    const d = el("div", cls, axisTrack);
-    d.style.left = `${xWeeks * ppw}px`;
-    if (widthWeeks) d.style.width = `${widthWeeks * ppw}px`;
-    d.textContent = text;
-  };
-  if (unit === "month") {
-    for (const c of monthCols) addTick(c.off, " major");
-    addTick(data.totalWeeks, " major");
-  } else if (unit === "week") {
-    for (let w = 0; w < data.totalWeeks; w++) addTick(w, w % 4 === 0 ? " major" : "");
-  } else if (unit === "day") {
-    const totalDays = Math.ceil(data.totalWeeks * 7);
-    const narrow = ppw / 7 < 34;
-    for (let dy = 0; dy < totalDays; dy++) {
-      const weekStart = dy % 7 === 0;
-      const dt = dateAfter(data.startDate, dy);
-      addTick(dy / 7, weekStart ? " major" : " minor");
-      const dow = dt ? dt.getDay() : (dy % 7 + 1) % 7;
-      addLabel(dy / 7, 1 / 7, "o-gantt-axis-day", (narrow ? DOW_NARROW : DOW_SHORT)[dow]);
-      if (weekStart) addLabel(dy / 7, 0, "o-gantt-axis-wk", dt ? dt.toLocaleDateString(void 0, { month: "short", day: "numeric" }) : `W${dy / 7 + 1}`);
-    }
-  } else {
-    const totalDays = Math.ceil(data.totalWeeks * 7);
-    const hourPx = ppw / 7 / 24;
-    const hourStep = hourPx >= 26 ? 1 : hourPx >= 13 ? 3 : hourPx >= 7 ? 6 : 0;
-    for (let dy = 0; dy < totalDays; dy++) {
-      const dt = dateAfter(data.startDate, dy);
-      addTick(dy / 7, " major");
-      addLabel(dy / 7, 0, "o-gantt-axis-wk", dt ? dt.toLocaleDateString(void 0, { month: "short", day: "numeric" }) : `D${dy + 1}`);
-      for (let h = 1; h < 24; h++) {
-        const x = (dy + h / 24) / 7;
-        addTick(x, " minor");
-        if (hourStep && h % hourStep === 0) addLabel(x, 0, "o-gantt-axis-hr", `${String(h).padStart(2, "0")}:00`);
-      }
-    }
-  }
-  data.milestones.forEach((ms, idx) => {
-    const tag = el("div", "o-gantt-ms-tag", axisTrack);
-    tag.style.left = `${(ms.week - 1) * ppw}px`;
-    tag.style.color = ms.color;
-    tag.setAttribute("data-ms", String(idx));
-    tag.textContent = ms.label;
+  GANTT_AXIS_TICKS[unit]({ pen: axisPen(axisTrack, ppw), data, ppw, monthCols });
+  renderMilestoneTags(axisTrack, data, ppw);
+  renderZoneBanners(axisTrack, data, ppw);
+}
+function renderGanttCard(tracks, data, ppw, c, row) {
+  const card = el("div", "o-gantt-card" + (c.completed ? " completed" : ""), tracks);
+  card.setAttribute("data-card", c.id);
+  card.setAttribute("data-lens", c.lens);
+  card.style.background = ganttLensColor(data, c.lens);
+  card.style.left = `${ganttWeekIndex(c.start) * ppw + GANTT_CARD_INSET}px`;
+  card.style.width = `${Math.max(GANTT_CARD_MIN_PX, c.durationWeeks * ppw - GANTT_CARD_GAP)}px`;
+  card.style.top = `${GANTT_LANE_PADDING + row * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING)}px`;
+  el("span", "o-gantt-dot", card).title = c.type;
+  el("span", "o-gantt-card-title", card).textContent = c.title;
+  card.title = `${c.id} \u2014 ${c.title}
+${c.lens} \xB7 ${c.type} \xB7 ${c.effort}
+Start ${typeof c.start === "number" ? "W" + (Math.round(c.start * 100) / 100 + 1) : c.start} \xB7 ${c.durationWeeks}w`;
+}
+function renderLaneBands(tracks, data, ppw) {
+  (data.zones ?? []).forEach((z, zi) => {
+    const band = el("div", "o-gantt-zone", tracks);
+    band.setAttribute("data-zone", String(zi));
+    band.style.left = `${(z.startWeek - 1) * ppw}px`;
+    band.style.width = `${(z.endWeek - z.startWeek + 1) * ppw}px`;
+    band.style.background = ganttZoneFill(z);
   });
-  (data.zones ?? []).forEach((z) => {
-    if (!z.label) return;
-    const zl = el("div", "o-gantt-zone-axis", axisTrack);
-    zl.style.left = `${(z.startWeek - 1) * ppw}px`;
-    zl.style.width = `${(z.endWeek - z.startWeek + 1) * ppw}px`;
-    zl.style.color = z.color;
-    zl.textContent = z.label;
+  data.milestones.forEach((ms, mi) => {
+    const line = el("div", "o-gantt-ms-line", tracks);
+    line.setAttribute("data-ms", String(mi));
+    line.style.left = `${(ms.week - 1) * ppw}px`;
+    line.style.background = ms.color;
   });
+}
+function renderLane(grid, data, ppw, lane, cardsInLane) {
+  const { rows, numRows: numRows2 } = packLane(cardsInLane);
+  const laneHeight = numRows2 * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING) + 2 * GANTT_LANE_PADDING;
+  const laneDiv = el("div", "o-gantt-lane", grid);
+  laneDiv.setAttribute("data-lane", lane.name);
+  const label = el("div", "o-gantt-label", laneDiv);
+  label.style.minHeight = `${laneHeight}px`;
+  el("div", "o-gantt-lane-name", label).textContent = lane.name;
+  el("div", "o-gantt-lane-owner", label).textContent = lane.owner;
+  el("div", "o-gantt-lane-count", label).textContent = `${cardsInLane.length} card${cardsInLane.length === 1 ? "" : "s"}`;
+  const tracks = el("div", "o-gantt-tracks", laneDiv);
+  tracks.style.minHeight = `${laneHeight}px`;
+  tracks.setAttribute("data-lane-tracks", lane.name);
+  renderLaneBands(tracks, data, ppw);
+  for (const c of cardsInLane) renderGanttCard(tracks, data, ppw, c, rows.get(c.id) ?? 0);
+}
+function renderGanttLanes(grid, data, ppw) {
   const byLane = /* @__PURE__ */ new Map();
   for (const lane of data.swimlanes) byLane.set(lane.name, []);
   for (const c of data.cards) byLane.get(c.swimlane)?.push(c);
-  for (const lane of data.swimlanes) {
-    const cardsInLane = byLane.get(lane.name) ?? [];
-    const { rows, numRows: numRows2 } = packLane(cardsInLane);
-    const laneHeight = numRows2 * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING) + 2 * GANTT_LANE_PADDING;
-    const laneDiv = el("div", "o-gantt-lane", grid);
-    laneDiv.setAttribute("data-lane", lane.name);
-    const label = el("div", "o-gantt-label", laneDiv);
-    label.style.minHeight = `${laneHeight}px`;
-    el("div", "o-gantt-lane-name", label).textContent = lane.name;
-    el("div", "o-gantt-lane-owner", label).textContent = lane.owner;
-    el("div", "o-gantt-lane-count", label).textContent = `${cardsInLane.length} card${cardsInLane.length === 1 ? "" : "s"}`;
-    const tracks = el("div", "o-gantt-tracks", laneDiv);
-    tracks.style.minHeight = `${laneHeight}px`;
-    tracks.setAttribute("data-lane-tracks", lane.name);
-    (data.zones ?? []).forEach((z, zi) => {
-      const band = el("div", "o-gantt-zone", tracks);
-      band.setAttribute("data-zone", String(zi));
-      band.style.left = `${(z.startWeek - 1) * ppw}px`;
-      band.style.width = `${(z.endWeek - z.startWeek + 1) * ppw}px`;
-      band.style.background = ganttZoneFill(z);
-    });
-    data.milestones.forEach((ms, mi) => {
-      const line = el("div", "o-gantt-ms-line", tracks);
-      line.setAttribute("data-ms", String(mi));
-      line.style.left = `${(ms.week - 1) * ppw}px`;
-      line.style.background = ms.color;
-    });
-    for (const c of cardsInLane) {
-      const card = el("div", "o-gantt-card" + (c.completed ? " completed" : ""), tracks);
-      card.setAttribute("data-card", c.id);
-      card.setAttribute("data-lens", c.lens);
-      card.style.background = ganttLensColor(data, c.lens);
-      card.style.left = `${ganttWeekIndex(c.start) * ppw + GANTT_CARD_INSET}px`;
-      card.style.width = `${Math.max(GANTT_CARD_MIN_PX, c.durationWeeks * ppw - GANTT_CARD_GAP)}px`;
-      card.style.top = `${GANTT_LANE_PADDING + (rows.get(c.id) ?? 0) * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING)}px`;
-      el("span", "o-gantt-dot", card).title = c.type;
-      el("span", "o-gantt-card-title", card).textContent = c.title;
-      card.title = `${c.id} \u2014 ${c.title}
-${c.lens} \xB7 ${c.type} \xB7 ${c.effort}
-Start ${typeof c.start === "number" ? "W" + (Math.round(c.start * 100) / 100 + 1) : c.start} \xB7 ${c.durationWeeks}w`;
-    }
-  }
+  for (const lane of data.swimlanes) renderLane(grid, data, ppw, lane, byLane.get(lane.name) ?? []);
   if (data.swimlanes.length === 0) {
     el("div", "o-gantt-empty", grid).textContent = "No swimlanes yet.";
   }
+}
+function renderGanttLegend(mount, data) {
   const legend = el("div", "o-gantt-legend", mount);
   for (const l of data.lenses) {
     const sw = el("span", "o-gantt-swatch", legend);
@@ -1925,19 +1956,58 @@ Start ${typeof c.start === "number" ? "W" + (Math.round(c.start * 100) / 100 + 1
     dot.style.background = l.color;
     sw.appendChild(document.createTextNode(" " + l.name));
   }
-  const count = el("span", "o-gantt-count", legend);
-  const applyFilter = () => {
-    let visible = 0;
-    let completed = 0;
-    mount.querySelectorAll(".o-gantt-card").forEach((card) => {
-      const ok = activeLens === "all" || card.getAttribute("data-lens") === activeLens;
-      card.classList.toggle("faded", !ok);
-      if (ok) visible++;
-      if (card.classList.contains("completed")) completed++;
-    });
-    count.textContent = `Showing ${visible} of ${data.cards.length} cards` + (completed > 0 ? ` \xB7 ${completed} complete` : "");
+  return el("span", "o-gantt-count", legend);
+}
+function applyGanttFilter(mount, data, lens, count) {
+  let visible = 0;
+  let completed = 0;
+  mount.querySelectorAll(".o-gantt-card").forEach((card) => {
+    const ok = lens.active === "all" || card.getAttribute("data-lens") === lens.active;
+    card.classList.toggle("faded", !ok);
+    if (ok) visible++;
+    if (card.classList.contains("completed")) completed++;
+  });
+  count.textContent = `Showing ${visible} of ${data.cards.length} cards` + (completed > 0 ? ` \xB7 ${completed} complete` : "");
+}
+function drawLensChips(chips, data, opts, lens, applyFilter) {
+  chips.textContent = "";
+  const mk = (label, val) => {
+    const chip = el("button", "o-gantt-chip" + (lens.active === val ? " active" : ""), chips);
+    chip.setAttribute("type", "button");
+    chip.textContent = label;
+    if (lens.active === val && val !== "all") {
+      chip.style.background = ganttLensColor(data, val);
+      chip.style.borderColor = ganttLensColor(data, val);
+      chip.style.color = "#fff";
+    }
+    if (opts.interactive) {
+      chip.addEventListener("click", () => {
+        lens.active = val;
+        drawLensChips(chips, data, opts, lens, applyFilter);
+        applyFilter();
+      });
+    }
   };
-  drawChips();
+  mk("All", "all");
+  for (const l of data.lenses) mk(l.name, l.name);
+}
+function renderGantt(slide, data, opts = {}) {
+  const mount = slide.querySelector("[data-gantt-mount]");
+  if (!mount) return;
+  mount.textContent = "";
+  const ppw = opts.fitPx ? Math.max(4, Math.floor(opts.fitPx / data.totalWeeks)) : Math.min(GANTT_PX_MAX, Math.max(GANTT_PX_MIN, opts.pxPerWeek ?? GANTT_PX_PER_WEEK));
+  const trackWidth = data.totalWeeks * ppw;
+  const lens = { active: opts.activeLens ?? "all" };
+  const bar = el("div", "o-gantt-bar", mount);
+  const chips = el("span", "o-gantt-chips", bar);
+  const wrap = el("div", "o-gantt-wrap", mount);
+  const grid = el("div", "o-gantt-grid", wrap);
+  grid.style.setProperty("--gantt-w", `${trackWidth}px`);
+  renderGanttAxis(grid, data, ppw);
+  renderGanttLanes(grid, data, ppw);
+  const count = renderGanttLegend(mount, data);
+  const applyFilter = () => applyGanttFilter(mount, data, lens, count);
+  drawLensChips(chips, data, opts, lens, applyFilter);
   applyFilter();
 }
 function renderGanttError(slide) {
@@ -2302,6 +2372,7 @@ function dmCancelPendingSelect() {
     dmSelectTimer = null;
   }
 }
+var dmLive = (fallback) => dmActive?.data ?? fallback;
 var dmSnap = false;
 var setDiagramSnap = (on) => {
   dmSnap = on;
@@ -2460,31 +2531,39 @@ function dmToggleSelect(svg, id, halo2) {
   dmSelected = was ? null : id;
   if (!was) halo2();
 }
+var dmEdit = null;
+function closeDmInput(save) {
+  const own = dmEdit;
+  if (!own) return false;
+  dmEdit = null;
+  const v = own.input.value.trim();
+  if (own.input.isConnected) own.input.remove();
+  if (!save || v === own.was) return false;
+  setTimeout(() => own.apply(v), 0);
+  return true;
+}
 function dmTextInput(mount, left, top, current, apply) {
-  mount.querySelector(".o-dmrename")?.remove();
-  const input = document.createElement("input");
-  input.className = "o-dmrename";
-  input.value = current;
-  input.style.left = `${left}px`;
-  input.style.top = `${top}px`;
-  mount.appendChild(input);
-  input.focus();
-  input.select();
-  let done = false;
-  const commit = (save) => {
-    if (done) return;
-    done = true;
-    const v = input.value.trim();
-    input.remove();
-    if (save && v !== current) apply(v);
+  const pending = closeDmInput(true);
+  const open = () => {
+    const input = document.createElement("input");
+    input.className = "o-dmrename";
+    input.value = current;
+    input.style.left = `${left}px`;
+    input.style.top = `${top}px`;
+    mount.appendChild(input);
+    dmEdit = { input, was: current, apply };
+    input.focus();
+    input.select();
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") closeDmInput(true);
+      if (e.key === "Escape") closeDmInput(false);
+    });
+    input.addEventListener("blur", () => closeDmInput(true));
+    input.addEventListener("mousedown", (e) => e.stopPropagation());
   };
-  input.addEventListener("keydown", (e) => {
-    e.stopPropagation();
-    if (e.key === "Enter") commit(true);
-    if (e.key === "Escape") commit(false);
-  });
-  input.addEventListener("blur", () => commit(true));
-  input.addEventListener("mousedown", (e) => e.stopPropagation());
+  if (pending) setTimeout(open, 0);
+  else open();
 }
 function dmRename(mount, nodeEl, current, apply) {
   const r = nodeEl.getBoundingClientRect();
@@ -2518,13 +2597,14 @@ function wireEdgeHit(group, mount, svg, geom, mid, edge, data, edit) {
       edit.onSelectEdge(edge, hit.getBoundingClientRect());
       return;
     }
-    dmInputAt(
-      mount,
-      svg,
-      mid,
-      edge.label,
-      (label) => commit({ nodes: data.nodes, edges: data.edges.map((x) => x === edge ? { ...x, label } : x) })
-    );
+    const same = (d) => d.edges.filter((x) => x.from === edge.from && x.to === edge.to);
+    const nth = Math.max(0, same(data).indexOf(edge));
+    dmInputAt(mount, svg, mid, edge.label, (label) => {
+      const d = dmLive(data);
+      const target = same(d)[nth];
+      if (!target) return;
+      commit({ nodes: d.nodes, edges: d.edges.map((x) => x === target ? { ...x, label } : x) });
+    });
   });
   hit.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -2532,7 +2612,7 @@ function wireEdgeHit(group, mount, svg, geom, mid, edge, data, edit) {
     commit({ nodes: data.nodes, edges: data.edges.filter((x) => x !== edge) });
   });
 }
-function dmPort(svg, mount, source, kind, data, commit) {
+function dmPort(svg, mount, source, kind, data, commit, basis) {
   const g = svgEl("g", { class: "o-dport", transform: `translate(${source.vx} ${source.vy})` }, svg);
   svgEl("circle", { r: "9", fill: "var(--accent)", opacity: "0.9" }, g);
   svgEl("path", { d: "M -4 0 H 4 M 0 -4 V 4", stroke: "#fff", "stroke-width": "2", "stroke-linecap": "round" }, g);
@@ -2569,13 +2649,13 @@ function dmPort(svg, mount, source, kind, data, commit) {
         }
         return;
       }
-      openSpawnMenu(mount, svg, source, kind, data, commit);
+      openSpawnMenu(mount, svg, source, kind, data, commit, basis);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   });
 }
-function openSpawnMenu(mount, svg, source, kind, data, commit) {
+function openSpawnMenu(mount, svg, source, kind, data, commit, basis) {
   mount.querySelector(".o-dmenu")?.remove();
   const menu = document.createElement("div");
   menu.className = "o-dmenu";
@@ -2591,10 +2671,8 @@ function openSpawnMenu(mount, svg, source, kind, data, commit) {
     menu.style.top = `${rect.top - m.top + source.vy / Number(svg.viewBox.baseVal.height) * rect.height - 10}px`;
   }
   const choices = kind === "flow" ? [["Step", "box"], ["Decision", "diamond"], ["Terminal", "pill"]] : [["New node", ""]];
-  const vbW = Number(svg.viewBox.baseVal.width);
-  const vbH = Number(svg.viewBox.baseVal.height);
-  const sx = Math.round(Math.max(2, Math.min(98, source.vx / vbW * 100 + 15)) * 10) / 10;
-  const sy = Math.round(Math.max(4, Math.min(96, source.vy / vbH * 100 + 7)) * 10) / 10;
+  const sx = Math.round(Math.max(2, Math.min(98, source.vx / basis.w * 100 + 15)) * 10) / 10;
+  const sy = Math.round(Math.max(4, Math.min(96, source.vy / basis.h * 100 + 7)) * 10) / 10;
   for (const [label, shape] of choices) {
     const b = document.createElement("button");
     b.type = "button";
@@ -2635,32 +2713,59 @@ var FH = 60;
 var FGY = 34;
 var FVW = 1200;
 var FVH = 660;
-function flowAutoPositions(data) {
-  const depth = new Map(data.nodes.map((n) => [n.id, 0]));
-  for (let pass = 0; pass < data.nodes.length; pass++) {
+var FLOW_MIN_VH = FH * 2 + FGY + 48;
+function longestPathDepths(ids, edges) {
+  const out = /* @__PURE__ */ new Map();
+  edges.forEach((e, i) => {
+    const list = out.get(e.from);
+    if (list) list.push(i);
+    else out.set(e.from, [i]);
+  });
+  const back = /* @__PURE__ */ new Set();
+  const state = /* @__PURE__ */ new Map();
+  const visit = (id) => {
+    state.set(id, 1);
+    for (const i of out.get(id) ?? []) {
+      const seen = state.get(edges[i].to);
+      if (seen === 1) back.add(i);
+      else if (seen === void 0) visit(edges[i].to);
+    }
+    state.set(id, 2);
+  };
+  for (const id of ids) if (state.get(id) === void 0) visit(id);
+  const forward = edges.filter((_, i) => !back.has(i));
+  const depth = new Map(ids.map((id) => [id, 0]));
+  for (let pass = 0; pass < ids.length; pass++) {
     let moved = false;
-    for (const e of data.edges) {
+    for (const e of forward) {
       const want = (depth.get(e.from) ?? 0) + 1;
-      if (want > (depth.get(e.to) ?? 0) && want < data.nodes.length + 1) {
+      if (want > (depth.get(e.to) ?? 0) && want < ids.length + 1) {
         depth.set(e.to, want);
         moved = true;
       }
     }
     if (!moved) break;
   }
+  return { depth, back: new Set([...back].map((i) => edges[i])) };
+}
+function flowAutoPositions(data, pinnedVh) {
+  const { depth, back } = longestPathDepths(data.nodes.map((n) => n.id), data.edges);
   const cols = [];
   for (const n of data.nodes) (cols[depth.get(n.id) ?? 0] ??= []).push(n);
   const colCount = Math.max(1, cols.length);
+  const rowH = FH + FGY + 14;
+  const rows = Math.max(1, ...cols.filter(Boolean).map((c) => c.length));
+  const vh = pinnedVh ?? Math.max(FLOW_MIN_VH, Math.min(FVH, rows * rowH + 48));
   const pos = /* @__PURE__ */ new Map();
   cols.forEach((col, ci) => {
     col.forEach((n, ri) => {
       pos.set(n.id, {
         x: (ci + 0.5) / colCount * (FVW - 120) + 60,
-        y: FVH / 2 + (ri - (col.length - 1) / 2) * (FH + FGY + 14)
+        y: vh / 2 + (ri - (col.length - 1) / 2) * rowH
       });
     });
   });
-  return pos;
+  return { pos, vh, back };
 }
 var LHW = 140;
 var LANE_TOP = 16;
@@ -2671,20 +2776,10 @@ var LANE_MIN_H = 72;
 var FLOW_ROW_H = FH + FGY + 14;
 function laneDepthMap(laneNodes, edges) {
   const ids = new Set(laneNodes.map((n) => n.id));
-  const depth = new Map(laneNodes.map((n) => [n.id, 0]));
-  const internal = edges.filter((e) => ids.has(e.from) && ids.has(e.to));
-  for (let pass = 0; pass < laneNodes.length; pass++) {
-    let moved = false;
-    for (const e of internal) {
-      const want = (depth.get(e.from) ?? 0) + 1;
-      if (want > (depth.get(e.to) ?? 0) && want < laneNodes.length + 1) {
-        depth.set(e.to, want);
-        moved = true;
-      }
-    }
-    if (!moved) break;
-  }
-  return depth;
+  return longestPathDepths(
+    laneNodes.map((n) => n.id),
+    edges.filter((e) => ids.has(e.from) && ids.has(e.to))
+  );
 }
 function flowLanePositions(data) {
   const lanes = [...data.lanes ?? []].sort((a, b) => a.order - b.order);
@@ -2692,9 +2787,11 @@ function flowLanePositions(data) {
   for (const n of data.nodes) (buckets.find((b) => b.id === n.lane) ?? buckets[0]).nodes.push(n);
   const pos = /* @__PURE__ */ new Map();
   const bands = [];
+  const back = /* @__PURE__ */ new Set();
   let y = LANE_TOP;
   for (const bucket of buckets) {
-    const depth = laneDepthMap(bucket.nodes, data.edges);
+    const { depth, back: laneBack } = laneDepthMap(bucket.nodes, data.edges);
+    laneBack.forEach((e) => back.add(e));
     const cols = [];
     for (const n of bucket.nodes) (cols[depth.get(n.id) ?? 0] ??= []).push(n);
     const colCount = Math.max(1, cols.length);
@@ -2713,7 +2810,7 @@ function flowLanePositions(data) {
     bands.push({ id: bucket.id, label: bucket.label, color: bucket.color, actor: bucket.actor, y, h: bandH });
     y += bandH + LANE_GAP;
   }
-  return { pos, bands, vh: y + LANE_TOP };
+  return { pos, bands, vh: y + LANE_TOP, back };
 }
 function flowEdgePath(a, b, aw, ah, bw, bh) {
   const dx0 = b.x - a.x;
@@ -2763,12 +2860,25 @@ function straightEdgePath(a, b, aw, ah, bw, bh) {
   const y2 = b.y - uy * tB;
   return { x1, y1, x2, y2, mid: { x: (x1 + x2) / 2, y: (y1 + y2) / 2 } };
 }
+var BACK_DIP = FH * 0.9;
+function flowBackEdgeArc(a, b, ah, bh) {
+  if (Math.abs(a.y - b.y) > 0.5 || a.x === b.x) return null;
+  const y1 = a.y + ah / 2 + 6;
+  const y2 = b.y + bh / 2 + 12;
+  const cy = Math.max(y1, y2) + BACK_DIP;
+  return {
+    d: `M ${a.x} ${y1} C ${a.x} ${cy}, ${b.x} ${cy}, ${b.x} ${y2}`,
+    // the cubic's value at t = 0.5 — the lowest point of a symmetric dip, where the label sits
+    mid: { x: (a.x + b.x) / 2, y: (y1 + y2 + 6 * cy) / 8 },
+    lowest: cy
+  };
+}
 var edgeStyle = (e, kind) => e.style === "straight" || e.style === "curved" ? e.style : kind === "flow" ? "curved" : "straight";
 var edgeArrow = (e, kind) => e.arrow === "none" || e.arrow === "end" || e.arrow === "both" ? e.arrow : kind === "flow" ? "end" : "none";
 var edgeStroke = (e, kind) => e.color || (kind === "flow" ? "var(--ink-soft)" : "var(--rule)");
 var edgeWidth = (e, kind) => e.width ?? (kind === "flow" ? 1.6 : 2);
 function drawEdge(o) {
-  const { parent, mount, svg, markerId, e, a, b, aw, ah, bw, bh, kind, cross, edit, data } = o;
+  const { parent, mount, svg, markerId, e, a, b, aw, ah, bw, bh, kind, cross, back, edit, data } = o;
   const attrs = {
     fill: "none",
     stroke: edgeStroke(e, kind),
@@ -2781,7 +2891,12 @@ function drawEdge(o) {
   if (arrow === "both") attrs["marker-start"] = `url(#${markerId})`;
   let geom;
   let mid;
-  if (edgeStyle(e, kind) === "curved") {
+  const arc = back && e.from !== e.to ? flowBackEdgeArc(a, b, ah, bh) : null;
+  if (arc) {
+    svgEl("path", { ...attrs, d: arc.d }, parent);
+    geom = { d: arc.d };
+    mid = arc.mid;
+  } else if (edgeStyle(e, kind) === "curved") {
     const r = flowEdgePath(a, b, aw, ah, bw, bh);
     svgEl("path", { ...attrs, d: r.d }, parent);
     geom = { d: r.d };
@@ -2810,7 +2925,7 @@ function addEdgeMarker(svg) {
   svgEl("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "context-stroke" }, marker);
   return markerId;
 }
-function flowContentExtent(data, pos) {
+function flowContentExtent(data, pos, back) {
   let maxX = 0;
   let maxY = 0;
   for (const n of data.nodes) {
@@ -2822,6 +2937,14 @@ function flowContentExtent(data, pos) {
     const dy = n.shape === "diamond" ? 10 : 0;
     maxX = Math.max(maxX, p.x + w / 2 + dx);
     maxY = Math.max(maxY, p.y + h / 2 + dy);
+  }
+  const hOf = new Map(data.nodes.map((n) => [n.id, n.height ?? FH]));
+  for (const e of back) {
+    const a = pos.get(e.from);
+    const b = pos.get(e.to);
+    if (!a || !b || e.from === e.to) continue;
+    const arc = flowBackEdgeArc(a, b, hOf.get(e.from) ?? FH, hOf.get(e.to) ?? FH);
+    if (arc) maxY = Math.max(maxY, arc.lowest);
   }
   return { w: maxX + 24, h: maxY + 24 };
 }
@@ -2837,27 +2960,34 @@ function renderFlow(slide, data, opts = {}) {
   let bands = [];
   let laneOf = /* @__PURE__ */ new Map();
   const pos = /* @__PURE__ */ new Map();
+  let back = /* @__PURE__ */ new Set();
   if (hasLanes) {
     const layout2 = flowLanePositions(data);
     layout2.pos.forEach((p, id) => pos.set(id, p));
     vh = layout2.vh;
     bands = layout2.bands;
+    back = layout2.back;
     laneOf = new Map(data.nodes.map((n) => [n.id, n.lane ?? null]));
     for (const n of data.nodes) {
       if (n.x !== void 0 && n.y !== void 0) pos.set(n.id, { x: n.x / 100 * FVW, y: n.y / 100 * vh });
     }
   } else {
-    const auto = flowAutoPositions(data);
+    const pinned = data.nodes.some((n) => n.x !== void 0 && n.y !== void 0) ? FVH : void 0;
+    const auto = flowAutoPositions(data, pinned);
+    vh = auto.vh;
+    back = auto.back;
     for (const n of data.nodes) {
       pos.set(
         n.id,
-        n.x !== void 0 && n.y !== void 0 ? { x: n.x / 100 * FVW, y: n.y / 100 * FVH } : auto.get(n.id)
+        n.x !== void 0 && n.y !== void 0 ? { x: n.x / 100 * FVW, y: n.y / 100 * FVH } : auto.pos.get(n.id)
       );
     }
   }
-  const extent = flowContentExtent(data, pos);
+  const extent = flowContentExtent(data, pos, back);
   const vw = Math.max(FVW, extent.w);
   vh = Math.max(vh, extent.h);
+  const manualW = hasLanes ? vw : FVW;
+  const manualH = hasLanes ? vh : FVH;
   const svg = svgEl("svg", { viewBox: `0 0 ${vw} ${vh}`, class: "o-flow-svg", role: "img" });
   const markerId = addEdgeMarker(svg);
   if (hasLanes) {
@@ -2906,7 +3036,7 @@ function renderFlow(slide, data, opts = {}) {
     const an = byId.get(e.from);
     const bn = byId.get(e.to);
     const cross = hasLanes && laneOf.get(e.from) !== laneOf.get(e.to);
-    drawEdge({ parent: edges, mount, svg, markerId, e, a, b, aw: an.width ?? FW, ah: an.height ?? FH, bw: bn.width ?? FW, bh: bn.height ?? FH, kind: "flow", cross, edit: opts.edit, data });
+    drawEdge({ parent: edges, mount, svg, markerId, e, a, b, aw: an.width ?? FW, ah: an.height ?? FH, bw: bn.width ?? FW, bh: bn.height ?? FH, kind: "flow", cross, back: back.has(e), edit: opts.edit, data });
   }
   if (opts.edit && dmSelected && !data.nodes.some((n) => n.id === dmSelected)) dmSelected = null;
   const nodes = svgEl("g", {}, svg);
@@ -2921,7 +3051,7 @@ function renderFlow(slide, data, opts = {}) {
     if (opts.edit) {
       const ed = opts.edit;
       const commitXY = (x, y) => ed.onCommit({ nodes: data.nodes.map((m) => m.id === n.id ? { ...m, x, y } : m), edges: data.edges, lanes: data.lanes });
-      const suppress = wireNodeDrag(svg, g, { x: p.x / vw * 100, y: p.y / vh * 100 }, vw, vh, commitXY);
+      const suppress = wireNodeDrag(svg, g, { x: p.x / manualW * 100, y: p.y / manualH * 100 }, manualW, manualH, commitXY);
       wireNodeContextDelete(g, n.id, data, ed.onCommit);
       const halo2 = () => dmHalo(g, 0, 0, w + (n.shape === "diamond" ? 24 : 0), h + (n.shape === "diamond" ? 20 : 0));
       g.addEventListener("click", (e) => {
@@ -2946,12 +3076,10 @@ function renderFlow(slide, data, opts = {}) {
         e.preventDefault();
         dmCancelPendingSelect();
         ed.onSelectNode?.(null, null);
-        dmRename(
-          mount,
-          g,
-          n.label,
-          (label) => ed.onCommit({ nodes: data.nodes.map((m) => m.id === n.id ? { ...m, label } : m), edges: data.edges, lanes: data.lanes })
-        );
+        dmRename(mount, g, n.label, (label) => {
+          const d = dmLive(data);
+          ed.onCommit({ nodes: d.nodes.map((m) => m.id === n.id ? { ...m, label } : m), edges: d.edges, lanes: d.lanes });
+        });
       });
       if (dmSelected === n.id) halo2();
     }
@@ -2960,7 +3088,7 @@ function renderFlow(slide, data, opts = {}) {
     const ed = opts.edit;
     for (const n of data.nodes) {
       const p = pos.get(n.id);
-      dmPort(svg, mount, { id: n.id, vx: p.x + (n.width ?? FW) / 2 + (n.shape === "diamond" ? 14 : 2), vy: p.y }, "flow", data, ed.onCommit);
+      dmPort(svg, mount, { id: n.id, vx: p.x + (n.width ?? FW) / 2 + (n.shape === "diamond" ? 14 : 2), vy: p.y }, "flow", data, ed.onCommit, { w: manualW, h: manualH });
     }
     dmActive = { data, commit: ed.onCommit };
     wireDmKeys();
@@ -3279,12 +3407,10 @@ function renderGraph(slide, data, opts = {}) {
         e.preventDefault();
         dmCancelPendingSelect();
         ed.onSelectNode?.(null, null);
-        dmRename(
-          mount,
-          g,
-          n.label,
-          (label) => ed.onCommit({ nodes: data.nodes.map((m) => m.id === n.id ? { ...m, label } : m), edges: data.edges, lanes: data.lanes })
-        );
+        dmRename(mount, g, n.label, (label) => {
+          const d = dmLive(data);
+          ed.onCommit({ nodes: d.nodes.map((m) => m.id === n.id ? { ...m, label } : m), edges: d.edges, lanes: d.lanes });
+        });
       });
       if (dmSelected === n.id) halo2();
     }
@@ -3294,7 +3420,7 @@ function renderGraph(slide, data, opts = {}) {
     for (const n of data.nodes) {
       const p = nodePos(n);
       const shape = n.shape ?? "pill";
-      dmPort(svg, mount, { id: n.id, vx: p.x + (n.width ?? GW) / 2 + (shape === "diamond" ? 14 : 2), vy: p.y }, "graph", data, ed.onCommit);
+      dmPort(svg, mount, { id: n.id, vx: p.x + (n.width ?? GW) / 2 + (shape === "diamond" ? 14 : 2), vy: p.y }, "graph", data, ed.onCommit, { w: GVW, h: vh });
     }
     dmActive = { data, commit: ed.onCommit };
     wireDmKeys();
@@ -3302,7 +3428,7 @@ function renderGraph(slide, data, opts = {}) {
   mount.appendChild(svg);
   if (opts.edit) editButton(mount, opts.edit.onOpenEditor);
 }
-function wireNodeDrag(svg, g, start, vw, vh, commitXY) {
+function wireNodeDrag(svg, g, start, bw, bh, commitXY) {
   const flag = { dragged: false };
   g.style.cursor = "grab";
   g.addEventListener("pointerdown", (down) => {
@@ -3312,15 +3438,15 @@ function wireNodeDrag(svg, g, start, vw, vh, commitXY) {
     let ny = start.y;
     const move = (e) => {
       const p = clientToVb(svg, e.clientX, e.clientY);
-      nx = p.x / vw * 100;
-      ny = p.y / vh * 100;
+      nx = p.x / bw * 100;
+      ny = p.y / bh * 100;
       if (dmSnap) {
         nx = Math.round(nx / 5) * 5;
         ny = Math.round(ny / 5) * 5;
       }
       nx = Math.max(2, Math.min(98, nx));
       ny = Math.max(4, Math.min(96, ny));
-      g.setAttribute("transform", `translate(${nx / 100 * vw} ${ny / 100 * vh})`);
+      g.setAttribute("transform", `translate(${nx / 100 * bw} ${ny / 100 * bh})`);
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
@@ -3722,17 +3848,129 @@ function lerpHex(from, to, t) {
   };
   return "#" + ch(0) + ch(1) + ch(2);
 }
+function isCoveredByMerge(rects, r, c) {
+  for (const m of rects)
+    if (r >= m.r0 && r <= m.r1 && c >= m.c0 && c <= m.c1 && !(m.r0 === r && m.c0 === c))
+      return true;
+  return false;
+}
+function collectRangeCells(values, rect, covered) {
+  const cells = [];
+  const rEnd = Math.min(rect.r1, values.length - 1);
+  for (let r = rect.r0; r <= rEnd; r++) {
+    const row = values[r];
+    if (!row)
+      continue;
+    const cEnd = Math.min(rect.c1, row.length - 1);
+    for (let c = rect.c0; c <= cEnd; c++) {
+      if (covered(r, c))
+        continue;
+      cells.push({ r, c, s: row[c] ?? "" });
+    }
+  }
+  return cells;
+}
+function numericValues(cells) {
+  return cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
+}
+function paintDupes(cells, rule, put) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const cell of cells) {
+    const s2 = cell.s.trim();
+    if (s2 !== "")
+      counts.set(s2, (counts.get(s2) ?? 0) + 1);
+  }
+  for (const cell of cells) {
+    const s2 = cell.s.trim();
+    if (s2 !== "" && (counts.get(s2) ?? 0) >= 2)
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function paintEq(cells, rule, put) {
+  const target = (rule.text ?? "").trim();
+  if (target === "")
+    return;
+  const targetIsNum = isNumeric(target);
+  const numTarget = targetIsNum ? Number(target) : 0;
+  const targetLower = target.toLowerCase();
+  for (const cell of cells) {
+    const s2 = cell.s.trim();
+    if (s2 === "")
+      continue;
+    const match = targetIsNum ? isNumeric(s2) && Number(s2) === numTarget : s2.toLowerCase() === targetLower;
+    if (match)
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function clearsThreshold(v, rule) {
+  const th = rule.value ?? 0;
+  if (rule.kind === "gt")
+    return v > th;
+  return v < th;
+}
+function paintCompare(cells, rule, put) {
+  for (const cell of cells) {
+    if (!isNumeric(cell.s))
+      continue;
+    if (clearsThreshold(Number(cell.s), rule))
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function withinRank(v, cutoff, rule) {
+  if (rule.kind === "top")
+    return v >= cutoff;
+  return v <= cutoff;
+}
+function paintRank(cells, rule, put) {
+  const nums = numericValues(cells);
+  if (!nums.length)
+    return;
+  const n = Math.max(1, Math.floor(rule.n ?? 1));
+  const sorted = nums.slice().sort((x, y) => rule.kind === "top" ? y - x : x - y);
+  const cutoff = sorted[Math.min(n, sorted.length) - 1];
+  for (const cell of cells) {
+    if (!isNumeric(cell.s))
+      continue;
+    if (withinRank(Number(cell.s), cutoff, rule))
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function paintScale(cells, rule, put) {
+  if (!rule.from || !rule.to)
+    return;
+  const nums = numericValues(cells);
+  if (!nums.length)
+    return;
+  let mn = nums[0], mx = nums[0];
+  for (const v of nums) {
+    if (v < mn)
+      mn = v;
+    if (v > mx)
+      mx = v;
+  }
+  const span2 = mx - mn;
+  for (const cell of cells) {
+    if (!isNumeric(cell.s))
+      continue;
+    const t = span2 === 0 ? 1 : (Number(cell.s) - mn) / span2;
+    put(cell.r, cell.c, lerpHex(rule.from, rule.to, t));
+  }
+}
+var COND_PAINTERS = /* @__PURE__ */ new Map([
+  ["dupes", paintDupes],
+  ["eq", paintEq],
+  ["gt", paintCompare],
+  ["lt", paintCompare],
+  ["top", paintRank],
+  ["bot", paintRank],
+  ["scale", paintScale]
+]);
 function evaluateCondFmt(values, rules, merges) {
   const out = /* @__PURE__ */ new Map();
   if (!rules || !rules.length)
     return out;
   const rects = merges ?? [];
-  const covered = (r, c) => {
-    for (const m of rects)
-      if (r >= m.r0 && r <= m.r1 && c >= m.c0 && c <= m.c1 && !(m.r0 === r && m.c0 === c))
-        return true;
-    return false;
-  };
+  const covered = (r, c) => isCoveredByMerge(rects, r, c);
   const put = (r, c, fill, color) => {
     if (!fill && !color)
       return;
@@ -3748,90 +3986,10 @@ function evaluateCondFmt(values, rules, merges) {
     const rect = a1RangeToRect(rule.range);
     if (!rect)
       continue;
-    const cells = [];
-    const rEnd = Math.min(rect.r1, values.length - 1);
-    for (let r = rect.r0; r <= rEnd; r++) {
-      const row = values[r];
-      if (!row)
-        continue;
-      const cEnd = Math.min(rect.c1, row.length - 1);
-      for (let c = rect.c0; c <= cEnd; c++) {
-        if (covered(r, c))
-          continue;
-        cells.push({ r, c, s: row[c] ?? "" });
-      }
-    }
-    if (rule.kind === "dupes") {
-      const counts = /* @__PURE__ */ new Map();
-      for (const cell of cells) {
-        const s2 = cell.s.trim();
-        if (s2 !== "")
-          counts.set(s2, (counts.get(s2) ?? 0) + 1);
-      }
-      for (const cell of cells) {
-        const s2 = cell.s.trim();
-        if (s2 !== "" && (counts.get(s2) ?? 0) >= 2)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "eq") {
-      const target = (rule.text ?? "").trim();
-      if (target === "")
-        continue;
-      const targetIsNum = isNumeric(target);
-      const numTarget = targetIsNum ? Number(target) : 0;
-      const targetLower = target.toLowerCase();
-      for (const cell of cells) {
-        const s2 = cell.s.trim();
-        if (s2 === "")
-          continue;
-        const match = targetIsNum ? isNumeric(s2) && Number(s2) === numTarget : s2.toLowerCase() === targetLower;
-        if (match)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "gt" || rule.kind === "lt") {
-      const th = rule.value ?? 0;
-      for (const cell of cells) {
-        if (!isNumeric(cell.s))
-          continue;
-        const v = Number(cell.s);
-        if (rule.kind === "gt" ? v > th : v < th)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "top" || rule.kind === "bot") {
-      const nums = cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
-      if (!nums.length)
-        continue;
-      const n = Math.max(1, Math.floor(rule.n ?? 1));
-      const sorted = nums.slice().sort((x, y) => rule.kind === "top" ? y - x : x - y);
-      const cutoff = sorted[Math.min(n, sorted.length) - 1];
-      for (const cell of cells) {
-        if (!isNumeric(cell.s))
-          continue;
-        const v = Number(cell.s);
-        if (rule.kind === "top" ? v >= cutoff : v <= cutoff)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "scale") {
-      if (!rule.from || !rule.to)
-        continue;
-      const nums = cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
-      if (!nums.length)
-        continue;
-      let mn = nums[0], mx = nums[0];
-      for (const v of nums) {
-        if (v < mn)
-          mn = v;
-        if (v > mx)
-          mx = v;
-      }
-      const span2 = mx - mn;
-      for (const cell of cells) {
-        if (!isNumeric(cell.s))
-          continue;
-        const t = span2 === 0 ? 1 : (Number(cell.s) - mn) / span2;
-        put(cell.r, cell.c, lerpHex(rule.from, rule.to, t));
-      }
-    }
+    const paint = COND_PAINTERS.get(rule.kind);
+    if (!paint)
+      continue;
+    paint(collectRangeCells(values, rect, covered), rule, put);
   }
   return out;
 }
@@ -3840,6 +3998,11 @@ function evaluateCondFmt(values, rules, merges) {
 var DRAW_MAX_ELEMENTS = 200;
 var DRAW_MAX_POINTS = 1200;
 var DRAW_TYPES = ["rect", "diamond", "ellipse", "arrow", "line", "freedraw", "text"];
+var DRAW_FILL_STYLES = ["none", "hachure", "cross", "solid"];
+var DRAW_STROKE_STYLES = ["solid", "dashed", "dotted"];
+var DRAW_FONTS = ["playfair", "lora", "inter", "source-serif", "caveat"];
+var DRAW_TEXT_ALIGNS = ["left", "center", "right"];
+var DRAW_ARROW_HEADS = ["end", "both"];
 
 // ../format/dist/venn-data.js
 var VENN_SIZE_MIN = 0.5;
@@ -6798,6 +6961,81 @@ function renderTimeseries(svg, data, w, lay) {
     }
   });
 }
+function drawBarFamily(svg, data, w, lay) {
+  (data.funnel ? renderFunnel : data.polar ? renderRadialBar : lay.horizontal ? renderBarH : renderBar)(svg, data, w, lay);
+}
+function drawLineFamily(svg, data, w, lay, ns) {
+  (data.stream ? renderStream : renderLine)(svg, data, w, lay, ns);
+}
+function drawScatterFamily(svg, data, w, lay) {
+  (data.hexbin ? renderHexbin : renderScatter)(svg, data, w, lay);
+}
+var CHART_PICTURES = /* @__PURE__ */ new Map([
+  ["bar", drawBarFamily],
+  ["line", drawLineFamily],
+  ["timeseries", renderTimeseries],
+  ["scatter", drawScatterFamily],
+  ["heatmap", renderHeatmap],
+  ["treemap", renderTreemap],
+  ["sankey", renderSankey],
+  ["waterfall", renderWaterfall],
+  ["boxplot", renderBox],
+  ["radar", renderRadar],
+  ["gauge", renderGauge]
+]);
+function applyChartTextVars(fig, mount, data) {
+  if (typeof data.textColor === "string") mount.style.setProperty("--chart-ink", data.textColor);
+  else mount.style.removeProperty("--chart-ink");
+  const fontStack = data.textFont ? CHART_FONT_STACK[data.textFont] : void 0;
+  if (fontStack) {
+    mount.style.setProperty("--chart-font", fontStack);
+    fig.style.setProperty("--chart-font", fontStack);
+  } else {
+    mount.style.removeProperty("--chart-font");
+    fig.style.removeProperty("--chart-font");
+  }
+  if (typeof data.textScale === "number") {
+    const scale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, data.textScale));
+    mount.style.setProperty("--chart-tsz", String(scale));
+  } else {
+    mount.style.removeProperty("--chart-tsz");
+  }
+}
+function drawTitleBand(svg, data, w) {
+  if (data.title) {
+    const t = svgEl2("text", { x: w / 2, y: 22, "text-anchor": "middle", class: "o-chart-title" }, svg);
+    t.textContent = data.title;
+  }
+  if (data.subtitle) {
+    const st = svgEl2("text", { x: w / 2, y: data.title ? 38 : 24, "text-anchor": "middle", class: "o-chart-sub" }, svg);
+    st.textContent = data.subtitle;
+  }
+}
+var KEYLESS_CHART_TYPES = /* @__PURE__ */ new Set(["gauge", "heatmap", "sankey"]);
+function legendEntries(data) {
+  if (KEYLESS_CHART_TYPES.has(data.type) || data.hexbin === true) return [];
+  if (data.type === "treemap") return treemapLegend(data);
+  if (data.type === "pie" || data.funnel === true || data.polar === true) {
+    return data.labels.map((l, i) => ({ label: l, color: sliceColor(data, i) }));
+  }
+  if (data.type === "waterfall") return waterfallLegend(data);
+  return data.series.map((s2) => ({ label: s2.name, color: s2.color })).concat(data.pareto ? [{ label: PARETO_LEGEND, color: paretoColor(data) }] : []);
+}
+function buildChartLegend(mount, data) {
+  const legend = document.createElement("div");
+  legend.className = "o-chart-legend";
+  mount.appendChild(legend);
+  for (const e of legendEntries(data)) {
+    const sw = document.createElement("span");
+    sw.className = "o-chart-swatch";
+    const dot = document.createElement("span");
+    dot.className = "sw";
+    dot.style.background = e.color;
+    sw.appendChild(dot);
+    sw.appendChild(document.createTextNode(" " + e.label));
+    legend.appendChild(sw);
+  }
+}
 function renderChart(figure, data, forPrint = false) {
   const mount = figure.querySelector("[data-chart-mount]");
   if (!mount) return;
@@ -6819,59 +7057,11 @@ function renderChart(figure, data, forPrint = false) {
   svg.setAttribute("role", "img");
   svg.style.maxWidth = `${w}px`;
   mount.appendChild(svg);
-  const fig = figure;
-  if (typeof data.textColor === "string") mount.style.setProperty("--chart-ink", data.textColor);
-  else mount.style.removeProperty("--chart-ink");
-  const fontStack = data.textFont ? CHART_FONT_STACK[data.textFont] : void 0;
-  if (fontStack) {
-    mount.style.setProperty("--chart-font", fontStack);
-    fig.style.setProperty("--chart-font", fontStack);
-  } else {
-    mount.style.removeProperty("--chart-font");
-    fig.style.removeProperty("--chart-font");
-  }
-  if (typeof data.textScale === "number") {
-    const scale = Math.min(TEXT_SCALE_MAX, Math.max(TEXT_SCALE_MIN, data.textScale));
-    mount.style.setProperty("--chart-tsz", String(scale));
-  } else {
-    mount.style.removeProperty("--chart-tsz");
-  }
-  if (data.title) {
-    const t = svgEl2("text", { x: w / 2, y: 22, "text-anchor": "middle", class: "o-chart-title" }, svg);
-    t.textContent = data.title;
-  }
-  if (data.subtitle) {
-    const st = svgEl2("text", { x: w / 2, y: data.title ? 38 : 24, "text-anchor": "middle", class: "o-chart-sub" }, svg);
-    st.textContent = data.subtitle;
-  }
-  if (data.type === "bar") (data.funnel ? renderFunnel : data.polar ? renderRadialBar : lay.horizontal ? renderBarH : renderBar)(svg, data, w, lay);
-  else if (data.type === "line") (data.stream ? renderStream : renderLine)(svg, data, w, lay, ns);
-  else if (data.type === "timeseries") renderTimeseries(svg, data, w, lay);
-  else if (data.type === "scatter") (data.hexbin ? renderHexbin : renderScatter)(svg, data, w, lay);
-  else if (data.type === "heatmap") renderHeatmap(svg, data, w, lay);
-  else if (data.type === "treemap") renderTreemap(svg, data, w, lay);
-  else if (data.type === "sankey") renderSankey(svg, data, w, lay);
-  else if (data.type === "waterfall") renderWaterfall(svg, data, w, lay);
-  else if (data.type === "boxplot") renderBox(svg, data, w, lay);
-  else if (data.type === "radar") renderRadar(svg, data, w, lay);
-  else if (data.type === "gauge") renderGauge(svg, data, w, lay);
-  else renderPie(svg, data, w, lay);
+  applyChartTextVars(figure, mount, data);
+  drawTitleBand(svg, data, w);
+  (CHART_PICTURES.get(data.type) ?? renderPie)(svg, data, w, lay, ns);
   if (data.legend === false) return;
-  const legend = document.createElement("div");
-  legend.className = "o-chart-legend";
-  mount.appendChild(legend);
-  const byCategory = data.type === "pie" || data.funnel === true || data.polar === true;
-  const entries = data.type === "gauge" || data.type === "heatmap" || data.type === "sankey" || data.hexbin === true ? [] : data.type === "treemap" ? treemapLegend(data) : byCategory ? data.labels.map((l, i) => ({ label: l, color: sliceColor(data, i) })) : data.type === "waterfall" ? waterfallLegend(data) : data.series.map((s2) => ({ label: s2.name, color: s2.color })).concat(data.pareto ? [{ label: PARETO_LEGEND, color: paretoColor(data) }] : []);
-  for (const e of entries) {
-    const sw = document.createElement("span");
-    sw.className = "o-chart-swatch";
-    const dot = document.createElement("span");
-    dot.className = "sw";
-    dot.style.background = e.color;
-    sw.appendChild(dot);
-    sw.appendChild(document.createTextNode(" " + e.label));
-    legend.appendChild(sw);
-  }
+  buildChartLegend(mount, data);
 }
 function parseChartFigureData(figure) {
   const block = figure.querySelector('script[data-odata="chart"]');
@@ -7043,52 +7233,80 @@ function cleanFormat(raw) {
   if (typeof raw.dateFmt === "string" && raw.dateFmt.length <= 32) f.dateFmt = raw.dateFmt;
   return f;
 }
+var okColour = (x) => typeof x === "string" && (FILL_TOKEN.test(x) || FILL_HEX.test(x));
+var isAlign = (x) => x === "left" || x === "center" || x === "right";
+var isIntInRange = (x, lo2, hi2) => typeof x === "number" && Number.isInteger(x) && x >= lo2 && x <= hi2;
+var STYLE_FLAGS = ["b", "i", "u", "s"];
+function cleanOrient(x) {
+  if (x === "up" || x === "down" || x === "stack") return x;
+  if (isIntInRange(x, -90, 90) && x !== 0) return x;
+  return void 0;
+}
 function cleanStyle(raw) {
   if (!isMap(raw)) return void 0;
   const s2 = {};
-  if (raw.b === 1) s2.b = 1;
-  if (raw.i === 1) s2.i = 1;
-  if (raw.u === 1) s2.u = 1;
-  if (raw.s === 1) s2.s = 1;
-  if (raw.align === "left" || raw.align === "center" || raw.align === "right") s2.align = raw.align;
-  if (typeof raw.fill === "string" && (FILL_TOKEN.test(raw.fill) || FILL_HEX.test(raw.fill))) s2.fill = raw.fill;
+  for (const k of STYLE_FLAGS) if (raw[k] === 1) s2[k] = 1;
+  if (isAlign(raw.align)) s2.align = raw.align;
+  if (okColour(raw.fill)) s2.fill = raw.fill;
   if (raw.wrap === true) s2.wrap = true;
-  if (typeof raw.color === "string" && (FILL_TOKEN.test(raw.color) || FILL_HEX.test(raw.color))) s2.color = raw.color;
-  if (typeof raw.indent === "number" && Number.isInteger(raw.indent) && raw.indent >= 0 && raw.indent <= 15) s2.indent = raw.indent;
-  if (raw.orient === "up" || raw.orient === "down" || raw.orient === "stack") s2.orient = raw.orient;
-  else if (typeof raw.orient === "number" && Number.isInteger(raw.orient) && raw.orient >= -90 && raw.orient <= 90 && raw.orient !== 0) s2.orient = raw.orient;
+  if (okColour(raw.color)) s2.color = raw.color;
+  if (isIntInRange(raw.indent, 0, 15)) s2.indent = raw.indent;
+  const orient = cleanOrient(raw.orient);
+  if (orient !== void 0) s2.orient = orient;
   return Object.keys(s2).length ? s2 : void 0;
 }
 var COND_KINDS = /* @__PURE__ */ new Set(["dupes", "gt", "lt", "eq", "top", "bot", "scale"]);
-var okColour = (x) => typeof x === "string" && (FILL_TOKEN.test(x) || FILL_HEX.test(x));
-function cleanCondRule(raw) {
-  if (!isMap(raw)) return void 0;
+var okHex = (x) => typeof x === "string" && FILL_HEX.test(x);
+function condRuleHead(raw) {
   if (typeof raw.range !== "string" || !a1RangeToRect(raw.range)) return void 0;
   const kind = raw.kind;
   if (typeof kind !== "string" || !COND_KINDS.has(kind)) return void 0;
-  const rule = { range: raw.range, kind };
+  return { range: raw.range, kind };
+}
+function applyScaleRange(rule, raw) {
+  if (!okHex(raw.from) || !okHex(raw.to)) return false;
+  rule.from = raw.from;
+  rule.to = raw.to;
+  return true;
+}
+function applyRulePaint(rule, raw) {
   const fill = okColour(raw.fill) ? raw.fill : void 0;
   const color = okColour(raw.color) ? raw.color : void 0;
-  if (kind === "scale") {
-    if (!(typeof raw.from === "string" && FILL_HEX.test(raw.from)) || !(typeof raw.to === "string" && FILL_HEX.test(raw.to))) return void 0;
-    rule.from = raw.from;
-    rule.to = raw.to;
-    return rule;
-  }
-  if (!fill && !color) return void 0;
+  if (!fill && !color) return false;
   if (fill) rule.fill = fill;
   if (color) rule.color = color;
-  if (kind === "gt" || kind === "lt") {
-    if (typeof raw.value !== "number" || !Number.isFinite(raw.value)) return void 0;
-    rule.value = raw.value;
-  } else if (kind === "eq") {
-    if (typeof raw.text !== "string" || raw.text.trim() === "") return void 0;
-    rule.text = raw.text;
-  } else if (kind === "top" || kind === "bot") {
-    if (typeof raw.n !== "number" || !Number.isInteger(raw.n) || raw.n < 1) return void 0;
-    rule.n = raw.n;
-  }
-  return rule;
+  return true;
+}
+var applyThreshold = (rule, raw) => {
+  if (typeof raw.value !== "number" || !Number.isFinite(raw.value)) return false;
+  rule.value = raw.value;
+  return true;
+};
+var applyMatchText = (rule, raw) => {
+  if (typeof raw.text !== "string" || raw.text.trim() === "") return false;
+  rule.text = raw.text;
+  return true;
+};
+var applyRankCount = (rule, raw) => {
+  if (typeof raw.n !== "number" || !Number.isInteger(raw.n) || raw.n < 1) return false;
+  rule.n = raw.n;
+  return true;
+};
+var COND_PAYLOAD = /* @__PURE__ */ new Map([
+  ["gt", applyThreshold],
+  ["lt", applyThreshold],
+  ["eq", applyMatchText],
+  ["top", applyRankCount],
+  ["bot", applyRankCount]
+]);
+function cleanCondRule(raw) {
+  if (!isMap(raw)) return void 0;
+  const rule = condRuleHead(raw);
+  if (!rule) return void 0;
+  if (rule.kind === "scale") return applyScaleRange(rule, raw) ? rule : void 0;
+  if (!applyRulePaint(rule, raw)) return void 0;
+  const payload = COND_PAYLOAD.get(rule.kind);
+  return !payload || payload(rule, raw) ? rule : void 0;
 }
 function cleanCondFmt(raw) {
   if (!Array.isArray(raw)) return [];
@@ -7331,11 +7549,7 @@ function openFilterPop(anchor, f, onChange) {
   }, 0);
   search?.focus();
 }
-function renderTable(slide, led, doc) {
-  const mount = slide.querySelector("[data-table-mount]");
-  if (!mount) return;
-  closeFilterPop();
-  mount.textContent = "";
+function tableView(led) {
   const fullNc = Math.max(1, gridWidth(led));
   const fullNr = led.rows.length;
   const rect = led.bakeRect;
@@ -7344,157 +7558,197 @@ function renderTable(slide, led, doc) {
   const allMerges = mergeRects(led.merges);
   const merges = rect ? clipMergesToCrop(allMerges, r0, c0, r1, c1) : allMerges;
   const overlays = led.condFmt.length ? evaluateCondFmt(led.rows, led.condFmt, allMerges) : null;
+  return { r0, r1, c0, c1, fullNr, fullNc, cropped: !!rect, merges, overlays };
+}
+function buildLedgerCard(slide, led, mount, doc) {
   const root = el2("div", "o-ledger", mount);
   const card = el2("div", "lv", root);
   if (doc && doc.sheets.length >= 2) buildTabPills(slide, doc, card);
   if (led.views && led.views.length >= 2) buildViewPills(slide, led, card, doc);
   if (led.kpis.length) buildKpis(led, card);
   if (led.orefreshed) el2("div", "lv-asof", card).textContent = "as of " + led.orefreshed.slice(0, 10);
-  const wrap = el2("div", "lv-wrap", card);
-  const table = el2("table", "lv-table", wrap);
+  return card;
+}
+function buildColgroup(led, table, view) {
   const colgroup = document.createElement("colgroup");
-  for (let c = c0; c <= c1; c++) {
+  for (let c = view.c0; c <= view.c1; c++) {
     const col = document.createElement("col");
     const w = led.columns[c]?.width;
     if (w && Number.isFinite(w)) col.style.width = w + "px";
     colgroup.appendChild(col);
   }
   table.appendChild(colgroup);
+}
+function buildHeadRow(led, table, view) {
   const thead = el2("thead", "", table);
   const hr = el2("tr", "", thead);
-  const funnelBtns = /* @__PURE__ */ new Map();
-  let openColFilter;
-  for (let c = c0; c <= c1; c++) {
+  for (let c = view.c0; c <= view.c1; c++) {
     const align = led.columns[c]?.align ?? (colIsNumeric(led, c) ? "right" : "left");
     const th = el2("th", "lv-h a-" + align, hr);
     th.textContent = led.columns[c]?.label ?? "";
   }
+}
+function funnelRegion(led, view) {
   const filter = led.filter;
-  const filterRow = filter && filter.row >= r0 && filter.row <= r1 ? filter.row : -1;
-  const filterColSet = new Set(filterRow >= 0 ? filter.cols.filter((c) => c >= c0 && c <= c1) : []);
+  const row = filter && filter.row >= view.r0 && filter.row <= view.r1 ? filter.row : -1;
+  const cols = new Set(row >= 0 ? filter.cols.filter((c) => c >= view.c0 && c <= view.c1) : []);
+  return { row, cols, btns: /* @__PURE__ */ new Map() };
+}
+function addFunnelButton(td, c, funnels) {
+  const b = el2("button", "lv-funnel", td);
+  b.type = "button";
+  b.setAttribute("aria-label", "Filter the rows below");
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    funnels.open?.(c, b);
+  });
+  funnels.btns.set(c, b);
+}
+function buildBodyRow(led, tbody, view, r, funnels) {
+  const tr = el2("tr", "", tbody);
+  const h = led.rowHeights[String(r)];
+  if (typeof h === "number" && h > 0) tr.style.height = h + "px";
+  for (let c = view.c0; c <= view.c1; c++) {
+    const m = view.merges.length ? mergeAt(view.merges, r, c) : null;
+    if (m && !(m.r0 === r && m.c0 === c)) continue;
+    const span2 = m ? { rowspan: m.r1 - m.r0 + 1, colspan: m.c1 - m.c0 + 1 } : null;
+    const td = renderCell(led, tr, r, c, span2, view.overlays?.get(a1(r, c)));
+    if (r === funnels.row && funnels.cols.has(c)) addFunnelButton(td, c, funnels);
+  }
+  return tr;
+}
+function buildBodyRows(led, table, view, funnels) {
   const tbody = el2("tbody", "", table);
   const bodyRows = [];
-  if (fullNr === 0 || r1 < r0) {
+  if (view.fullNr === 0 || view.r1 < view.r0) {
     const tr = el2("tr", "", tbody);
     const td = el2("td", "lv-empty", tr);
-    td.setAttribute("colspan", String(c1 - c0 + 1));
+    td.setAttribute("colspan", String(view.c1 - view.c0 + 1));
     td.textContent = "No rows.";
-  } else {
-    for (let r = r0; r <= r1; r++) {
-      const tr = el2("tr", "", tbody);
-      bodyRows.push({ tr, r });
-      const h = led.rowHeights[String(r)];
-      if (typeof h === "number" && h > 0) tr.style.height = h + "px";
-      for (let c = c0; c <= c1; c++) {
-        const m = merges.length ? mergeAt(merges, r, c) : null;
-        if (m && !(m.r0 === r && m.c0 === c)) continue;
-        const span2 = m ? { rowspan: m.r1 - m.r0 + 1, colspan: m.c1 - m.c0 + 1 } : null;
-        const td = renderCell(led, tr, r, c, span2, overlays?.get(a1(r, c)));
-        if (r === filterRow && filterColSet.has(c)) {
-          const b = el2("button", "lv-funnel", td);
-          b.type = "button";
-          b.setAttribute("aria-label", "Filter the rows below");
-          b.addEventListener("click", (e) => {
-            e.stopPropagation();
-            openColFilter?.(c, b);
-          });
-          funnelBtns.set(c, b);
+    return bodyRows;
+  }
+  for (let r = view.r0; r <= view.r1; r++) bodyRows.push({ tr: buildBodyRow(led, tbody, view, r, funnels), r });
+  return bodyRows;
+}
+function buildTotals(led, table, card, view) {
+  if (!led.totals?.on || view.cropped) return null;
+  buildFooter(led, table, view.fullNc);
+  const totHint = el2("div", "lv-tothint", card);
+  totHint.textContent = "\u03A3 totals reflect all rows";
+  totHint.style.display = "none";
+  return totHint;
+}
+function columnFilter(led, belowRows, c) {
+  const disp = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Set();
+  for (const { r } of belowRows) {
+    const baked = led.rows[r]?.[c] ?? "";
+    const v = baked === "" ? "" : formatCell(baked, fmtAt(led, r, c));
+    disp.set(r, v);
+    seen.add(v);
+  }
+  return { allowed: new Set(seen), values: [...seen], disp };
+}
+function wireFilters(led, bodyRows, funnels, totHint) {
+  const belowRows = bodyRows.filter((br) => br.r > funnels.row);
+  const filters = /* @__PURE__ */ new Map();
+  for (const c of funnels.btns.keys()) filters.set(c, columnFilter(led, belowRows, c));
+  const applyFilters = () => {
+    for (const { tr, r } of belowRows) {
+      let show = true;
+      for (const f of filters.values()) {
+        if (!f.allowed.has(f.disp.get(r) ?? "")) {
+          show = false;
+          break;
         }
       }
+      tr.style.display = show ? "" : "none";
     }
-  }
-  let totHint = null;
-  if (led.totals?.on && !rect) {
-    buildFooter(led, table, fullNc);
-    totHint = el2("div", "lv-tothint", card);
-    totHint.textContent = "\u03A3 totals reflect all rows";
-    totHint.style.display = "none";
-  }
-  if (funnelBtns.size) {
-    const dispAt = (r, c) => {
-      const baked = led.rows[r]?.[c] ?? "";
-      return baked === "" ? "" : formatCell(baked, fmtAt(led, r, c));
-    };
-    const belowRows = bodyRows.filter((br) => br.r > filterRow);
-    const filters = /* @__PURE__ */ new Map();
-    for (const c of funnelBtns.keys()) {
-      const disp = /* @__PURE__ */ new Map();
-      const seen = /* @__PURE__ */ new Set();
-      for (const { r } of belowRows) {
-        const v = dispAt(r, c);
-        disp.set(r, v);
-        seen.add(v);
-      }
-      filters.set(c, { allowed: new Set(seen), values: [...seen], disp });
+    let anyActive = false;
+    for (const [c, f] of filters) {
+      const active = f.allowed.size < f.values.length;
+      funnels.btns.get(c)?.classList.toggle("on", active);
+      if (active) anyActive = true;
     }
-    const applyFilters = () => {
-      for (const { tr, r } of belowRows) {
-        let show = true;
-        for (const f of filters.values()) {
-          if (!f.allowed.has(f.disp.get(r) ?? "")) {
-            show = false;
-            break;
-          }
-        }
-        tr.style.display = show ? "" : "none";
-      }
-      let anyActive = false;
-      for (const [c, f] of filters) {
-        const active = f.allowed.size < f.values.length;
-        funnelBtns.get(c)?.classList.toggle("on", active);
-        if (active) anyActive = true;
-      }
-      if (totHint) totHint.style.display = anyActive ? "" : "none";
-    };
-    openColFilter = (c, anchor) => {
-      const f = filters.get(c);
-      if (f) openFilterPop(anchor, f, applyFilters);
-    };
+    if (totHint) totHint.style.display = anyActive ? "" : "none";
+  };
+  funnels.open = (c, anchor) => {
+    const f = filters.get(c);
+    if (f) openFilterPop(anchor, f, applyFilters);
+  };
+}
+function renderTable(slide, led, doc) {
+  const mount = slide.querySelector("[data-table-mount]");
+  if (!mount) return;
+  closeFilterPop();
+  mount.textContent = "";
+  const view = tableView(led);
+  const card = buildLedgerCard(slide, led, mount, doc);
+  const wrap = el2("div", "lv-wrap", card);
+  const table = el2("table", "lv-table", wrap);
+  buildColgroup(led, table, view);
+  const funnels = funnelRegion(led, view);
+  buildHeadRow(led, table, view);
+  const bodyRows = buildBodyRows(led, table, view, funnels);
+  const totHint = buildTotals(led, table, card, view);
+  if (funnels.btns.size) wireFilters(led, bodyRows, funnels, totHint);
+}
+function applyMergeSpan(td, span2) {
+  if (!span2 || span2.rowspan <= 1 && span2.colspan <= 1) return;
+  td.setAttribute("colspan", String(span2.colspan));
+  td.setAttribute("rowspan", String(span2.rowspan));
+  td.classList.add("merged");
+}
+function applyBakedValue(td, baked, fmt) {
+  el2("span", "v", td).textContent = baked === "" ? "" : formatCell(baked, fmt);
+  if (baked !== "" && isNumeric(baked)) td.classList.add("num");
+  if (baked !== "" && isErrStr(baked)) td.classList.add("err");
+}
+function applyTextFlags(td, style) {
+  if (style.b) td.classList.add("bold");
+  if (style.i) td.classList.add("italic");
+  if (style.u) td.classList.add("underline");
+  if (style.s) td.classList.add("strike");
+  if (style.align) td.classList.add("al-" + style.align);
+  if (typeof style.fill === "string") {
+    if (FILL_TOKEN.test(style.fill)) td.classList.add(style.fill);
+    else if (FILL_HEX.test(style.fill)) td.style.background = style.fill;
   }
+  if (style.wrap) td.classList.add("wrap");
+  if (typeof style.color === "string") {
+    if (FILL_TOKEN.test(style.color)) td.classList.add("clr-" + style.color);
+    else if (FILL_HEX.test(style.color)) td.style.color = style.color;
+  }
+}
+function applyCellShape(td, style) {
+  if (typeof style.indent === "number" && style.indent > 0) {
+    td.classList.add("indent");
+    td.style.setProperty("--ind", String(style.indent));
+  }
+  if (style.orient) {
+    if (typeof style.orient === "number") {
+      td.classList.add("orient-rot");
+      td.style.setProperty("--orient-deg", style.orient + "deg");
+    } else td.classList.add("orient-" + style.orient);
+  }
+}
+function applyFormatTint(td, baked, fmt) {
+  if (baked === "" || isErrStr(baked) || !fmt) return;
+  if (fmt.kind === "currency" || fmt.kind === "percent" || fmt.kind === "date") td.classList.add("v-" + formatTone(fmt));
 }
 function renderCell(led, tr, r, c, span2, overlay) {
   const baked = led.rows[r]?.[c] ?? "";
   const fmt = fmtAt(led, r, c);
   const td = el2("td", "cell", tr);
-  if (span2 && (span2.rowspan > 1 || span2.colspan > 1)) {
-    td.setAttribute("colspan", String(span2.colspan));
-    td.setAttribute("rowspan", String(span2.rowspan));
-    td.classList.add("merged");
-  }
-  el2("span", "v", td).textContent = baked === "" ? "" : formatCell(baked, fmt);
-  if (baked !== "" && isNumeric(baked)) td.classList.add("num");
-  if (baked !== "" && isErrStr(baked)) td.classList.add("err");
+  applyMergeSpan(td, span2);
+  applyBakedValue(td, baked, fmt);
   const style = led.cellStyles[a1(r, c)];
   if (style) {
-    if (style.b) td.classList.add("bold");
-    if (style.i) td.classList.add("italic");
-    if (style.u) td.classList.add("underline");
-    if (style.s) td.classList.add("strike");
-    if (style.align) td.classList.add("al-" + style.align);
-    if (typeof style.fill === "string") {
-      if (FILL_TOKEN.test(style.fill)) td.classList.add(style.fill);
-      else if (FILL_HEX.test(style.fill)) td.style.background = style.fill;
-    }
-    if (style.wrap) td.classList.add("wrap");
-    if (typeof style.color === "string") {
-      if (FILL_TOKEN.test(style.color)) td.classList.add("clr-" + style.color);
-      else if (FILL_HEX.test(style.color)) td.style.color = style.color;
-    }
-    if (typeof style.indent === "number" && style.indent > 0) {
-      td.classList.add("indent");
-      td.style.setProperty("--ind", String(style.indent));
-    }
-    if (style.orient) {
-      if (typeof style.orient === "number") {
-        td.classList.add("orient-rot");
-        td.style.setProperty("--orient-deg", style.orient + "deg");
-      } else td.classList.add("orient-" + style.orient);
-    }
+    applyTextFlags(td, style);
+    applyCellShape(td, style);
   }
   if (overlay) applyCondOverlay(td, overlay, typeof style?.fill === "string", typeof style?.color === "string");
-  if (baked !== "" && !isErrStr(baked) && fmt && (fmt.kind === "currency" || fmt.kind === "percent" || fmt.kind === "date")) {
-    td.classList.add("v-" + formatTone(fmt));
-  }
+  applyFormatTint(td, baked, fmt);
   return td;
 }
 function applyCondOverlay(td, overlay, userFill, userColor) {
@@ -8693,6 +8947,19 @@ function smoothPath(pts) {
   }
   return d;
 }
+var SMOOTH_EPSILON = [0.4, 0.8, 1.6];
+function chaikin(pts) {
+  if (pts.length < 3) return pts;
+  const out = [pts[0]];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, ay] = pts[i];
+    const [bx, by] = pts[i + 1];
+    out.push([ax + (bx - ax) * 0.25, ay + (by - ay) * 0.25]);
+    out.push([ax + (bx - ax) * 0.75, ay + (by - ay) * 0.75]);
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
 function simplifyPoints(pts, epsilon = 0.8) {
   if (pts.length < 3) return pts;
   const keep = new Uint8Array(pts.length);
@@ -8868,7 +9135,10 @@ function strokePathsFor(e, rand, jit) {
   if (e.type === "ellipse") return ellipsePaths(e, rand, jit);
   if (e.type === "freedraw") {
     const wob = jit * 0.55;
-    const pts = simplifyPoints(e.points ?? []).map(
+    const sm = e.smoothing === 0 || e.smoothing === 2 ? e.smoothing : 1;
+    let src = simplifyPoints(e.points ?? [], SMOOTH_EPSILON[sm]);
+    if (sm === 2) src = chaikin(src);
+    const pts = src.map(
       (p) => [e.x + p[0] + (rand() - 0.5) * wob, e.y + p[1] + (rand() - 0.5) * wob]
     );
     const d = smoothPath(pts);
@@ -8882,7 +9152,11 @@ function strokePathsFor(e, rand, jit) {
     }
     if (e.type === "arrow" && pts.length >= 2) {
       const n = pts.length;
-      out.push(...arrowHeadPaths(e.x + pts[n - 1][0], e.y + pts[n - 1][1], e.x + pts[n - 2][0], e.y + pts[n - 2][1], rand, jit, e.strokeWidth ?? 2));
+      const sw = e.strokeWidth ?? 2;
+      out.push(...arrowHeadPaths(e.x + pts[n - 1][0], e.y + pts[n - 1][1], e.x + pts[n - 2][0], e.y + pts[n - 2][1], rand, jit, sw));
+      if (e.heads === "both") {
+        out.push(...arrowHeadPaths(e.x + pts[0][0], e.y + pts[0][1], e.x + pts[1][0], e.y + pts[1][1], rand, jit, sw));
+      }
     }
     return out;
   }
@@ -8899,8 +9173,53 @@ function fillPathsFor(e, rand, jit) {
   if (style === "cross") hachure.push(...hachureLines(poly, HACHURE_ANGLE + HACHURE_CROSS_DELTA, gap, rand, jit));
   return { hachure, solid: null };
 }
+function sceneViewBox(data) {
+  return data.w !== void 0 && data.h !== void 0 ? { x: 0, y: 0, w: data.w, h: data.h } : sceneBounds(data) ?? { x: 0, y: 0, w: 1e3, h: 600 };
+}
+function elementGroup(e, marks) {
+  const g = svgEl3("g", { class: "o-draw-el", "data-eid": e.id }, marks);
+  if (e.opacity !== void 0 && e.opacity < 100) g.setAttribute("opacity", f2(e.opacity / 100));
+  if (e.angle) {
+    const cx = e.x + e.width / 2;
+    const cy = e.y + e.height / 2;
+    g.setAttribute("transform", `rotate(${f2(e.angle)} ${f2(cx)} ${f2(cy)})`);
+  }
+  return g;
+}
+function paintFill(g, e, rand, jit, sw) {
+  const { hachure, solid } = fillPathsFor(e, rand, jit);
+  const fill = e.fill ?? "";
+  if (solid) svgEl3("path", { d: solid, fill, stroke: "none" }, g);
+  for (const d of hachure) svgEl3("path", { d, fill: "none", stroke: fill, "stroke-width": f2(Math.max(1, sw * 0.6)), "stroke-linecap": "round" }, g);
+}
+function paintText(g, e) {
+  const lines = (e.text ?? "").split("\n");
+  const fs = e.fontSize ?? 16;
+  const anchor = e.textAlign === "center" ? "middle" : e.textAlign === "right" ? "end" : "start";
+  const tx = e.textAlign === "center" ? e.x + e.width / 2 : e.textAlign === "right" ? e.x + e.width : e.x;
+  const family = (e.roughness ?? 1) > 0 ? CHART_FONT_STACK.caveat : CHART_FONT_STACK[e.font ?? "inter"] ?? CHART_FONT_STACK.inter;
+  lines.forEach((ln, i) => {
+    const t = svgEl3("text", {
+      x: f2(tx),
+      y: f2(e.y + fs * 0.95 + i * fs * 1.3),
+      fill: e.stroke,
+      "font-size": f2(fs),
+      "font-family": family,
+      "text-anchor": anchor
+    }, g);
+    t.textContent = ln;
+  });
+}
+function paintStrokes(g, e, rand, jit, sw) {
+  const dash = e.strokeStyle === "dashed" ? `${f2(sw * 3.5)} ${f2(sw * 2.5)}` : e.strokeStyle === "dotted" ? `0.1 ${f2(sw * 2.2)}` : void 0;
+  for (const d of strokePathsFor(e, rand, jit)) {
+    const attrs = { d, fill: "none", stroke: e.stroke, "stroke-width": f2(sw), "stroke-linecap": "round", "stroke-linejoin": "round" };
+    if (dash) attrs["stroke-dasharray"] = dash;
+    svgEl3("path", attrs, g);
+  }
+}
 function drawSceneSvg(data) {
-  const box = data.w !== void 0 && data.h !== void 0 ? { x: 0, y: 0, w: data.w, h: data.h } : sceneBounds(data) ?? { x: 0, y: 0, w: 1e3, h: 600 };
+  const box = sceneViewBox(data);
   const svg = document.createElementNS(SVGNS2, "svg");
   svg.setAttribute("viewBox", `${f2(box.x)} ${f2(box.y)} ${f2(box.w)} ${f2(box.h)}`);
   svg.setAttribute("class", "o-draw-svg");
@@ -8911,54 +9230,27 @@ function drawSceneSvg(data) {
     const rand = mulberry32(e.seed ?? 1);
     const jit = ROUGH_JITTER[e.roughness ?? 1] ?? ROUGH_JITTER[1];
     const sw = e.strokeWidth ?? 2;
-    const g = svgEl3("g", { class: "o-draw-el", "data-eid": e.id }, marks);
-    if (e.opacity !== void 0 && e.opacity < 100) g.setAttribute("opacity", f2(e.opacity / 100));
-    if (e.angle) {
-      const cx = e.x + e.width / 2;
-      const cy = e.y + e.height / 2;
-      g.setAttribute("transform", `rotate(${f2(e.angle)} ${f2(cx)} ${f2(cy)})`);
-    }
-    const { hachure, solid } = fillPathsFor(e, rand, jit);
-    const fill = e.fill ?? "";
-    if (solid) svgEl3("path", { d: solid, fill, stroke: "none" }, g);
-    for (const d of hachure) svgEl3("path", { d, fill: "none", stroke: fill, "stroke-width": f2(Math.max(1, sw * 0.6)), "stroke-linecap": "round" }, g);
+    const g = elementGroup(e, marks);
+    paintFill(g, e, rand, jit, sw);
     if (e.type === "text") {
-      const lines = (e.text ?? "").split("\n");
-      const fs = e.fontSize ?? 16;
-      const anchor = e.textAlign === "center" ? "middle" : e.textAlign === "right" ? "end" : "start";
-      const tx = e.textAlign === "center" ? e.x + e.width / 2 : e.textAlign === "right" ? e.x + e.width : e.x;
-      const family = (e.roughness ?? 1) > 0 ? CHART_FONT_STACK.caveat : CHART_FONT_STACK[e.font ?? "inter"] ?? CHART_FONT_STACK.inter;
-      lines.forEach((ln, i) => {
-        const t = svgEl3("text", {
-          x: f2(tx),
-          y: f2(e.y + fs * 0.95 + i * fs * 1.3),
-          fill: e.stroke,
-          "font-size": f2(fs),
-          "font-family": family,
-          "text-anchor": anchor
-        }, g);
-        t.textContent = ln;
-      });
+      paintText(g, e);
       continue;
     }
-    const dash = e.strokeStyle === "dashed" ? `${f2(sw * 3.5)} ${f2(sw * 2.5)}` : e.strokeStyle === "dotted" ? `0.1 ${f2(sw * 2.2)}` : void 0;
-    for (const d of strokePathsFor(e, rand, jit)) {
-      const attrs = { d, fill: "none", stroke: e.stroke, "stroke-width": f2(sw), "stroke-linecap": "round", "stroke-linejoin": "round" };
-      if (dash) attrs["stroke-dasharray"] = dash;
-      svgEl3("path", attrs, g);
-    }
+    paintStrokes(g, e, rand, jit, sw);
   }
   return svg;
 }
-var num = (x, fallback) => typeof x === "number" && Number.isFinite(x) ? x : fallback;
+var isFiniteNum = (x) => typeof x === "number" && Number.isFinite(x);
+var isHexColour = (x) => typeof x === "string" && /^#[0-9a-fA-F]{3,8}$/.test(x);
+var isLevel012 = (x) => x === 0 || x === 1 || x === 2;
+var isOneOfText = (x, allowed) => typeof x === "string" && allowed.includes(x);
+var isDrawPoint = (p) => Array.isArray(p) && p.length === 2 && isFiniteNum(p[0]) && isFiniteNum(p[1]);
+var num = (x, fallback) => isFiniteNum(x) ? x : fallback;
 var clamp2 = (x, lo2, hi2) => Math.min(hi2, Math.max(lo2, x));
-var hex = (x, fallback) => typeof x === "string" && /^#[0-9a-fA-F]{3,8}$/.test(x) ? x : fallback;
-function normalizeElement(raw) {
-  const e = raw ?? {};
-  const type = DRAW_TYPES.includes(e.type) ? e.type : null;
-  if (!type || typeof e.id !== "string" || !e.id) return null;
-  const out = {
-    id: e.id.slice(0, 40),
+var hex = (x, fallback) => isHexColour(x) ? x : fallback;
+function baseElement(e, id, type) {
+  return {
+    id: id.slice(0, 40),
     type,
     x: clamp2(num(e.x, 0), -1e5, 1e5),
     y: clamp2(num(e.y, 0), -1e5, 1e5),
@@ -8966,60 +9258,78 @@ function normalizeElement(raw) {
     height: Math.max(0, clamp2(num(e.height, 0), -1e5, 1e5)),
     stroke: hex(e.stroke, "#333333")
   };
+}
+function applyCommonFields(out, e) {
   if (typeof e.name === "string" && e.name.trim()) out.name = e.name.trim().slice(0, 40);
-  if (typeof e.angle === "number" && Number.isFinite(e.angle)) out.angle = e.angle;
-  if (e.fill === "" || typeof e.fill === "string" && /^#[0-9a-fA-F]{3,8}$/.test(e.fill)) out.fill = e.fill;
-  if (e.fillStyle === "none" || e.fillStyle === "hachure" || e.fillStyle === "cross" || e.fillStyle === "solid") out.fillStyle = e.fillStyle;
+  if (isFiniteNum(e.angle)) out.angle = e.angle;
+  if (e.fill === "" || isHexColour(e.fill)) out.fill = e.fill;
+  if (isOneOfText(e.fillStyle, DRAW_FILL_STYLES)) out.fillStyle = e.fillStyle;
   if (e.strokeWidth !== void 0) out.strokeWidth = clamp2(Math.round(num(e.strokeWidth, 2)), 1, 8);
-  if (e.strokeStyle === "solid" || e.strokeStyle === "dashed" || e.strokeStyle === "dotted") out.strokeStyle = e.strokeStyle;
-  if (e.roughness === 0 || e.roughness === 1 || e.roughness === 2) out.roughness = e.roughness;
+  if (isOneOfText(e.strokeStyle, DRAW_STROKE_STYLES)) out.strokeStyle = e.strokeStyle;
+  if (isLevel012(e.roughness)) out.roughness = e.roughness;
   if (e.opacity !== void 0) out.opacity = clamp2(Math.round(num(e.opacity, 100)), 0, 100);
   if (typeof e.seed === "number" && Number.isInteger(e.seed) && e.seed >= 1) out.seed = Math.min(e.seed, 2147483647);
-  if (type === "arrow" || type === "line" || type === "freedraw") {
-    const pts = Array.isArray(e.points) ? e.points : [];
-    const clean = [];
-    for (const p of pts.slice(0, DRAW_MAX_POINTS)) {
-      if (Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && Number.isFinite(p[0]) && typeof p[1] === "number" && Number.isFinite(p[1])) {
-        clean.push([clamp2(p[0], -1e5, 1e5), clamp2(p[1], -1e5, 1e5)]);
-      }
-    }
-    if (clean.length < 2) return null;
-    out.points = clean;
-    if (e.attach && typeof e.attach === "object") {
-      out.attach = e.attach;
-    }
+}
+function applyPointFields(out, e, type) {
+  const pts = Array.isArray(e.points) ? e.points : [];
+  const clean = [];
+  for (const p of pts.slice(0, DRAW_MAX_POINTS)) {
+    if (isDrawPoint(p)) clean.push([clamp2(p[0], -1e5, 1e5), clamp2(p[1], -1e5, 1e5)]);
   }
-  if (type === "text") {
-    if (typeof e.text !== "string" || !e.text) return null;
-    out.text = e.text.slice(0, 2e3);
-    if (e.fontSize !== void 0) out.fontSize = clamp2(num(e.fontSize, 16), 6, 200);
-    if (e.font === "playfair" || e.font === "lora" || e.font === "inter" || e.font === "source-serif" || e.font === "caveat") out.font = e.font;
-    if (e.textAlign === "left" || e.textAlign === "center" || e.textAlign === "right") out.textAlign = e.textAlign;
+  if (clean.length < 2) return false;
+  out.points = clean;
+  if (type === "arrow" && DRAW_ARROW_HEADS.includes(e.heads)) {
+    out.heads = e.heads;
   }
+  if (type === "freedraw" && isLevel012(e.smoothing)) out.smoothing = e.smoothing;
+  if (e.attach && typeof e.attach === "object") {
+    out.attach = e.attach;
+  }
+  return true;
+}
+function applyTextFields(out, e) {
+  if (typeof e.text !== "string" || !e.text) return false;
+  out.text = e.text.slice(0, 2e3);
+  if (e.fontSize !== void 0) out.fontSize = clamp2(num(e.fontSize, 16), 6, 200);
+  if (isOneOfText(e.font, DRAW_FONTS)) out.font = e.font;
+  if (isOneOfText(e.textAlign, DRAW_TEXT_ALIGNS)) out.textAlign = e.textAlign;
+  return true;
+}
+var DRAW_TYPE_FIELDS = /* @__PURE__ */ new Map([
+  ["arrow", applyPointFields],
+  ["line", applyPointFields],
+  ["freedraw", applyPointFields],
+  ["text", applyTextFields]
+]);
+function normalizeElement(raw) {
+  const e = raw ?? {};
+  const type = DRAW_TYPES.includes(e.type) ? e.type : null;
+  const id = typeof e.id === "string" ? e.id : "";
+  if (!type || !id) return null;
+  const out = baseElement(e, id, type);
+  applyCommonFields(out, e);
+  const extraFields = DRAW_TYPE_FIELDS.get(type);
+  if (extraFields && !extraFields(out, e, type)) return null;
   return out;
 }
-function normalizeDrawData(raw) {
-  const d = raw ?? {};
-  const els = d.elements;
+function normalizeElements(raw) {
   const elements = [];
-  if (Array.isArray(els)) {
-    for (const e of els.slice(0, DRAW_MAX_ELEMENTS)) {
-      const n = normalizeElement(e);
-      if (n) elements.push(n);
-    }
+  if (!Array.isArray(raw)) return elements;
+  for (const e of raw.slice(0, DRAW_MAX_ELEMENTS)) {
+    const n = normalizeElement(e);
+    if (n) elements.push(n);
   }
-  const out = { elements };
-  if (typeof d.wpct === "number" && Number.isFinite(d.wpct)) out.wpct = clamp2(Math.round(d.wpct), 10, 100);
-  if (typeof d.replay === "boolean") out.replay = d.replay;
-  if (Array.isArray(d.replayOrder)) {
-    const ids2 = new Set(elements.map((x) => x.id));
-    const order = [];
-    for (const id of d.replayOrder.slice(0, DRAW_MAX_ELEMENTS)) {
-      if (typeof id === "string" && ids2.has(id) && !order.includes(id)) order.push(id);
-    }
-    if (order.length) out.replayOrder = order;
+  return elements;
+}
+function cleanReplayOrder(raw, ids) {
+  if (!Array.isArray(raw)) return void 0;
+  const order = [];
+  for (const id of raw.slice(0, DRAW_MAX_ELEMENTS)) {
+    if (typeof id === "string" && ids.has(id) && !order.includes(id)) order.push(id);
   }
-  const ids = new Set(elements.map((x) => x.id));
+  return order.length ? order : void 0;
+}
+function sanitizeAttachments(elements, ids) {
   for (const n of elements) {
     const a = n.attach;
     if (!a) continue;
@@ -9032,6 +9342,17 @@ function normalizeDrawData(raw) {
     if (from || to) n.attach = { ...from ? { from } : {}, ...to ? { to } : {} };
     else delete n.attach;
   }
+}
+function normalizeDrawData(raw) {
+  const d = raw ?? {};
+  const elements = normalizeElements(d.elements);
+  const ids = new Set(elements.map((x) => x.id));
+  const out = { elements };
+  if (typeof d.wpct === "number" && Number.isFinite(d.wpct)) out.wpct = clamp2(Math.round(d.wpct), 10, 100);
+  if (typeof d.replay === "boolean") out.replay = d.replay;
+  const order = cleanReplayOrder(d.replayOrder, ids);
+  if (order) out.replayOrder = order;
+  sanitizeAttachments(elements, ids);
   for (const k of ["w", "h"]) {
     const v = d[k];
     if (typeof v === "number" && Number.isFinite(v)) out[k] = clamp2(v, 50, 1e5);
@@ -9080,6 +9401,7 @@ function mountDraws(slide) {
 var finalizeDraws = mountDraws;
 function replayDrawInks(svg, order) {
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  if (document.visibilityState === "hidden") return;
   const groups = Array.from(svg.querySelectorAll(":scope > .o-draw-marks > .o-draw-el"));
   if (order?.length) {
     const rank = new Map(order.map((id, i) => [id, i]));
@@ -9101,9 +9423,8 @@ function replayDrawInks(svg, order) {
       if (len && Number.isFinite(len) && !p.hasAttribute("stroke-dasharray")) {
         p.style.strokeDasharray = `${len}`;
         p.style.strokeDashoffset = `${len}`;
-      } else {
-        p.style.opacity = "0";
       }
+      p.style.opacity = "0";
     }
     if (isText) g.style.opacity = "0";
   }
@@ -9131,11 +9452,14 @@ function replayDrawInks(svg, order) {
         }
         p.getBoundingClientRect();
         const dur = Math.min(0.9, 0.18 + len / 900);
-        p.style.transition = `stroke-dashoffset ${dur.toFixed(2)}s ease-out ${delay.toFixed(2)}s`;
+        const at = delay.toFixed(2);
+        p.style.transition = `stroke-dashoffset ${dur.toFixed(2)}s ease-out ${at}s, opacity 0s linear ${at}s`;
         p.style.strokeDashoffset = "0";
+        p.style.opacity = "1";
         cleanup.push(() => {
           p.style.strokeDasharray = "";
           p.style.strokeDashoffset = "";
+          p.style.opacity = "";
           p.style.transition = "";
         });
         maxEnd = Math.max(maxEnd, delay + dur);
@@ -9151,10 +9475,11 @@ function replayDrawInks(svg, order) {
         maxEnd = Math.max(maxEnd, delay + 0.45);
       }
     };
-    if (document.visibilityState === "hidden") return;
     window.setTimeout(run, 30);
   });
-  if (maxEnd > 0) window.setTimeout(() => cleanup.forEach((f) => f()), (maxEnd + 0.4) * 1e3);
+  window.setTimeout(() => {
+    if (maxEnd > 0) window.setTimeout(() => cleanup.forEach((f) => f()), (maxEnd + 0.4) * 1e3);
+  }, 30);
 }
 function armDrawReplay(slide) {
   const fire = () => {
@@ -9546,13 +9871,41 @@ function finalizeStageBlocks(slide, ctx) {
 }
 
 // src/kinds.ts
+var COUNT_NUM_RE = /[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/;
+function parseCountTo(raw) {
+  const m = COUNT_NUM_RE.exec(raw);
+  if (!m) return null;
+  const num2 = m[0];
+  const dot = num2.indexOf(".");
+  return {
+    prefix: raw.slice(0, m.index),
+    value: Number(num2.replace(/,/g, "")),
+    decimals: dot === -1 ? 0 : num2.length - dot - 1,
+    grouped: num2.includes(","),
+    suffix: raw.slice(m.index + num2.length)
+  };
+}
+function formatCount(t, v) {
+  let n = v.toFixed(t.decimals);
+  if (t.grouped) {
+    const dot = n.indexOf(".");
+    const int = dot === -1 ? n : n.slice(0, dot);
+    n = int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + (dot === -1 ? "" : n.slice(dot));
+  }
+  return t.prefix + n + t.suffix;
+}
 function mountCountUps(slide) {
   slide.querySelectorAll("[data-count-to]").forEach((el6) => {
-    const to = parseInt(el6.getAttribute("data-count-to") ?? "0", 10) || 0;
+    const raw = el6.getAttribute("data-count-to") ?? "";
+    const target = parseCountTo(raw);
+    if (!target) {
+      el6.textContent = raw;
+      return;
+    }
     const t0 = performance.now();
     const tick = (t) => {
       const p = Math.min(1, (t - t0) / 800);
-      el6.textContent = String(Math.round(to * p));
+      el6.textContent = p < 1 ? formatCount(target, target.value * p) : raw;
       if (p < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -10653,6 +11006,26 @@ var RUNTIME_CSS = `
    reaches decks written before it existed. */
 .o-stage .slide-inner { padding-top: max(clamp(72px, 12vh, 128px), var(--mast-h, 0px)); }
 .o-scroll .o-stage .slide:not(.k-document) .slide-inner { padding-top: max(clamp(28px, 5vh, 56px), var(--mast-h, 0px)); }
+/* THE KIND-COMPONENT FOLDS NEED THE SAME OFFSET, AND HAVE NO .slide-inner TO PUT IT ON.
+   A roadmap / flowchart / node-graph / grid / ledger / tracker fold is its kind's SHELL \u2014 the shell
+   is the content column, carrying its own clamp(56px, 9vh, 96px) \u2014 and the fold is flex-start, so
+   nothing centres it out from under the band either. The rule above could never reach them, and the
+   whole class kept the constant the masthead outgrew: measured on a standalone deck at 1500x950, a
+   flow fold's first line at 26px under a band ending at 100px.
+   THE flex-start IS NOT THE BUG AND IS NOT TOUCHED. A diagram taller than the window has to start at
+   the top and scroll; centring it would crop it at both ends. The offset is the fix, the alignment
+   stays. Same max() shape, same .o-stage scope (print clones keep the bare constant), same reason
+   for living in RUNTIME_CSS: it costs no deck bytes and reaches decks written before it existed. */
+.o-stage .o-flow-shell, .o-stage .o-graph-shell, .o-stage .o-gantt-shell,
+.o-stage .o-grid-shell, .o-stage .o-table-shell, .o-stage .o-tracker-shell {
+  padding-top: max(clamp(56px, 9vh, 96px), var(--mast-h, 0px));
+}
+/* A DOCUMENT MOVES BY ITS MARGIN, NEVER ITS PADDING. The paginator READS .o-doc's computed padding
+   to decide where a page's text must stop (see document-css.ts), so inflating it here would push
+   every page boundary and reflow the whole document under a tall masthead. The margin is not part
+   of that arithmetic: the paper itself drops below the band, and the text keeps the reserve the
+   paginator already agreed with it. */
+.o-stage .k-document > .o-doc { margin-top: max(clamp(24px, 5vh, 56px), var(--mast-h, 0px)); }
 /* the stamp/logo scales with the bar thickness (chrome-pad); default = 22px (16+6),
    so plain decks are unchanged, and a thicker bar gets a proportionally bigger mark */
 .o-top .o-logo, .o-top .o-stamp { color: var(--chrome-mark, var(--accent)); height: var(--chrome-mark-h, calc(var(--chrome-pad, 16px) + 6px)); width: auto; flex: none; }

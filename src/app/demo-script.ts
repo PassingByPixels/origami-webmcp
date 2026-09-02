@@ -51,7 +51,7 @@ export function learnRefs(tool: string, body: unknown, refs: Record<string, stri
 const dataBlock = (kind: string, data: unknown): string =>
   `<script type="application/json" data-odata="${kind}">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>`;
 
-/* "29" is the registered tool count this page reports (tests/e2e/app.spec.ts asserts it). It is
+/* "38" is the registered tool count this page reports (tests/e2e/app.spec.ts asserts it). It is
    a literal because the cover is authored markup, not a template — if the surface grows, this
    number and that assertion move together. */
 const COVER = `<div class="slide-inner">
@@ -59,7 +59,7 @@ const COVER = `<div class="slide-inner">
   <h1>An agent made this Fold. In your browser.</h1>
   <p class="lede">Nothing was uploaded and no server saw it. A model called tools this page had registered, and the deck assembled itself while you watched — ending as one file you can email to anyone.</p>
   <div class="card-grid">
-    <div class="stat-card"><div class="big">29</div><div class="lbl">Tools on the page</div></div>
+    <div class="stat-card"><div class="big">38</div><div class="lbl">Tools on the page</div></div>
     <div class="stat-card"><div class="big">1</div><div class="lbl">File when it lands</div></div>
     <div class="stat-card"><div class="big">0</div><div class="lbl">Servers involved</div></div>
   </div>

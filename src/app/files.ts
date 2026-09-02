@@ -136,6 +136,8 @@ export function downloadBlob(text: string, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+import type { SavedTheme, ThemeStore } from '../core/themes.js';
+
 /* ---------- autosave ---------- */
 
 /* NAMESPACED PER PAGE. localStorage is shared by every page on the origin, so /draw/ and
@@ -179,6 +181,74 @@ export function clearAutosave(ns: string): void {
     localStorage.removeItem(autosaveKey(ns));
   } catch {
     /* nothing to do */
+  }
+}
+
+/* ---------- saved themes ---------- */
+
+/* NOT namespaced per page, on purpose: a palette is the human's, not one page's, and the mini
+   tool pages have no theme tools to collide with. The key is versioned so a future shape change
+   can be told apart from a corrupt record rather than guessed at. */
+export const THEMES_KEY = 'origami-web/themes/v1';
+
+/**
+ * The page's ThemeStore: save_theme's palettes, in localStorage, so one survives a reload.
+ *
+ * Storage is not a trusted channel — a record may be from an older build, hand-edited, or left
+ * by something else on this origin — so every read RE-VALIDATES the shape and drops anything
+ * that is not a theme, rather than handing a half-object to the tools. A browser that refuses
+ * storage (private window, quota, blocked) degrades to in-memory for the session instead of
+ * breaking the page.
+ */
+export class LocalThemeStore implements ThemeStore {
+  private readonly fallback = new Map<string, SavedTheme>();
+
+  private load(): Map<string, SavedTheme> {
+    try {
+      const raw = localStorage.getItem(THEMES_KEY);
+      if (!raw) return new Map(this.fallback);
+      const parsed: unknown = JSON.parse(raw);
+      const out = new Map<string, SavedTheme>();
+      if (Array.isArray(parsed)) {
+        for (const t of parsed) {
+          const q = t as Partial<SavedTheme>;
+          if (typeof q?.name === 'string' && q.tokens !== null && typeof q?.tokens === 'object' && !Array.isArray(q.tokens)) {
+            out.set(q.name, { name: q.name, label: typeof q.label === 'string' ? q.label : q.name, tokens: q.tokens as Record<string, string>, ...(typeof q.basedOn === 'string' ? { basedOn: q.basedOn } : {}) });
+          }
+        }
+      }
+      return out;
+    } catch {
+      return new Map(this.fallback);
+    }
+  }
+
+  private save(map: Map<string, SavedTheme>): void {
+    this.fallback.clear();
+    for (const [k, v] of map) this.fallback.set(k, v);
+    try {
+      localStorage.setItem(THEMES_KEY, JSON.stringify([...map.values()]));
+    } catch {
+      /* in-memory for this session; the tool result never claimed disk */
+    }
+  }
+
+  all(): SavedTheme[] {
+    return [...this.load().values()];
+  }
+  get(name: string): SavedTheme | undefined {
+    return this.load().get(name);
+  }
+  set(theme: SavedTheme): void {
+    const map = this.load();
+    map.set(theme.name, theme);
+    this.save(map);
+  }
+  delete(name: string): boolean {
+    const map = this.load();
+    if (!map.delete(name)) return false;
+    this.save(map);
+    return true;
   }
 }
 

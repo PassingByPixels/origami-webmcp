@@ -1,34 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import { FORMAT_BLOCKS, KINDS, buildModel, parseDeck, validateDeck } from '../../vendor/format-dist/index.js';
 import { FLOW_INNER, VENN_INNER } from '../fixtures.js';
+import { formatCell } from '../../vendor/format-dist/index.js';
+import { CHARTS_MODE } from '../../src/core/modes.js';
 import { ACTIVITY_CAP, ActivityLog } from '../../src/core/activity.js';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { GUIDE_TOPICS } from '../../src/core/guide.js';
 import { ProposalStore, restorableProposals } from '../../src/core/proposal-store.js';
-import { createRegistry } from '../../src/core/tools.js';
+import { createModeRegistry } from '../../src/core/mode-registry.js';
+import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
+import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, chartPlotHeight } from '../../src/core/compose.js';
+import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
+import { BATCH_MAX } from '../../src/core/batch-tool.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
-import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
+import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harness.js';
 
 /* These run against the REAL vendored @origami/format + @origami/runtime — no mocks, no
    stubs. Every assertion is about observable deck state (what the model holds, what the
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 29 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 38 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
       'accept_proposal',
       'add_chunk',
       'add_custom_fold',
+      'add_fold',
+      'add_ledger',
+      'apply_theme',
       'create_deck',
       'define_block',
       'delete_block',
       'delete_chunk',
+      'delete_theme',
       'export_deck',
+      'get_block',
       'get_kind_schema',
       'inspect_render',
       'list_activity',
@@ -36,6 +47,7 @@ describe('tool surface', () => {
       'list_chunks',
       'list_proposals',
       'list_starters',
+      'list_themes',
       'move_chunk',
       'origami_guide',
       'propose_add',
@@ -43,7 +55,10 @@ describe('tool surface', () => {
       'propose_delete',
       'read_chunk',
       'reject_proposal',
+      'run_batch',
       'save_deck',
+      'save_theme',
+      'set_block',
       'set_chunk_meta',
       'set_deck_meta',
       'set_fold_type',
@@ -510,7 +525,7 @@ describe('save_deck', () => {
     const deck = new DeckStore();
     const proposals = new ProposalStore();
     let captured = '';
-    const registry = createRegistry({
+    const registry = createModeRegistry({
       deck,
       proposals,
       runtimeJs,
@@ -518,7 +533,7 @@ describe('save_deck', () => {
         captured = text;
         return { written: true, where: 'deck.origami.html', note: 'written to the file on disk.' };
       },
-    });
+    }, FOLIO_MODE);
     await registry.invoke('create_deck', { title: 'Somewhere' });
     await registry.invoke('add_chunk', { html: innerWith('Saved heading', 'Saved body') });
     const body = JSON.parse((await registry.invoke('save_deck', {})).content[0]!.text);
@@ -772,14 +787,18 @@ describe('the kind catalog steers, and knownIssues is measured', () => {
   it('knownIssues records what was MEASURED, not what was reported', async () => {
     const guide = await harness().json('origami_guide');
     const clip = guide.knownIssues.flowKindMastheadClip;
-    // the number that was actually observed, and the correction to the original claim
-    expect(clip).toMatch(/measured at 42px/);
-    expect(clip).toMatch(/121px to 253px/);
-    expect(clip).toMatch(/no rendered content is hidden/);
-    // and it does not tell an agent to work around a defect that is not there
+    // the numbers actually observed after the 2026-09-02 runtime refresh changed them
+    expect(clip).toMatch(/90-97px/);
+    expect(clip).toMatch(/116-185px/);
+    expect(clip).toMatch(/wrap a flow\/graph figure in a free card/);
+    // and it does not tell an agent to work around it any other way
     expect(clip).not.toMatch(/avoid the flow kind|do not use/i);
 
-    expect(guide.knownIssues.emptyDataBlockPassesUntilSave).toMatch(/renders completely blank/);
+    // the empty-data-block trap is FIXED, so the entry states the new behaviour: the gate
+    // refuses it at authoring time with the rule named, and inspect_render still owns the rest
+    expect(guide.knownIssues.dataBlocksAreGatedAtWriteTime).toMatch(/REFUSED at authoring time/);
+    expect(guide.knownIssues.dataBlocksAreGatedAtWriteTime).toMatch(/flow\.nodes\.count/);
+    expect(guide.knownIssues.dataBlocksAreGatedAtWriteTime).toMatch(/inspect_render/);
     expect(guide.knownIssues.studioTreeShakenCss).toMatch(/tree-shaken|stripped/);
   });
 });
@@ -825,14 +844,14 @@ describe('inspect_render', () => {
 
   it('reports a failed measurement as unmeasured rather than as a clean deck', async () => {
     const deck = new DeckStore();
-    const registry = createRegistry({
+    const registry = createModeRegistry({
       deck,
       proposals: new ProposalStore(),
       runtimeJs,
       measure: async () => {
         throw new Error('the deck did not finish rendering within 15s, so nothing was measured');
       },
-    });
+    }, FOLIO_MODE);
     await registry.invoke('create_deck', { title: 'Timeout' });
     const body = JSON.parse((await registry.invoke('inspect_render', {})).content[0]!.text);
     expect(body.measured).toBe(false);
@@ -1501,6 +1520,7 @@ describe('tool annotations', () => {
      the tools actually do. */
   const READ_ONLY = [
     'export_deck',
+    'get_block',
     'get_kind_schema',
     'inspect_render',
     'list_activity',
@@ -1508,10 +1528,11 @@ describe('tool annotations', () => {
     'list_chunks',
     'list_proposals',
     'list_starters',
+    'list_themes',
     'origami_guide',
     'read_chunk',
   ];
-  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk'];
+  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk', 'delete_theme'];
 
   it('marks exactly the read-only tools readOnlyHint', () => {
     const h = harness();
@@ -1544,9 +1565,12 @@ describe('tool annotations', () => {
     const before = h.deck.serialize();
     const dirtyBefore = h.deck.peek()!.dirty;
 
+    // one bag of arguments serves every reader except get_block, whose `kind` is a DATA-block
+    // kind (chart | venn | …), not a slide kind — omitted here so it reports the whole fold
     const args: Record<string, unknown> = { kind: 'free', chunkId: extra.chunkId };
+    const argsFor = (name: string): Record<string, unknown> => (name === 'get_block' ? { chunkId: extra.chunkId } : args);
     for (const name of READ_ONLY) {
-      const res = await h.call(name, args);
+      const res = await h.call(name, argsFor(name));
       expect(res.isError, `${name}: ${res.content[0]!.text.slice(0, 160)}`).toBeFalsy();
       expect(h.deck.serialize(), `${name} changed the Fold`).toBe(before);
       expect(h.deck.peek()!.dirty, `${name} dirtied the Fold`).toBe(dirtyBefore);
@@ -1572,7 +1596,7 @@ describe('save_deck never claims a save that did not happen', () => {
 
   const deckWith = async (save: (text: string) => Promise<any>) => {
     const deck = new DeckStore();
-    const registry = createRegistry({ deck, proposals: new ProposalStore(), runtimeJs, save });
+    const registry = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, save }, FOLIO_MODE);
     await registry.invoke('create_deck', { title: 'Save shapes' });
     return async () => JSON.parse((await registry.invoke('save_deck', {})).content[0]!.text);
   };
@@ -2062,7 +2086,7 @@ describe('origami_guide by topic', () => {
 
     // everything else is still there in full
     expect(Object.keys(guide.kinds).sort()).toEqual(Object.keys(KINDS).sort());
-    expect(guide.knownIssues.flowKindMastheadClip).toMatch(/measured at 42px/);
+    expect(guide.knownIssues.flowKindMastheadClip).toMatch(/90-97px/);
     expect(guide.editProtocol.length).toBeGreaterThan(4);
     expect(guide.topics.howToUse).toMatch(/origami_guide\(\{ topic \}\)/);
   });
@@ -2074,7 +2098,18 @@ describe('origami_guide by topic', () => {
     // the sections the default answer keeps whole must be byte-for-byte the same by topic —
     // a topic that quietly returned a different edition would be a second source of truth
     expect((await h.json('origami_guide', { topic: 'issues' })).knownIssues).toEqual(dflt.knownIssues);
-    expect((await h.json('origami_guide', { topic: 'tools' })).tools).toEqual(dflt.tools);
+
+    /* tools is now abridged in the default answer too: per-turn description bytes are the scarce
+       thing, so the prose the tool DESCRIPTIONS no longer carry moved into this topic. The
+       default keeps the COMPLETE list of names with one line each — an agent must be able to
+       trust it on its own — and each of those lines has to be the real entry's opening, not a
+       separate blurb that could drift from it. */
+    const tools = (await h.json('origami_guide', { topic: 'tools' })).tools;
+    expect(Object.keys(tools).sort()).toEqual(Object.keys(dflt.tools).sort());
+    for (const name of Object.keys(tools)) {
+      expect(tools[name].startsWith(dflt.tools[name]), name).toBe(true);
+    }
+    expect(dflt.toolsHowTo).toMatch(/origami_guide\(\{ topic: "tools" \}\)/);
 
     // kinds is the third abridged section: the default has the index, the topic has the bodies
     const kinds = (await h.json('origami_guide', { topic: 'kinds' })).kinds;
@@ -2131,12 +2166,20 @@ describe('origami_guide by topic', () => {
     sizes.whole = size(whole);
     console.log('origami_guide bytes (JSON.stringify(...,null,2).length):', JSON.stringify(sizes, null, 2));
 
-    // the budget this slice was built to: a cold agent's first call stays under 20 KB
+    // THE STANDING BUDGETS. quickstart is the answer a cold agent is pointed at first and it
+    // has to be cheap enough to read before acting; the default is the whole contract and has
+    // to stay a fraction of the guide it replaced. Both are re-measured on every run, so a
+    // section that grows into either one is a failing test rather than a slow surprise.
+    expect(sizes.quickstart!, 'quickstart must stay under 3 KB — it is the FIRST thing a cold agent reads').toBeLessThanOrEqual(3_000);
     expect(sizes.default!).toBeLessThanOrEqual(20_000);
     expect(sizes.default!).toBeLessThan(sizes.whole! / 2);
-    // the cheapest routes an agent has: the protocol alone, and the tool catalog alone
+    // the cheapest route an agent has: the protocol alone
     expect(sizes.contract!).toBeLessThan(6_000);
-    expect(sizes.tools!).toBeLessThan(6_000);
+    /* The tools topic is DELIBERATELY the biggest of the cheap ones: it is where the prose the
+       tool descriptions no longer carry now lives. Descriptions are paid on every turn (the
+       /folio/ registry's total is asserted in tests/unit/tool-bytes.test.ts); this answer is
+       fetched at most once, and only when an agent wants the detail. */
+    expect(sizes.tools!).toBeLessThan(10_000);
   });
 
   it('advertises every registered tool in the catalog, default answer included', async () => {
@@ -2179,5 +2222,1111 @@ describe('the OPFS backstop', () => {
     expect(safeName('...')).toBe('untitled.origami.html');
     expect(safeName('x'.repeat(400)).length).toBe(120);
     expect(safeName('welcome.origami.html')).toBe('welcome.origami.html');
+  });
+});
+
+describe('S1 — one data gate, at authoring time', () => {
+  /* The two gates used to disagree: add_chunk / write_chunk checked only the CARRIER (well-formed
+     <script type="application/json">), while save_deck checked what was inside it. So a wrong
+     shape was accepted for a whole authoring session and refused at the end, after the agent had
+     built the deck around it. Every write path now runs the format library's OWN per-kind
+     validator, so the verdict an agent gets at add time is the verdict save_deck gives. */
+
+  const figure = (kind: string, data: unknown): string =>
+    `<div class="slide-inner"><h2>Gate</h2><figure class="o-${kind}fig anim"><script type="application/json" data-odata="${kind}">${JSON.stringify(data).replace(/</g, '\u003c')}</script><div class="o-${kind}" data-${kind}-mount></div><figcaption>x</figcaption></figure></div>`;
+
+  /** Sonnet's real refusal: a table column.format given as a STRING. add_chunk took it and only
+      save_deck said no. */
+  const STRING_FORMAT = { columns: [{ label: 'Item' }, { label: 'Cost', format: 'currency' }], rows: [['Widget', '10']] };
+
+  it("refuses Sonnet's string column.format at add_chunk, with the rule save_deck names", async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('add_chunk', { kind: 'free', html: figure('table', STRING_FORMAT) });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.violations.map((v: any) => v.rule)).toContain('table.column.format');
+    // and nothing landed: no fold, no dirty flag, the same bytes
+    expect(h.deck.model().order).toHaveLength(1);
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses the same table at write_chunk, and the dryRun verdict is identical', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Gate' });
+    const id = created.chunks[0].id;
+    const before = h.deck.serialize();
+
+    const dry = await h.call('write_chunk', { chunkId: id, html: figure('table', STRING_FORMAT), dryRun: true });
+    const wet = await h.call('write_chunk', { chunkId: id, html: figure('table', STRING_FORMAT) });
+    expect(dry.isError).toBe(true);
+    expect(wet.isError).toBe(true);
+    expect(JSON.parse(dry.content[0]!.text)).toEqual(JSON.parse(wet.content[0]!.text));
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses an EMPTY flow block — the blank fold is caught at add, not at save', async () => {
+    /* knownIssues.emptyDataBlockPassesUntilSave described exactly this and said it passed until
+       save_deck. It no longer does, so that entry has to change with it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const res = await h.call('add_chunk', { kind: 'free', html: figure('flow', { nodes: [], edges: [] }) });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+  });
+
+  it('refuses a data block that is not valid JSON at all', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const html = '<div class="slide-inner"><h2>Broken</h2><figure><script type="application/json" data-odata="chart">{ not json }</script><div class="o-chart" data-chart-mount></div></figure></div>';
+    const res = await h.call('add_chunk', { kind: 'free', html });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('kind-data.json');
+  });
+
+  it('add_custom_fold runs the same gate', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const res = await h.call('add_custom_fold', { html: figure('venn', { count: 3, sets: [{ label: 'A', color: '#4A8CC4' }] }) });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.length).toBeGreaterThan(0);
+    expect(h.deck.model().order).toHaveLength(1);
+  });
+
+  it('propose_add and propose_chunk stage nothing when the data is wrong', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Gate' });
+    expect((await h.call('propose_add', { kind: 'free', html: figure('flow', { nodes: [], edges: [] }) })).isError).toBe(true);
+    expect((await h.call('propose_chunk', { chunkId: created.chunks[0].id, html: figure('flow', { nodes: [], edges: [] }) })).isError).toBe(true);
+    expect(h.proposals.count()).toBe(0);
+  });
+
+  it('accept_proposal re-runs the gate, so a def deleted after staging cannot land a broken instance', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    await h.json('define_block', {
+      def: { kind: 'x.note', name: 'Note', version: 1, fields: [{ name: 'body', type: 'text' }], template: '<p>{{body}}</p>' },
+    });
+    const staged = await h.json('propose_add', { block: 'x.note', fields: { body: 'hello' } });
+    expect(staged.proposalId).toBeTruthy();
+    await h.json('delete_block', { kind: 'x.note' });
+
+    const res = await h.call('accept_proposal', { proposalId: staged.proposalId });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('block.unknown-def');
+  });
+
+  it('a VALID data block still lands, unchanged — the gate is not a wall', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gate' });
+    const good = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+    const body = await h.json('add_chunk', { kind: 'free', html: figure('chart', good) });
+    expect(body.chunkId).toBeTruthy();
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('the guide no longer claims an empty data block passes until save', async () => {
+    const h = harness();
+    const issues = (await h.json('origami_guide', { topic: 'issues' })).knownIssues;
+    expect(issues.emptyDataBlockPassesUntilSave).toBeUndefined();
+    expect(JSON.stringify(issues)).not.toMatch(/passes the content policy, so add_chunk returns ok/);
+  });
+});
+
+describe('S2 — typed block tools on /folio/', () => {
+  /* The mini pages have had typed writers since the block-tools slice; /folio/ had none, so an
+     agent editing a chart on a deck had to read the whole fold template, hand-splice the figure,
+     re-escape the JSON and write the template back. These two tools do that in one call each,
+     through the same VALIDATORS, the same dataFigure and the same writeFoldInner. */
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+
+  it('reads every data block on a fold in ONE call, and one block when asked', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'roadmap' });
+
+    const all = await h.json('get_block', { chunkId: added.chunkId });
+    expect(all.count).toBe(1);
+    expect(all.blocks[0]).toMatchObject({ kind: 'gantt', nth: 0, caption: 'Roadmap' });
+    expect((all.blocks[0].data as any).totalWeeks).toBe(16);
+
+    const one = await h.json('get_block', { chunkId: added.chunkId, kind: 'gantt' });
+    expect(one.data).toEqual(all.blocks[0].data);
+    expect(one.schema).toEqual(KINDS.gantt!.schemaComment);
+  });
+
+  it('set_block replaces the JSON wholesale and the deck still validates', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'venn' });
+
+    const res = await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'venn',
+      data: { count: 2, sets: [{ label: 'Now', color: '#4A8CC4' }, { label: 'Next', color: '#D9A520' }] },
+      caption: 'Where we are',
+    });
+    expect(res).toMatchObject({ chunkId: added.chunkId, kind: 'venn', nth: 0, caption: 'Where we are' });
+
+    const read = await h.json('get_block', { chunkId: added.chunkId, kind: 'venn' });
+    expect((read.data as any).sets.map((s: any) => s.label)).toEqual(['Now', 'Next']);
+    expect(read.caption).toBe('Where we are');
+    // the old seed is gone, not merged
+    expect(h.deck.serialize()).not.toContain('"Us"');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('refuses data that breaks the kind schema, and leaves the fold byte-identical', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'flowchart' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('set_block', { chunkId: added.chunkId, kind: 'flow', data: { nodes: [], edges: [] } });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses a kind the fold does not carry, and names the kinds it does', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'venn' });
+    const res = await h.call('set_block', { chunkId: added.chunkId, kind: 'chart', data: CHART });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/carries no chart block/);
+    expect(body.error).toMatch(/venn\[0\]/);
+    expect(body.blocks).toEqual([{ kind: 'venn', nth: 0 }]);
+  });
+
+  it('nth addresses the SECOND block of a kind, and never splices the first', async () => {
+    /* Two figures on one fold is what add_fold builds, and the figure finder used to walk
+       backwards to the nearest "<figure" with no check that it had not already closed — which
+       on the second block would have found the FIRST figure and deleted it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Two charts' });
+    const fig = (labels: string[]) =>
+      `<figure class="o-chartfig anim"><script type="application/json" data-odata="chart">${JSON.stringify({ ...CHART, labels }).replace(/</g, '\\u003c')}</script><div class="o-chart" data-chart-mount></div><figcaption>${labels[0]}</figcaption></figure>`;
+    const added = await h.json('add_chunk', {
+      kind: 'free',
+      html: `<div class="slide-inner"><h2>Two</h2>${fig(['A1', 'A2'])}${fig(['B1', 'B2'])}</div>`,
+    });
+
+    const idx = await h.json('get_block', { chunkId: added.chunkId });
+    expect(idx.blocks.map((b: any) => `${b.kind}${b.nth}`)).toEqual(['chart0', 'chart1']);
+    expect(idx.blocks[1].caption).toBe('B1');
+
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'chart', nth: 1, data: { ...CHART, labels: ['Z1', 'Z2'] } });
+    const after = await h.json('get_block', { chunkId: added.chunkId });
+    expect(after.count, 'the first figure must survive').toBe(2);
+    expect((after.blocks[0].data as any).labels).toEqual(['A1', 'A2']);
+    expect((after.blocks[1].data as any).labels).toEqual(['Z1', 'Z2']);
+  });
+
+  it('never swallows a sibling figure when the block it edits has no figure of its own', async () => {
+    /* A REAL data-loss bug in the figure finder, found while adding nth. It walked back to the
+       nearest "<figure" before the block and forward to the next "</figure>", with no check that
+       the opening tag it found had not already closed. On a fold shaped
+       <figure>…</figure> <div><script data-odata="chart"></div> <figure>…</figure>
+       — which is a hand-authored Fold, or one the Studio wrote — that span covers BOTH figures,
+       and set_block/set_chart would have replaced the pair with one new figure. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Siblings' });
+    const venn = { count: 2, sets: [{ label: 'Us', color: '#4A8CC4' }, { label: 'Them', color: '#D9A520' }] };
+    const esc = (d: unknown) => JSON.stringify(d).replace(/</g, '\u003c');
+    const html =
+      '<div class="slide-inner"><h2>Mixed</h2>' +
+      `<figure class="o-vennfig anim"><script type="application/json" data-odata="venn">${esc(venn)}</script><div class="o-venn" data-venn-mount></div><figcaption>First</figcaption></figure>` +
+      `<div class="o-chart-shell"><script type="application/json" data-odata="chart">${esc(CHART)}</script><div class="o-chart" data-chart-mount></div></div>` +
+      `<figure class="o-ganttfig anim"><script type="application/json" data-odata="gantt">${esc({ totalWeeks: 4, startDate: null, lenses: [{ name: 'Plan', color: '#4a8cc4' }], swimlanes: [{ name: 'A', owner: 'O' }], cards: [{ id: 'C1', title: 'Do it', swimlane: 'A', start: 'W1', durationWeeks: 1, lens: 'Plan', type: 'Process', effort: 'EASY', what: '', needs: '', caveat: '', deliverable: '', sources: '', completed: false }], milestones: [] })}</script><div class="o-gantt" data-gantt-mount></div><figcaption>Last</figcaption></figure>` +
+      '</div>';
+    const added = await h.json('add_chunk', { kind: 'free', html });
+    expect((await h.json('get_block', { chunkId: added.chunkId })).count).toBe(3);
+
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'chart', data: { ...CHART, labels: ['Z1', 'Z2'] } });
+
+    const after = await h.json('get_block', { chunkId: added.chunkId });
+    expect(after.blocks.map((b: any) => b.kind), 'both figures must survive').toEqual(['venn', 'chart', 'gantt']);
+    expect((after.blocks[1].data as any).labels).toEqual(['Z1', 'Z2']);
+    expect(h.deck.model().slides.get(added.chunkId)!.inner).toContain('First');
+    expect(h.deck.model().slides.get(added.chunkId)!.inner).toContain('Last');
+  });
+
+  it('bakes a table written through set_block, and rewrites a block that has no figure', async () => {
+    /* add_chunk({kind:"table"}) mints the Studio's .o-table-shell, which is NOT a <figure>. The
+       writer has to rewrite the JSON in place there rather than refuse, and the calc engine has
+       to run on the way in exactly as it does for write_chunk. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const added = await h.json('add_chunk', { kind: 'table', label: 'Budget' });
+    expect(h.deck.model().slides.get(added.chunkId)!.inner).not.toContain('<figure');
+
+    const res = await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'table',
+      data: {
+        columns: [{ label: 'Item' }, { label: 'Cost' }],
+        rows: [['Rent', '1200'], ['Food', '300'], ['Total', '']],
+        formulas: { B3: '=SUM(B1:B2)' },
+      },
+    });
+    expect(res.captionApplied).toBe(false);
+    const read = await h.json('get_block', { chunkId: added.chunkId, kind: 'table' });
+    expect((read.data as any).rows[2][1], 'the formula baked').toBe('1500');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('one set_block is one undo step, and undo returns the exact previous bytes', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Undo' });
+    const added = await h.json('add_chunk', { starter: 'venn' });
+    const before = h.deck.serialize();
+    await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'venn',
+      data: { count: 2, sets: [{ label: 'X', color: '#4A8CC4' }, { label: 'Y', color: '#D9A520' }] },
+    });
+    expect(h.deck.serialize()).not.toBe(before);
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses an unknown chunk rather than guessing which fold was meant', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    for (const name of ['get_block', 'set_block']) {
+      const res = await h.call(name, { chunkId: 'snope', kind: 'chart', data: CHART });
+      expect(res.isError, name).toBe(true);
+      expect(JSON.parse(res.content[0]!.text).error, name).toMatch(/unknown chunk "snope"/);
+    }
+  });
+});
+
+describe('S3 — add_fold and add_ledger, the one-call fold', () => {
+  /* The cost of a deck is TURNS. A titled card holding a chart used to be add_chunk (a starter,
+     or hand-assembled figure markup with the JSON re-escaped) then read_chunk then write_chunk.
+     These build it from data in one call, through the same insertFold — same bake, same content
+     policy, same data gate, ONE op on the undo stack. */
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+  const innerOf = (h: ReturnType<typeof harness>, id: string) => h.deck.model().slides.get(id)!.inner;
+
+  it('builds ONE card with an eyebrow, a heading and the blocks in order', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Composed' });
+    const res = await h.json('add_fold', {
+      title: 'Where we landed',
+      eyebrow: 'Q3 review',
+      blocks: [
+        { text: '<p class="lede">One line of copy.</p>' },
+        { stats: [{ value: '48', label: 'Decks shipped' }] },
+        { chart: CHART, caption: 'Revenue by quarter' },
+      ],
+    });
+
+    expect(res).toMatchObject({ index: 1, label: 'Where we landed', blocks: [{ kind: 'chart', nth: 0 }] });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner.startsWith('<div class="slide-inner">')).toBe(true);
+    expect(inner).toContain('<p class="eyebrow anim" style="--i:0">Q3 review</p>');
+    expect(inner).toContain('<h2 class="anim" style="--i:1">Where we landed</h2>');
+    // order is the order asked for: copy, then stats, then the figure
+    expect(inner.indexOf('One line of copy')).toBeLessThan(inner.indexOf('Decks shipped'));
+    expect(inner.indexOf('Decks shipped')).toBeLessThan(inner.indexOf('data-odata="chart"'));
+    expect(h.deck.model().order).toHaveLength(2);
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('is ONE undo step, however many blocks are on it', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Composed' });
+    const before = h.deck.serialize();
+    await h.json('add_fold', {
+      title: 'Four blocks',
+      blocks: [{ text: '<p>a</p>' }, { bullets: ['one', 'two'] }, { quote: { text: 'Said once.', by: 'Someone' } }, { chart: CHART }],
+    });
+    expect(h.deck.model().order).toHaveLength(2);
+    await h.json('undo');
+    expect(h.deck.serialize(), 'one undo returns the exact previous bytes').toBe(before);
+  });
+
+  it('labels the fold from the title so the tabs never read FREEFORM', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Labels' });
+    const short = await h.json('add_fold', { title: 'Short title', blocks: [{ text: '<p>x</p>' }] });
+    expect(short.label).toBe('Short title');
+    expect(h.deck.model().slides.get(short.chunkId)!.label).toBe('Short title');
+
+    const long = await h.json('add_fold', { title: 'A heading long enough that a sidebar cannot show all of it', blocks: [{ text: '<p>x</p>' }] });
+    expect(long.label.length).toBeLessThanOrEqual(29);
+    expect(long.label.endsWith('…')).toBe(true);
+
+    const named = await h.json('add_fold', { title: 'Ignored', label: 'Chosen', blocks: [{ text: '<p>x</p>' }] });
+    expect(named.label).toBe('Chosen');
+  });
+
+  it('refuses a block that names no kind, or two, and says which entry', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Bad blocks' });
+    const before = h.deck.serialize();
+
+    const none = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { nonsense: 1 }] });
+    expect(none.isError).toBe(true);
+    expect(JSON.parse(none.content[0]!.text).error).toMatch(/blocks\[1\] names no block/);
+
+    const two = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, bullets: ['a'] }] });
+    expect(two.isError).toBe(true);
+    expect(JSON.parse(two.content[0]!.text).error).toMatch(/blocks\[0\] names 2 blocks/);
+
+    expect(h.deck.serialize(), 'nothing was added').toBe(before);
+  });
+
+  it('refuses data that breaks its kind schema, naming the block index and the violation', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Bad data' });
+    const before = h.deck.serialize();
+    const res = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { flow: { nodes: [], edges: [] } }] });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/blocks\[1\]\.flow breaks its own schema/);
+    expect(body.violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('sizes a chart to FIT unless the chart names its own plot height', async () => {
+    /* MEASURED, not chosen: the chart schema's own default (318) puts eyebrow + heading + one
+       captioned chart 22px past a 1280x720 screen. The e2e suite proves fits:true on the real
+       render; this holds the number that produces it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Plot' });
+    const auto = await h.json('add_fold', { title: 'Auto', blocks: [{ chart: CHART }] });
+    expect((await h.json('get_block', { chunkId: auto.chunkId, kind: 'chart' })).data.plotHeight).toBe(COMPOSED_PLOT_HEIGHT);
+    expect(COMPOSED_PLOT_HEIGHT).toBeLessThan(318);
+
+    const own = await h.json('add_fold', { title: 'Own', blocks: [{ chart: { ...CHART, plotHeight: 420 } }] });
+    expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(420);
+  });
+
+  it('animates a stat card whenever the value holds a digit, decorated or not', async () => {
+    /* MEASURED through the real render (tools/agent-bridge.mjs, 2026-09-02): the vendored
+       runtime's count-up now finds the numeric core of a decorated value with a regex, keeps
+       the prefix/suffix around it, and lands the settled frame byte-exact to the attribute —
+       "€48k" and "2.1%" animate correctly the same way "48" always did. Only a value with no
+       digit at all (a plain label, not a countable number) stays literal text. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Stats' });
+    const res = await h.json('add_fold', {
+      title: 'Numbers',
+      blocks: [{ stats: [{ value: '48', label: 'Decks' }, { value: '2.1%', label: 'Churn' }, { value: '€48k', label: 'MRR' }, { value: 'n/a', label: 'Target' }] }],
+    });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner).toContain('<div class="big" data-count-to="48">0</div>');
+    expect(inner).toContain('<div class="big" data-count-to="2.1%">0</div>');
+    expect(inner).toContain('<div class="big" data-count-to="€48k">0</div>');
+    expect(inner).toContain('<div class="big">n/a</div>');
+    expect(inner).not.toContain('data-count-to="n/a"');
+    expect(inner).toContain('data-ocols="4"');
+  });
+
+  it('lays two columns out with the attribute the runtime CSS actually targets', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Cols' });
+    const res = await h.json('add_fold', {
+      title: 'Two tracks',
+      columns: 2,
+      blocks: [{ text: '<h3>Left</h3>' }, { text: '<h3>Right</h3>' }],
+    });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner).toContain('<div class="o-tcols anim" data-ocols="2">');
+    // .o-tcols > .o-text is the grid; a child that is not one is not laid out as a column
+    expect(inner.match(/<div class="o-text anim">/g)).toHaveLength(2);
+    expect((await h.call('add_fold', { title: 'T', columns: 3, blocks: [{ text: '<p>x</p>' }] })).isError).toBe(true);
+  });
+
+  it('escapes text that would otherwise become markup', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Escapes' });
+    const res = await h.json('add_fold', {
+      title: 'A < B & C',
+      eyebrow: '<script>x</script>',
+      blocks: [{ bullets: ['1 < 2'] }, { quote: { text: 'a & b', by: '<em>who</em>' } }],
+    });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner).toContain('A &lt; B &amp; C');
+    expect(inner).toContain('&lt;script&gt;');
+    expect(inner).toContain('1 &lt; 2');
+    expect(inner).toContain('&lt;em&gt;who&lt;/em&gt;');
+    // and the deck stays inert: nothing smuggled through
+    expect(await h.json('add_fold', { title: 'x', blocks: [{ text: '<p>y</p>' }] })).toMatchObject({ activeContent: [] });
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('hands back the addresses set_block takes, for every data block on the card', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Addresses' });
+    const res = await h.json('add_fold', {
+      title: 'Two charts and a venn',
+      blocks: [{ chart: CHART }, { venn: { count: 2, sets: [{ label: 'A', color: '#4A8CC4' }, { label: 'B', color: '#D9A520' }] } }, { chart: { ...CHART, labels: ['Q3', 'Q4'] } }],
+    });
+    expect(res.blocks).toEqual([{ kind: 'chart', nth: 0 }, { kind: 'venn', nth: 0 }, { kind: 'chart', nth: 1 }]);
+
+    // the addresses are real: writing the second chart leaves the first and the venn alone
+    await h.json('set_block', { chunkId: res.chunkId, kind: 'chart', nth: 1, data: { ...CHART, labels: ['Z1', 'Z2'] } });
+    const after = await h.json('get_block', { chunkId: res.chunkId });
+    expect(after.blocks.map((b: any) => b.kind)).toEqual(['chart', 'venn', 'chart']);
+    expect((after.blocks[0].data as any).labels).toEqual(['Q1', 'Q2']);
+    expect((after.blocks[2].data as any).labels).toEqual(['Z1', 'Z2']);
+  });
+
+  it('add_fold carries no diagram layoutWarning — the runtime now sizes flow/graph to content', async () => {
+    /* Before the 2026-09-02 runtime refresh the diagram viewBox was fixed at 1200x660, so a
+       flow/graph block alone overflowed 720px and add_fold handed the fact back as
+       layoutWarning. The refreshed runtime sizes the viewBox to content instead (a one-row
+       flow measures well under half the old height — tests/unit/flow-fit.test.ts), so there is
+       no longer a diagram-specific trap to warn about; inspect_render is the arbiter for any
+       fold, this kind included. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Diagram' });
+    const flow = await h.json('add_fold', {
+      title: 'How a fold ships',
+      blocks: [{ flow: { nodes: [{ id: 'a', label: 'Draft', shape: 'pill', tone: 'accent' }, { id: 'b', label: 'Ship', shape: 'pill', tone: 'green' }], edges: [{ from: 'a', to: 'b', label: '' }] } }],
+    });
+    expect(flow.layoutWarning).toBeUndefined();
+    expect((await h.json('add_fold', { title: 'Chart', blocks: [{ chart: CHART }] })).layoutWarning).toBeUndefined();
+  });
+
+  it('add_ledger bakes the formulas the human never sees a formula for', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const res = await h.json('add_ledger', {
+      title: 'Q3 budget',
+      eyebrow: 'Ledger',
+      columns: [{ label: 'Line' }, { label: 'Plan', align: 'right' }, { label: 'Actual', align: 'right' }, { label: 'Delta', align: 'right' }],
+      rows: [['Engineering', '120000', '118400', ''], ['Design', '42000', '39800', ''], ['Total', '', '', '']],
+      formulas: { D1: '=B1-C1', D2: '=B2-C2', B3: '=SUM(B1:B2)', C3: '=SUM(C1:C2)', D3: '=SUM(D1:D2)' },
+      caption: 'Plan against actual, EUR',
+    });
+    expect(res).toMatchObject({ label: 'Q3 budget', blocks: [{ kind: 'table', nth: 0 }] });
+
+    const table = (await h.json('get_block', { chunkId: res.chunkId, kind: 'table' })).data;
+    expect(table.rows[0][3], 'the calc engine ran on the way in').toBe('1600');
+    expect(table.rows[2]).toEqual(['Total', '162000', '158200', '3800']);
+    expect(innerOf(h, res.chunkId)).toContain('<h2 class="anim" style="--i:1">Q3 budget</h2>');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('add_ledger refuses a column format given as a STRING — the shape that used to reach save_deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const before = h.deck.serialize();
+    const res = await h.call('add_ledger', {
+      title: 'Bad',
+      columns: [{ label: 'Item' }, { label: 'Cost', format: 'currency' }],
+      rows: [['Widget', '10']],
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('table.column.format');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses a fold with a title but nothing on it, rather than adding a blank card', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Empty' });
+    for (const args of [{ title: 'T', blocks: [] }, { title: '   ', blocks: [{ text: '<p>x</p>' }] }, { title: 'T' }]) {
+      const res = await h.call('add_fold', args);
+      expect(res.isError, JSON.stringify(args)).toBe(true);
+    }
+    expect(h.deck.model().order).toHaveLength(1);
+  });
+
+  it('honours position, so a fold can be composed into the middle of a deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Order' });
+    await h.json('add_fold', { title: 'Last', blocks: [{ text: '<p>z</p>' }] });
+    const mid = await h.json('add_fold', { title: 'Middle', position: 1, blocks: [{ text: '<p>m</p>' }] });
+    expect(mid.index).toBe(1);
+    expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Middle', 'Last']);
+  });
+});
+
+describe('S4 — themes an agent can own', () => {
+  /* Two things went wrong in trial, and both are fixed here.
+       - set_deck_meta({themeName:"boardroom"}) renamed the theme and changed NOTHING. themeName
+         is a label; no preset existed to apply and nothing said so.
+       - A cold model sent {primary, background} — plausible token names from every OTHER design
+         system, neither read by the deck stylesheet. validateThemeTokens only checks the VALUE,
+         so they were stored in the manifest for ever and did nothing at all. */
+
+  const tokensOf = (h: ReturnType<typeof harness>) => h.deck.model().theme.tokens;
+
+  it('lists the four runtime presets with their complete token maps', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const res = await h.json('list_themes');
+    expect(res.themes.map((t: any) => t.name)).toEqual(['origami-default', 'boardroom', 'meadow', 'dusk']);
+    for (const t of res.themes) {
+      expect(t.source, t.name).toBe('preset');
+      expect(Object.keys(t.tokens).length, t.name).toBeGreaterThanOrEqual(14);
+      // a preset that named a token the stylesheet does not read would be a lie in the catalog
+      expect(unknownTokens(t.tokens), t.name).toEqual([]);
+    }
+    expect(res.tokensTheDeckReads).toEqual([...THEME_TOKENS]);
+  });
+
+  it('apply_theme really changes the colours, where set_deck_meta({themeName}) does not', async () => {
+    /* Read the accent OUT OF THE SERIALIZED FOLD, not out of model.theme.tokens: a fresh deck's
+       token map is empty and the style block holds the palette, so the model field would report
+       "undefined -> the default" and call that a change. The bytes are the truth here. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const accentInForce = () => /--accent\s*:\s*([^;]+);/.exec(h.deck.serialize())![1]!.trim();
+    const before = accentInForce();
+    expect(before).toBe('#3F7268');
+
+    // the trial's failure, reproduced: a rename is a rename
+    await h.json('set_deck_meta', { themeName: 'boardroom' });
+    expect(h.deck.model().theme.name).toBe('boardroom');
+    expect(accentInForce(), 'renaming must not restyle').toBe(before);
+
+    const res = await h.json('apply_theme', { name: 'boardroom' });
+    expect(res.applied).toBe('boardroom');
+    expect(res.source).toBe('preset');
+    expect(accentInForce()).toBe('#38628F');
+    expect(tokensOf(h).bg).toBe('#F3F5F8');
+    // a token the preset does NOT name survives the merge. The presets carry the fourteen
+    // palette tokens; the three masthead ones are only ever set by hand, and applying a theme
+    // must not silently strip a masthead a human tuned.
+    await h.json('set_deck_meta', { themeTokens: { 'chrome-pad': '18px' } });
+    await h.json('apply_theme', { name: 'meadow' });
+    expect(tokensOf(h)['chrome-pad']).toBe('18px');
+    expect(accentInForce()).not.toBe('#38628F');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('is one undo step, and an unknown name is refused with the names that exist', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const before = h.deck.serialize();
+    await h.json('apply_theme', { name: 'dusk' });
+    expect(h.deck.serialize()).not.toBe(before);
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+
+    const bad = await h.call('apply_theme', { name: 'corporate-blue' });
+    expect(bad.isError).toBe(true);
+    const body = JSON.parse(bad.content[0]!.text);
+    expect(body.error).toMatch(/unknown theme "corporate-blue"/);
+    expect(body.availableThemes).toContain('boardroom');
+  });
+
+  it("REFUSES Haiku's primary/background with the tokens the stylesheet really reads", async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const res = await h.call('save_theme', { name: 'house', tokens: { primary: '#38628F', background: '#F3F5F8' } });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.violations.map((v: any) => v.rule)).toEqual(['theme.token-name', 'theme.token-name']);
+    expect(body.violations[0].detail).toMatch(/"primary" is not read by the deck stylesheet/);
+    expect(body.tokensTheDeckReads).toEqual([...THEME_TOKENS]);
+    // and nothing was kept: a refusal that half-saved would be worse than storing the typo
+    expect((await h.json('list_themes')).themes.filter((t: any) => t.source === 'saved')).toEqual([]);
+  });
+
+  it('saves a one-token variant of a preset, and apply_theme can then use it', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const saved = await h.json('save_theme', { name: 'house-navy', label: 'House navy', tokens: { accent: '#1F3A5F' }, basedOn: 'boardroom' });
+    expect(saved).toMatchObject({ saved: 'house-navy', replaced: false, basedOn: 'boardroom' });
+    // basedOn is the BASE, not a reference: the rest of boardroom came with it
+    expect(saved.tokens.accent).toBe('#1F3A5F');
+    expect(saved.tokens.bg).toBe('#F3F5F8');
+    // saving changes nothing on the Fold
+    expect(tokensOf(h).accent).not.toBe('#1F3A5F');
+
+    const listed = (await h.json('list_themes')).themes.find((t: any) => t.name === 'house-navy');
+    expect(listed).toMatchObject({ source: 'saved', label: 'House navy' });
+
+    await h.json('apply_theme', { name: 'house-navy' });
+    expect(tokensOf(h).accent).toBe('#1F3A5F');
+    expect(tokensOf(h).bg).toBe('#F3F5F8');
+  });
+
+  it('reports WCAG contrast and warns below 4.5:1', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+
+    // black on white is the top of the scale
+    expect(contrastRatio('#000000', '#FFFFFF')).toBe(21);
+    expect(contrastRatio('#FFFFFF', '#FFFFFF')).toBe(1);
+    // a value no ratio can be measured from is null, not a guess
+    expect(contrastRatio('rgba(0,0,0,0.5)', '#FFFFFF')).toBeNull();
+    expect(contrastRatio('Georgia, serif', '#FFFFFF')).toBeNull();
+
+    const ok = await h.json('save_theme', { name: 'readable', tokens: { ink: '#111111', bg: '#FFFFFF', paper: '#FFFFFF', accent: '#2F5F4A', chrome: '#FFFFFF', 'chrome-ink': '#111111' } });
+    expect(ok.contrast.warnings).toEqual([]);
+    expect(ok.contrast.pairs.find((p: any) => p.pair === 'ink/bg').ratio).toBeGreaterThan(15);
+
+    const faint = await h.json('save_theme', { name: 'faint', tokens: { ink: '#AAAAAA', bg: '#FFFFFF', paper: '#FFFFFF', accent: '#CCCCCC', chrome: '#FFFFFF', 'chrome-ink': '#111111' } });
+    expect(faint.saved).toBe('faint');
+    expect(faint.contrast.warnings.length).toBeGreaterThanOrEqual(2);
+    expect(faint.contrast.warnings.join(' ')).toMatch(/below the 4\.5:1 WCAG AA minimum/);
+    expect(faint.note).toMatch(/read the contrast warnings/);
+    // a pair whose colours cannot be read is reported as unmeasured WITH the reason
+    const partial = await h.json('save_theme', { name: 'fonts-only', tokens: { 'font-body': 'Georgia, serif' } });
+    const inkBg = partial.contrast.pairs.find((p: any) => p.pair === 'ink/bg');
+    expect(inkBg).toMatchObject({ ratio: null, passesAA: null });
+    expect(inkBg.why).toMatch(/not set in this theme/);
+  });
+
+  it('refuses to overwrite or delete a preset, and refuses a name that is not a key', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    expect((await h.call('save_theme', { name: 'boardroom', tokens: { accent: '#000000' } })).isError).toBe(true);
+    expect((await h.call('delete_theme', { name: 'boardroom' })).isError).toBe(true);
+    expect((await h.call('save_theme', { name: 'House Navy!', tokens: { accent: '#000000' } })).isError).toBe(true);
+    expect((await h.json('list_themes')).themes.find((t: any) => t.name === 'boardroom').tokens.accent).toBe('#38628F');
+  });
+
+  it('delete_theme forgets the palette but leaves a deck already wearing it alone', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    await h.json('save_theme', { name: 'gone-soon', tokens: { accent: '#B3402A' }, basedOn: 'meadow' });
+    await h.json('apply_theme', { name: 'gone-soon' });
+    expect(tokensOf(h).accent).toBe('#B3402A');
+
+    const del = await h.json('delete_theme', { name: 'gone-soon' });
+    expect(del).toMatchObject({ deleted: 'gone-soon', remaining: [] });
+    expect(tokensOf(h).accent, 'a theme is applied BY VALUE — deleting it cannot restyle the deck').toBe('#B3402A');
+    expect((await h.call('apply_theme', { name: 'gone-soon' })).isError).toBe(true);
+    expect((await h.call('delete_theme', { name: 'gone-soon' })).isError).toBe(true);
+  });
+
+  it('keeps saved themes in the injected store, so the page can persist them', async () => {
+    /* The tools never touch storage themselves: they take a ThemeStore. That is what lets the
+       page put them in localStorage (proved surviving a real reload in tests/e2e/app.spec.ts)
+       while every other host gets the in-memory one and behaves the same. */
+    const store = new MemoryThemeStore();
+    const deck = new DeckStore();
+    const registry = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, themes: store }, FOLIO_MODE);
+    await registry.invoke('create_deck', { title: 'Store' });
+    await registry.invoke('save_theme', { name: 'kept', tokens: { accent: '#123456' } });
+    expect(store.all().map((t) => t.name)).toEqual(['kept']);
+    expect(store.get('kept')!.tokens.accent).toBe('#123456');
+
+    // a second registry over the SAME store sees it — which is what a reload is
+    const second = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, themes: store }, FOLIO_MODE);
+    const listed = JSON.parse((await second.invoke('list_themes', {})).content[0]!.text);
+    expect(listed.themes.find((t: any) => t.name === 'kept')).toMatchObject({ source: 'saved' });
+  });
+
+  it('set_deck_meta now SAYS that themeName is only a label', async () => {
+    const h = harness();
+    expect(h.registry.get('set_deck_meta')!.description).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
+    expect(h.registry.get('set_deck_meta')!.description).toMatch(/apply_theme/);
+  });
+});
+
+describe('S5 — turns and bytes', () => {
+  /* The lead's latency probe found every tool under 6 ms except inspect_render (2.4 s) and
+     save_deck (53 ms). So the cost of a deck is not compute — it is turns and payload bytes,
+     and these two are the only levers left after add_fold made one fold one call. */
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+
+  it('builds a whole deck in ONE call, in order', async () => {
+    const h = harness();
+    const res = await h.json('run_batch', {
+      calls: [
+        { tool: 'create_deck', args: { title: 'Batched', discard: true } },
+        { tool: 'add_fold', args: { title: 'Opening', blocks: [{ text: '<p class="lede">One turn.</p>' }] } },
+        { tool: 'add_fold', args: { title: 'The numbers', blocks: [{ chart: CHART }] } },
+        { tool: 'add_ledger', args: { title: 'Budget', columns: [{ label: 'Line' }, { label: 'Cost' }], rows: [['Rent', '1200'], ['Total', '']], formulas: { B2: '=SUM(B1:B1)' } } },
+        { tool: 'apply_theme', args: { name: 'boardroom' } },
+      ],
+    });
+    expect(res).toMatchObject({ requested: 5, completed: 5 });
+    expect(res.stoppedAt).toBeUndefined();
+    expect(res.results.map((r: any) => r.tool)).toEqual(['create_deck', 'add_fold', 'add_fold', 'add_ledger', 'apply_theme']);
+    expect(res.results.every((r: any) => r.ok)).toBe(true);
+    // the results are the tools' OWN bodies, parsed — one payload, not five strings to re-parse
+    expect(res.results[1].result.chunkId).toBeTypeOf('string');
+    expect(res.results[3].result.blocks).toEqual([{ kind: 'table', nth: 0 }]);
+
+    expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Opening', 'The numbers', 'Budget']);
+    expect(h.deck.serialize()).toContain('#38628F');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('records every inner call in the feed, and undo reverses them ONE AT A TIME', async () => {
+    /* The batch is a driver, not a second dispatcher: each call goes through
+       ToolRegistry.invoke. That is what makes the feed and the undo stack see six steps rather
+       than one opaque one — and an agent that undoes after a batch must get its last fold back,
+       not the whole build. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const before = h.deck.serialize();
+    await h.json('run_batch', {
+      calls: [
+        { tool: 'add_fold', args: { title: 'One', blocks: [{ text: '<p>1</p>' }] } },
+        { tool: 'add_fold', args: { title: 'Two', blocks: [{ text: '<p>2</p>' }] } },
+        { tool: 'add_fold', args: { title: 'Three', blocks: [{ text: '<p>3</p>' }] } },
+      ],
+    });
+    expect(h.deck.model().order).toHaveLength(4);
+
+    const feed = (await h.json('list_activity', { limit: 20 })).entries.map((e: any) => e.tool);
+    expect(feed.filter((t: string) => t === 'add_fold')).toHaveLength(3);
+    expect(feed).toContain('run_batch');
+
+    await h.json('undo');
+    expect(h.deck.model().order, 'ONE undo takes back ONE fold').toHaveLength(3);
+    await h.json('undo');
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('stops at the FIRST failure and says exactly where, leaving what already landed', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const res = await h.json('run_batch', {
+      calls: [
+        { tool: 'add_fold', args: { title: 'Good', blocks: [{ text: '<p>ok</p>' }] } },
+        { tool: 'add_fold', args: { title: 'Bad', blocks: [{ flow: { nodes: [], edges: [] } }] } },
+        { tool: 'add_fold', args: { title: 'Never', blocks: [{ text: '<p>no</p>' }] } },
+      ],
+    });
+    expect(res).toMatchObject({ requested: 3, completed: 1, stoppedAt: 1, stoppedOn: 'add_fold' });
+    expect(res.results).toHaveLength(2); // the failure is returned, the call after it never ran
+    expect(res.results[1].ok).toBe(false);
+    expect(res.results[1].result.violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+    expect(res.note).toMatch(/DID land/);
+    // the first fold really is on the deck: a half-batch is reported, not rolled back
+    expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Good']);
+  });
+
+  it('checks the whole list before running anything, so a typo never half-builds a deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const before = h.deck.serialize();
+    const res = await h.call('run_batch', {
+      calls: [
+        { tool: 'add_fold', args: { title: 'Good', blocks: [{ text: '<p>ok</p>' }] } },
+        { tool: 'add_fould', args: {} },
+      ],
+    });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/calls\[1\] names unknown tool "add_fould" — nothing was run/);
+    expect(body.availableTools).toContain('add_fold');
+    expect(h.deck.serialize(), 'the valid first call must NOT have run').toBe(before);
+  });
+
+  it('refuses a batch inside a batch, and a batch longer than the cap', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const nested = await h.call('run_batch', { calls: [{ tool: 'run_batch', args: { calls: [] } }] });
+    expect(nested.isError).toBe(true);
+    expect(JSON.parse(nested.content[0]!.text).error).toMatch(/cannot contain another batch/);
+
+    const long = await h.call('run_batch', { calls: Array.from({ length: BATCH_MAX + 1 }, () => ({ tool: 'list_chunks', args: {} })) });
+    expect(long.isError).toBe(true);
+    expect(JSON.parse(long.content[0]!.text)).toMatchObject({ max: BATCH_MAX });
+
+    expect((await h.call('run_batch', { calls: [] })).isError).toBe(true);
+    expect((await h.call('run_batch', { calls: [{ args: {} }] })).isError).toBe(true);
+  });
+
+  it('origami_guide({topic:"quickstart"}) is the fast path, under 3 KB, with a real example', async () => {
+    const h = harness();
+    const q = await h.json('origami_guide', { topic: 'quickstart' });
+    expect(new TextEncoder().encode(JSON.stringify(q, null, 2)).length).toBeLessThanOrEqual(3_000);
+
+    // the five calls, named in order
+    const path = q.theFastPath.join(' ');
+    for (const tool of ['create_deck', 'add_fold', 'add_ledger', 'run_batch', 'apply_theme', 'inspect_render', 'save_deck']) {
+      expect(path, tool).toContain(tool);
+    }
+    // and ONE example that really works — parsed out of the answer and RUN
+    expect(q.example.call).toBe('add_fold');
+    const args = JSON.parse(q.example.args);
+    expect(args.blocks.some((b: any) => b.chart), 'the example carries a chart').toBe(true);
+    expect(args.blocks.some((b: any) => b.table), 'the example carries a table').toBe(true);
+
+    await h.json('create_deck', { title: 'From the guide' });
+    const built = await h.json('add_fold', args);
+    expect(built.chunkId).toBeTypeOf('string');
+    expect(built.blocks).toEqual([{ kind: 'chart', nth: 0 }, { kind: 'table', nth: 0 }]);
+    expect(validateDeck(parseDeck(h.deck.serialize())), 'the guide example must produce a VALID Fold').toEqual([]);
+  });
+
+  it("the default guide's FIRST key points at the quickstart", async () => {
+    const h = harness();
+    const dflt = await h.json('origami_guide');
+    expect(Object.keys(dflt)[0]).toBe('start');
+    expect(dflt.start).toMatch(/topic: "quickstart"/);
+    expect(dflt.topics.quickstart).toMatch(/read this one first/);
+    expect(GUIDE_TOPICS).toContain('quickstart');
+  });
+});
+
+describe('S6 — what BOTH trial agents still tripped on', () => {
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+  const innerOf = (h: ReturnType<typeof harness>, id: string) => h.deck.model().slides.get(id)!.inner;
+
+  /* ---- 1. no placeholder in a fresh deck ---------------------------------------------- */
+
+  it('mints a real COVER, so a fresh Fold carries no placeholder text at all', async () => {
+    /* create_deck used to mint an h2 reading "New fold" and a lede reading "Write here."
+       Haiku overwrote it (read_chunk + write_chunk); Sonnet added its own cover and then had to
+       list_chunks + delete_chunk to remove the placeholder. Between them that is five calls
+       spent on text the deck could have written itself. */
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Q3 review', subtitle: 'Revenue held; delivery cost did not', eyebrow: 'Board pack' });
+
+    expect(created.chunks[0].kind, 'the cover KIND, whose whole schema is .eyebrow / h1 / .lede').toBe('cover');
+    const inner = innerOf(h, created.chunks[0].id);
+    expect(inner).toContain('<p class="eyebrow anim" style="--i:0">Board pack</p>');
+    expect(inner).toContain('<h1 class="anim" style="--i:1">Q3 review</h1>');
+    expect(inner).toContain('<p class="lede anim" style="--i:2">Revenue held; delivery cost did not</p>');
+
+    const text = h.deck.serialize();
+    expect(text, 'no placeholder ANYWHERE in a fresh Fold').not.toContain('New fold');
+    expect(text).not.toContain('Write here.');
+    expect(validateDeck(parseDeck(text))).toEqual([]);
+  });
+
+  it('emits no empty element when subtitle and eyebrow are absent', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Bare' });
+    const inner = innerOf(h, created.chunks[0].id);
+    expect(inner.trim()).toBe('<div class="slide-inner"><h1 class="anim" style="--i:0">Bare</h1></div>');
+    expect(inner).not.toContain('eyebrow');
+    expect(inner).not.toContain('lede');
+    // and it still paints: a cover with a title on it is real content, not a blank fold
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('escapes a title that would otherwise be markup', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'A < B & C', subtitle: '<script>x</script>' });
+    const inner = innerOf(h, h.deck.model().order[0]!);
+    expect(inner).toContain('A &lt; B &amp; C');
+    expect(inner).toContain('&lt;script&gt;');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('leaves the mini pages minting their own free card, not a cover', async () => {
+    // a mini page seeds ONE free card holding its block; the cover kind would be wrong there
+    const mini = await miniHarness(CHARTS_MODE);
+    expect(mini.deck.model().slides.get(mini.deck.model().order[0]!)!.kind).toBe('free');
+  });
+
+  /* ---- 2. required-but-blank diagram fields ------------------------------------------- */
+
+  it('fills flow/graph tone and edge label, which the validator requires and agents read as optional', async () => {
+    /* MEASURED against the vendored validators: a flow node with no `tone` is refused with
+       "tone must be one of accent|green|amber|red or \"\"" and an edge with no `label` with
+       "label must be a string". Both trial agents wrote a diagram without them. "" is the legal
+       blank for both, so filling it is a pure default. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Diagrams' });
+
+    const flow = await h.json('add_fold', {
+      title: 'Process',
+      blocks: [{ flow: { nodes: [{ id: 'a', label: 'Draft', shape: 'pill' }, { id: 'b', label: 'Ship', shape: 'pill' }], edges: [{ from: 'a', to: 'b' }] } }],
+    });
+    const stored = (await h.json('get_block', { chunkId: flow.chunkId, kind: 'flow' })).data;
+    expect(stored.nodes.map((n: any) => n.tone)).toEqual(['', '']);
+    expect(stored.edges.map((e: any) => e.label)).toEqual(['']);
+
+    const graph = await h.json('add_fold', {
+      title: 'Map',
+      blocks: [{ graph: { nodes: [{ id: 'a', label: 'A', x: 20, y: 20 }, { id: 'b', label: 'B', x: 60, y: 60 }], edges: [{ from: 'a', to: 'b' }] } }],
+    });
+    const g = (await h.json('get_block', { chunkId: graph.chunkId, kind: 'graph' })).data;
+    expect(g.nodes.every((n: any) => n.tone === '')).toBe(true);
+    expect(g.edges.every((e: any) => e.label === '')).toBe(true);
+  });
+
+  it('set_block fills them too, and a tone the agent DID write is never overwritten', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Diagrams' });
+    const added = await h.json('add_chunk', { starter: 'flowchart' });
+    await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'flow',
+      data: { nodes: [{ id: 'a', label: 'A', shape: 'pill', tone: 'green' }, { id: 'b', label: 'B', shape: 'box' }], edges: [{ from: 'a', to: 'b', label: 'yes' }, { from: 'b', to: 'a' }] },
+    });
+    const d = (await h.json('get_block', { chunkId: added.chunkId, kind: 'flow' })).data;
+    expect(d.nodes.map((n: any) => n.tone)).toEqual(['green', '']);
+    expect(d.edges.map((e: any) => e.label)).toEqual(['yes', '']);
+  });
+
+  it('does NOT default anything that carries meaning', async () => {
+    /* The line this stops at. A gantt card's `effort` is EASY|MED|DEFER with no blank member, so
+       filling one would be inventing content rather than supplying a blank — it stays a refusal. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Gantt' });
+    const res = await h.call('add_fold', {
+      title: 'Plan',
+      blocks: [{ gantt: { totalWeeks: 4, startDate: null, lenses: [{ name: 'Plan', color: '#4a8cc4' }], swimlanes: [{ name: 'A', owner: 'O' }], cards: [{ id: 'C1', title: 'Do it', swimlane: 'A', start: 'W1', durationWeeks: 1, lens: 'Plan', type: 'Process' }], milestones: [] } }],
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('gantt.card.effort');
+  });
+
+  it('tells an agent where the filling stops', async () => {
+    const h = harness();
+    const kinds = (await h.json('origami_guide', { topic: 'kinds' })).kinds;
+    for (const k of ['flow', 'graph']) {
+      expect(kinds[k].howToAdd, k).toMatch(/REQUIRED-BUT-BLANK/);
+      expect(kinds[k].howToAdd, k).toMatch(/write_chunk and the propose_\* tools do not/);
+    }
+    expect(kinds.gantt.howToAdd).not.toMatch(/REQUIRED-BUT-BLANK/);
+  });
+
+  /* ---- 3. add_ledger currency + inlined shapes ---------------------------------------- */
+
+  it('puts one currency prefix on every currency column, which is what both agents got wrong', async () => {
+    /* MEASURED in the vendored cell-format: `const sym = fmt?.currency ?? '$'`, printed
+       LITERALLY. Both trial agents wrote € in the prose and the table rendered $. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const res = await h.json('add_ledger', {
+      title: 'Q3 budget',
+      currency: '€',
+      columns: [{ label: 'Line' }, { label: 'Plan', align: 'right', format: { kind: 'currency' } }, { label: 'Actual', align: 'right', format: { kind: 'currency' } }, { label: 'Share', format: { kind: 'percent' } }],
+      rows: [['Engineering', '120000', '118400', '0.62'], ['Total', '', '', '']],
+      formulas: { B2: '=SUM(B1:B1)', C2: '=SUM(C1:C1)' },
+    });
+    const cols = (await h.json('get_block', { chunkId: res.chunkId, kind: 'table' })).data.columns;
+    expect(cols[1].format).toEqual({ kind: 'currency', currency: '€' });
+    expect(cols[2].format).toEqual({ kind: 'currency', currency: '€' });
+    expect(cols[3].format, 'a non-currency column is untouched').toEqual({ kind: 'percent' });
+    expect(cols[0].format, 'a column with no format at all is untouched').toBeUndefined();
+    expect(formatCell('1234.5', cols[1].format)).toBe('€1,234.50');
+  });
+
+  it('leaves a column that names its own currency alone, and is a no-op when unset', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const res = await h.json('add_ledger', {
+      title: 'Mixed',
+      currency: '€',
+      columns: [{ label: 'EUR', format: { kind: 'currency' } }, { label: 'GBP', format: { kind: 'currency', currency: '£' } }],
+      rows: [['1', '2']],
+    });
+    const cols = (await h.json('get_block', { chunkId: res.chunkId, kind: 'table' })).data.columns;
+    expect(cols.map((c: any) => c.format.currency)).toEqual(['€', '£']);
+
+    const plain = await h.json('add_ledger', { title: 'Default', columns: [{ label: 'Cost', format: { kind: 'currency' } }], rows: [['1']] });
+    const one = (await h.json('get_block', { chunkId: plain.chunkId, kind: 'table' })).data.columns[0];
+    expect(one.format.currency, 'unset means the format library decides').toBeUndefined();
+    expect(formatCell('1234.5', one.format), 'and what it decides is $').toBe('$1,234.50');
+  });
+
+  it('carries the kpis / totals / formulas shapes in its own description, so no schema round trip is needed', async () => {
+    /* The description is the only thing an agent has when it decides how to call a tool. A KPI
+       built from it ALONE has to validate — so the example is parsed straight out of the text. */
+    const h = harness();
+    const d = h.registry.get('add_ledger')!.description;
+    const kpi = JSON.parse(/`kpis` pins cards above the table: (\[.*?\]) /.exec(d)![1]!);
+    const totals = JSON.parse(/`totals` is a footer row: (\{.*?\}\}) /.exec(d)![1]!);
+    expect(d).toMatch(/format` is an OBJECT/);
+    expect(d).toMatch(/prints "\$"/);
+
+    await h.json('create_deck', { title: 'From the description' });
+    const res = await h.json('add_ledger', {
+      title: 'KPI',
+      currency: '€',
+      columns: [{ label: 'Line' }, { label: 'Plan', format: { kind: 'currency' } }],
+      rows: [['Engineering', '120000'], ['Design', '42000'], ['x', ''], ['x', ''], ['Total', '']],
+      formulas: { B5: '=SUM(B1:B4)' },
+      kpis: kpi,
+      totals,
+    });
+    expect(res.blocks).toEqual([{ kind: 'table', nth: 0 }]);
+    expect(validateDeck(parseDeck(h.deck.serialize())), 'a ledger built from the description alone must be VALID').toEqual([]);
+  });
+
+  /* ---- 5. fit with prose --------------------------------------------------------------- */
+
+  it('shrinks a composed chart when the card also carries prose', async () => {
+    /* MEASURED at 1280x720 through the real render: the same lede+chart fold is 849px at
+       plotHeight 318, 781 at 250, 751 at 220, 731 at 200 and FITS at 180. A paragraph costs the
+       chart 107px, which is more than the distance from 250 to the floor — so any prose on the
+       card puts the chart at the floor. The e2e test measures it; this pins the arithmetic. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Fit' });
+
+    const alone = await h.json('add_fold', { title: 'Chart only', blocks: [{ chart: CHART }] });
+    expect((await h.json('get_block', { chunkId: alone.chunkId, kind: 'chart' })).data.plotHeight).toBe(COMPOSED_PLOT_HEIGHT);
+
+    for (const prose of [{ text: '<p class="lede">A line.</p>' }, { bullets: ['a', 'b'] }, { stats: [{ value: '1', label: 'x' }] }, { quote: { text: 'Said.' } }]) {
+      const withProse = await h.json('add_fold', { title: 'With prose', blocks: [prose, { chart: CHART }] });
+      const ph = (await h.json('get_block', { chunkId: withProse.chunkId, kind: 'chart' })).data.plotHeight;
+      expect(ph, JSON.stringify(Object.keys(prose))).toBe(MIN_PLOT_HEIGHT);
+      expect(ph).toBeLessThan(COMPOSED_PLOT_HEIGHT);
+    }
+
+    // the floor holds however much prose is piled on
+    const crowded = await h.json('add_fold', { title: 'Crowded', blocks: [{ text: '<p>a</p>' }, { bullets: ['b'] }, { quote: { text: 'c' } }, { chart: CHART }] });
+    expect((await h.json('get_block', { chunkId: crowded.chunkId, kind: 'chart' })).data.plotHeight).toBe(MIN_PLOT_HEIGHT);
+
+    // and a chart that names its own height is obeyed, prose or not
+    const own = await h.json('add_fold', { title: 'Own', blocks: [{ text: '<p>a</p>' }, { chart: { ...CHART, plotHeight: 600 } }] });
+    expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(600);
+  });
+
+  it('states the rule in the arithmetic, not just in a comment', () => {
+    expect(chartPlotHeight([])).toBe(COMPOSED_PLOT_HEIGHT);
+    expect(chartPlotHeight([{ chart: {} }])).toBe(COMPOSED_PLOT_HEIGHT);
+    expect(chartPlotHeight([{ text: '<p>a</p>' }])).toBe(MIN_PLOT_HEIGHT);
+    expect(MIN_PLOT_HEIGHT).toBe(180);
+    expect(COMPOSED_PLOT_HEIGHT).toBeGreaterThan(MIN_PLOT_HEIGHT);
+  });
+
+  /* ---- 4. per-turn bytes kept honest ---------------------------------------------------- */
+
+  it('keeps every destructive warning and measured caveat that the trim could have cost', () => {
+    /* The budget is only worth having if it did not buy the bytes by dropping a warning. Each of
+       these is a caveat an agent cannot recover from being wrong about. */
+    const h = harness();
+    const d = (n: string) => h.registry.get(n)!.description;
+
+    expect(d('delete_chunk')).toMatch(/removes the slide template entirely/);
+    expect(d('delete_chunk')).toMatch(/set_chunk_meta\(\{chunkId, hidden:false\}\)/);
+    expect(d('delete_theme')).toMatch(/GONE from this browser/);
+    expect(d('create_deck')).toMatch(/discard:true/);
+    expect(d('save_deck')).toMatch(/saved:true means/);
+    expect(d('save_deck')).toMatch(/NEVER reported as saved/);
+    expect(d('export_deck')).toMatch(/writes NOTHING, saves NOTHING/);
+    expect(d('inspect_render')).toMatch(/NOT a clean bill of health unless measured is true/);
+    expect(d('set_deck_meta')).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
+    expect(d('save_theme')).toMatch(/REFUSED/);
+    expect(d('move_chunk')).toMatch(/REFUSED rather than clamped/);
+    expect(d('undo')).toMatch(/no redo/);
+    expect(d('add_custom_fold')).toMatch(/padlock/);
+
+    // and every writer still says it writes — a dropped annotation must never be the difference
+    for (const name of ['write_chunk', 'add_chunk', 'add_fold', 'add_ledger', 'set_block', 'move_chunk', 'set_chunk_meta', 'set_deck_meta', 'apply_theme', 'run_batch']) {
+      expect(d(name), name).toMatch(/CHANGES THE (DECK|COLOURS|OPEN FOLD)/);
+    }
+    for (const name of ['add_custom_fold', 'define_block', 'delete_block', 'set_header', 'set_fold_type']) {
+      expect(d(name), name).toMatch(/CHANGES THE OPEN FOLD/);
+    }
+  });
+
+  it('undo points at a guide entry that really lists the writers it covers', async () => {
+    // the description bought its bytes back by pointing; the pointer has to be true
+    const h = harness();
+    expect(h.registry.get('undo')!.description).toMatch(/origami_guide\(\{topic:"tools"\}\) lists them/);
+    const tools = (await h.json('origami_guide', { topic: 'tools' })).tools;
+    for (const name of ['write_chunk', 'add_fold', 'add_ledger', 'set_block', 'apply_theme', 'delete_chunk']) {
+      expect(tools.undo, name).toContain(name);
+    }
   });
 });

@@ -28,6 +28,15 @@
       <div class="popover" data-testid="mcp-popover" id="mcp-popover" role="dialog" aria-label="Agent access" hidden></div>
     </span>
 
+    <!-- The open Fold's colours — the same four tools an agent has (list_themes / apply_theme /
+         save_theme / delete_theme), reachable by hand. The dot is the deck's own `accent` token;
+         the label is the matching preset or saved theme's name, or "Custom" when the tokens on
+         the deck match none of them. -->
+    <span class="popwrap">
+      <button type="button" class="themebtn" data-testid="btn-theme" id="btn-theme" aria-haspopup="dialog" aria-expanded="false" disabled><i class="swatch" id="theme-swatch" aria-hidden="true"></i><span id="theme-label">Theme</span></button>
+      <div class="popover thememenu" data-testid="theme-popover" id="theme-popover" role="dialog" aria-label="Theme" hidden></div>
+    </span>
+
     <button type="button" data-testid="btn-new" id="btn-new">New</button>
     <button type="button" data-testid="btn-open" id="btn-open">Open&hellip;</button>
 

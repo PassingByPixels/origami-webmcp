@@ -21,10 +21,19 @@ const PLACEMENT = new Map(FORMAT_BLOCKS.map((b) => [b.key as string, b.data?.pla
 
 const placementOf = (key: string): string => (PLACEMENT.get(key) === 'block' ? 'in-slide block' : 'whole fold');
 
+/* The one thing an agent cannot read off a flow/graph schema: `tone` and edge `label` are
+   REQUIRED, with "" as their blank. Both cold-agent trials wrote a diagram without them and ate
+   a refusal. add_fold and set_block now fill them, so this line says where that stops. */
+const DIAGRAM_BLANKS =
+  ' REQUIRED-BUT-BLANK: every node needs `tone` and every edge needs `label`, and "" is the legal blank for both — a node with no tone is refused, not defaulted. add_fold and set_block fill them for you; write_chunk and the propose_* tools do not, so put them in the JSON yourself there.';
+
 const howToAdd = (key: string): string =>
   PLACEMENT.get(key) === 'block'
     ? `IN-SLIDE BLOCK, not a slide kind — any number of these may sit on any fold. PREFER a FREE CARD holding one: add_chunk({ kind: "free", html: '<div class="slide-inner"><p class="eyebrow">Section</p><h2>A title</h2>' + <the ${key} figure> + '</div>' }). That is what this kind's own schema recommends, and it gives the block a heading and room for a second block beside it. add_chunk({ kind: "${key}", html: <the figure> }) is also valid and is what the stdio server does, but it makes a fold whose entire body is one untitled figure.`
     : "A WHOLE FOLD: add_chunk({ kind, html }) with the fold's inner markup.";
+
+/** howToAdd plus the diagram blanks, for the two kinds that have them. */
+const howToAddFull = (key: string): string => howToAdd(key) + (key === 'flow' || key === 'graph' ? DIAGRAM_BLANKS : '');
 
 /* The same advice howToAdd gives PER KIND, said ONCE. In the default answer the kind entries
    are an index (name + placement) and this carries the steer for both placements, so an agent
@@ -43,7 +52,7 @@ const KINDS_HOW_TO = {
 
 /** The sections `origami_guide({topic})` can return. Every byte of the full guide is
     reachable through exactly one of them, so the default answer can point instead of paste. */
-export const GUIDE_TOPICS = ['contract', 'kinds', 'recipes', 'starters', 'issues', 'tools'] as const;
+export const GUIDE_TOPICS = ['quickstart', 'contract', 'kinds', 'recipes', 'starters', 'issues', 'tools'] as const;
 export type GuideTopic = (typeof GUIDE_TOPICS)[number];
 
 /** The keys that make up the `contract` topic: the protocol prose an agent needs before it
@@ -60,6 +69,51 @@ const CONTRACT_KEYS = [
   'capabilities',
   'notAvailableHere',
 ] as const;
+
+/**
+ * THE FAST PATH, under 3 KB.
+ *
+ * The default guide is the whole contract, and an agent that reads it knows everything; it is
+ * also 15 KB of reading before the first call, and two cold-agent trials spent their opening
+ * turns on it and then still hand-assembled figure markup. This answer is the other shape: the
+ * five calls that build a deck, and ONE complete add_fold example carrying a chart and a table,
+ * so the block vocabulary is learned by copying rather than by reading a schema.
+ *
+ * It is deliberately INCOMPLETE, and the last key says so. A guide that pointed nowhere would
+ * be a trap rather than a shortcut.
+ */
+const QUICKSTART = {
+  topic: 'quickstart',
+  theFastPath: [
+    '1. create_deck({ title, subtitle?, eyebrow? }) - its FIRST fold is already a cover with that title. No placeholder to overwrite: do not add your own cover.',
+    '2. add_fold({ title, eyebrow, blocks }) - ONE call a fold. add_ledger({ title, columns, rows, formulas, currency }) for a ledger. Wrap several in run_batch({calls:[...]}) and the deck is ONE turn.',
+    '3. apply_theme({ name }) - a whole palette; list_themes names them. set_deck_meta({themeName}) renames the label only.',
+    '4. inspect_render() - lays the deck out for real and names what OVERFLOWS, renders BLANK or is CLIPPED. You cannot see it.',
+    '5. save_deck() - always end here, and READ it: it says whether bytes reached disk or the human must press Save.',
+  ],
+  blocks:
+    'Each entry names EXACTLY ONE of: chart, venn, flow, graph, gantt, draw, table (that kind\u2019s own JSON + optional caption), or text (HTML: p, p.lede, h3, ul/li), bullets, stats (up to 4 { value, label }), quote ({ text, by }). Data is validated BEFORE anything lands - refused here, never at save.',
+  /* The example is a compact JSON STRING, not a nested object. Tool results are serialized
+     with JSON.stringify(..., null, 2), so a nested example is charged two spaces of
+     indentation per level - it cost 2 KB of this 3 KB answer as an object and 700 bytes as
+     a string. It is also what an agent copies: one line it can paste. */
+  example: {
+    call: 'add_fold',
+    args:
+      '{"title":"Revenue by quarter","eyebrow":"Q3 review","blocks":[{"text":"<p class=\\"lede\\">Revenue held; the cost of delivery did not.</p>"},{"stats":[{"value":"48","label":"Decks shipped"},{"value":"2.1%","label":"Churn"}]},{"chart":{"type":"bar","labels":["Q1","Q2","Q3","Q4"],"series":[{"name":"Revenue","color":"#38628F","values":[12,19,15,24]}],"yMax":null},"caption":"EUR m"},{"table":{"columns":[{"label":"Line"},{"label":"Plan","align":"right"},{"label":"Actual","align":"right"},{"label":"Delta","align":"right"}],"rows":[["Engineering","120000","118400",""],["Total","","",""]],"formulas":{"D1":"=B1-C1","B2":"=SUM(B1:B1)","C2":"=SUM(C1:C1)","D2":"=SUM(D1:D1)"}},"caption":"Formulas are baked into values on the way in"}]}',
+    returns:
+      'chunkId, index, label, and the (kind, nth) address of every data block - what set_block({ chunkId, kind, nth, data }) takes, so a block is rewritten without a read.',
+  },
+  fiveThingsThatCatchAgents: [
+    'A column `format` is an OBJECT - { "kind": "currency" } - not a string. add_ledger({currency:"€"}) sets the prefix; default "$".',
+    'flow/graph: node `tone` and edge `label` are REQUIRED ("" is the blank). add_fold/set_block fill them; write_chunk does not.',
+    'A bare flow/graph fold can clip under a masthead subtitle/chips bar. Use a free card; check inspect_render.',
+    'Themes read 17 token names only (list_themes has them). "primary"/"background" are REFUSED, not stored.',
+    'add_fold names the fold from its title, so tabs read as words; `label` overrides.',
+  ],
+  thisIsNotEverything:
+    'The fast path, not the contract. origami_guide() with no topic is everything; get_kind_schema(kind) is one kind.',
+};
 
 const pointer = (what: string, count: number, topic: GuideTopic): string =>
   `${count} ${what} — omitted here to keep this answer small. Call origami_guide({ topic: "${topic}" }) for them in full.`;
@@ -110,15 +164,15 @@ function fullGuide(): Record<string, unknown> {
           name: k.name,
           schema: k.schemaComment,
           placement: placementOf(k.key),
-          howToAdd: howToAdd(k.key),
+          howToAdd: howToAddFull(k.key),
         },
       ])
     ),
     knownIssues: {
       flowKindMastheadClip:
-        `REPORTED as a Folio runtime bug (a flow-kind fold's figure riding up under the deck masthead) and MEASURED here as narrower than reported. With a subtitle and chips set, the masthead (header.o-top) is 100px tall and OVERLAYS the stage; a free-kind fold keeps its content at or below that line. A flow-KIND fold's figure BOX does start above it — measured at 42px — but the top of that box is empty padding: the topmost element that actually PAINTS measured 121px to 253px across every viewport height from 240 to 720, always below the bar. So no rendered content is hidden, and there is nothing to work around today. Putting the figure in a free card (see kinds.flow.howToAdd) is still the safer shape, because a free card's padding is what holds content clear of the bar. inspect_render measures this on the real render and will say so if it ever changes.`,
-      emptyDataBlockPassesUntilSave:
-        `A data block that is valid JSON but describes nothing — {"nodes":[],"edges":[]} on a flow, an empty sets array on a venn — passes the content policy, so add_chunk returns ok and the fold renders completely blank. save_deck does refuse it at the end (flow.nodes.count), but only then, and as a schema violation rather than "this fold is blank". Call inspect_render before save_deck: a blank fold is reported as empty-fold with the painted-element count.`,
+        `REPORTED as a Folio runtime bug (a flow-kind fold's figure riding up under the deck masthead) and RE-MEASURED after the 2026-09-02 runtime refresh, which changed the number. With a subtitle and chips set, the masthead (header.o-top) is 100px tall and OVERLAYS the stage. A BARE flow/graph-KIND fold — add_chunk({kind:"flow", html}) with no free-card wrapper, its whole body one untitled figure — now has its topmost PAINTED content measured at 90-97px across viewport heights 240-720 (720px view: 97px), a few px inside the 100px bar; the runtime's tighter content-fit layout removed the empty top padding that used to keep it clear. A flow/graph figure inside a FREE card (see kinds.flow.howToAdd — eyebrow + heading above the figure) still measured content starting at 116-185px, comfortably below the bar, at the same viewport heights. So the fix is the same one the free-card steer already gives, and it now actually matters: wrap a flow/graph figure in a free card rather than adding it as a bare flow/graph-kind fold on a deck with a subtitle or chips. inspect_render measures this on the real render and will say so if it changes again.`,
+      dataBlocksAreGatedAtWriteTime:
+        `FIXED, and the behaviour changed: every write path (add_chunk, add_custom_fold, write_chunk, the propose_* trio and accept_proposal) now runs the SAME per-kind validator save_deck runs, over every data block in the content. A block that is valid JSON but describes nothing — {"nodes":[],"edges":[]} on a flow, an empty sets array on a venn — is REFUSED at authoring time with the rule named (flow.nodes.count), not accepted and then rejected at save. Unparseable JSON in a data block is refused the same way. dryRun gives the identical verdict and applies nothing. What this gate does NOT catch is a fold that is blank for a layout reason rather than a data one (an empty .slide-inner) — inspect_render still reports that as empty-fold with the painted-element count, so call it before save_deck.`,
       studioTreeShakenCss:
         `A Fold saved by the Studio can have unused kind CSS stripped out of it, so a block you add to someone else's Fold may render unstyled even though it validates and saves. See recipes.styleCaveat. inspect_render measures geometry, not styling, and does not catch this.`,
     },
@@ -142,8 +196,12 @@ function fullGuide(): Record<string, unknown> {
       list_chunks: 'Table of contents of the open Fold.',
       read_chunk: 'Read one chunk to edit (payload + schema + template).',
       write_chunk: 'Apply an edited chunk to the open Fold — takes effect immediately.',
-      add_chunk: 'Add a new slide (free/table starters; supply html for other kinds; or block+fields for a composite).',
-      add_custom_fold: 'Add a whole CUSTOM FOLD (page) from html — an editable page or a raw report.',
+      add_fold: 'BUILD A WHOLE FOLD IN ONE CALL: a title, an eyebrow, and an ordered list of blocks (chart | venn | flow | graph | gantt | draw | table | text | bullets | stats | quote). One call, one fold, one undo step — this is the fast path.',
+      add_ledger: 'add_fold with one table block: a titled ledger card from columns + rows + formulas, baked by the calc engine on the way in.',
+      add_chunk: 'Add a new slide (free/table starters; supply html for other kinds; or block+fields for a composite). Prefer add_fold when you are building a card from data.',
+      add_custom_fold: 'Add a whole CUSTOM FOLD (page) from html — an editable page or a raw report. THE INLINE-EDITABLE VOCABULARY, for a page a human edits by clicking straight on it, all inside a <div class="slide-inner">: headings (<h2>/<h3>), paragraphs (<p>, <p class="lede">, <p class="eyebrow">), lists (<ul><li>…), and stat cards (<div class="card-grid"><div class="stat-card"><div class="big">42</div><div class="lbl">Label</div></div>…</div>). See origami_guide({topic:"recipes"}) for complete, validated examples of each.',
+      get_block: "Read one data block's JSON on one fold, by chunkId + kind (+ nth) — or every block on that fold in one call. Read before you replace.",
+      set_block: "Replace one data block's WHOLE JSON on one fold, by chunkId + kind (+ nth). Validated by that kind's own schema; tables bake. It never creates a block.",
       delete_chunk: 'Hide (recoverable) or delete a slide.',
       define_block: 'Register (or update) a composite block def (a reusable typed, inert, human-editable component).',
       list_block_defs: 'List the composite block defs registered in this deck.',
@@ -152,13 +210,18 @@ function fullGuide(): Record<string, unknown> {
       get_kind_schema: 'The markup contract for one kind (same as origami_guide(kind)).',
       set_header: 'Deck masthead: subtitle + metadata chips.',
       set_fold_type: 'Set the reading experience (deck | scroll | ledger).',
-      inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here.',
-      undo: 'Reverse the last change to the open Fold (one tool call = one step; 50 deep, no redo, and it cannot cross a create_deck).',
+      inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here. It measures the REAL render, never a model: a fold it could not put on screen comes back measured:false with the reason instead of a number, and a host with no browser layout says so for the whole deck — so an absent warning is not a clean bill of health unless measured is true. Layout is viewport-dependent, which is why the viewport is a parameter and is named in every result: a fold that fits at 1280x720 can still break on a shorter screen.',
+      undo: 'Reverse the last change to the open Fold — one tool call is one step, so a run_batch of six is six steps. THE WRITERS IT COVERS: write_chunk, add_chunk, add_fold, add_ledger, add_custom_fold, set_block, move_chunk, set_chunk_meta, set_deck_meta, apply_theme, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any accepted proposal. It does NOT cross create_deck or a Fold the human opened (both reset the stack), does not change bytes already on disk (save again to push a reversal through), and does not cover a staged proposal (use reject_proposal) or a saved theme (use delete_theme). 50 steps deep, no redo.',
       move_chunk: 'Reorder the folds: move one chunk to a 0-based position. Order only — no content is touched.',
       set_chunk_meta: 'Set one chunk\'s label / notes / hidden flag. hidden:false is the ONLY way to un-hide a fold that delete_chunk hid.',
-      set_deck_meta: 'Deck title and theme (theme name + CSS custom-property tokens).',
-      list_activity: 'The feed: what has been done to this Fold, newest first — one entry per tool call, with source, outcome and timing.',
-      save_deck: 'Write the Fold to disk if the page holds a writable handle; otherwise persist the working copy and report that the human must press Save.',
+      set_deck_meta: 'Deck title, theme LABEL and raw CSS custom-property tokens. themeName alone renames without restyling — apply_theme is what changes colours.',
+      list_themes: 'Every palette apply_theme can use: the four runtime presets plus anything save_theme kept in this browser, with their full token maps.',
+      apply_theme: 'Put a whole named palette on the open Fold — THE tool that restyles a deck. One undo step.',
+      save_theme: 'Keep a palette of your own (in this browser) for apply_theme, optionally based on another. Returns a WCAG contrast report. THE 17 TOKENS THE DECK STYLESHEET READS, and the only ones accepted: bg, paper, ink, ink-soft, rule, rule-soft, accent, tint-a, tint-b, chrome, chrome-ink, chrome-soft, font-display, font-body, plus chrome-mark, chrome-mark-h and chrome-pad for the masthead bar. A name outside that set — primary, background, textColor, the names other design systems use — is REFUSED with this list rather than stored and never read.',
+      delete_theme: 'Forget a theme you saved. Presets cannot be deleted, and a deck already wearing the colours keeps them.',
+      run_batch: 'Run several tool calls in ONE turn, in order, stopping at the first failure. The whole build in one turn; undo still reverses them one at a time.',
+      list_activity: 'The feed: what has been done to this Fold, newest first — one entry per tool call, with source, outcome and timing. Use it to see what a human did while you were working, to find the call that broke something, or to check your own trail. Your own call is recorded AFTER the answer is built, so it never appears in its own result.',
+      save_deck: 'Write the Fold to disk if the page holds a writable handle; otherwise persist the working copy and report that the human must press Save. WHY THE RESULT MATTERS: three different things can happen and only one is a save. (1) saved:true = the page held a writable File System Access handle and the bytes were written AND read back to confirm it. (2) opfs.written = the complete Fold is in this browser private file system, which needs no permission and no gesture and has room for images; it is real storage but INVISIBLE outside this page, and the browser may evict it, so the human retrieves it with the "Download last save" button. (3) downloadStarted = a download was fired at the browser; on Chrome that usually lands in Downloads, but the page cannot see where it went and a browser may block a repeat, so it is never reported as saved. It never throws and never opens a picker (nobody would be there to click it), so an unattended agent can always finish on it.',
       export_deck: 'Hand YOURSELF the whole .origami.html text (the agent\'s copy). It saves nothing — save_deck is still the human\'s route to disk.',
       propose_chunk: 'Stage a chunk edit for review instead of applying it (a "document PR").',
       propose_add: 'Stage a new slide for review (the add equivalent of propose_chunk).',
@@ -180,6 +243,18 @@ function fullGuide(): Record<string, unknown> {
 const kindIndex = (): Record<string, unknown> =>
   Object.fromEntries(Object.values(KINDS).map((k) => [k.key, { name: k.name, placement: placementOf(k.key) }]));
 
+/* The tool catalog is where the prose the DESCRIPTIONS no longer carry now lives (per-turn bytes
+   are the scarce thing; this answer is fetched once). That made it the third bulk payload, so
+   the default answer carries the same COMPLETE list of tool names — an agent must be able to
+   trust it on its own — with one line each, and points at topic:"tools" for the rest. */
+const firstSentence = (text: string): string => {
+  const at = text.indexOf('. ');
+  return at === -1 ? text : text.slice(0, at + 1);
+};
+
+const toolIndex = (tools: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(tools).map(([name, text]) => [name, firstSentence(text)]));
+
 /**
  * The guide, whole or by topic.
  *
@@ -192,6 +267,7 @@ const kindIndex = (): Record<string, unknown> =>
  * agent still learns from the default answer what exists and how to ask for the rest.
  */
 export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
+  if (topic === 'quickstart') return { ...QUICKSTART };
   const g = fullGuide();
   if (topic === 'kinds') return { topic, kinds: g.kinds };
   if (topic === 'issues') return { topic, knownIssues: g.knownIssues };
@@ -207,7 +283,12 @@ export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
   const starters = g.starters as { folds: unknown[] } & Record<string, unknown>;
   // built key by key rather than by spread-and-override, so kindsHowTo sits with the index it
   // explains instead of at the far end of the answer
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = {
+    // FIRST, deliberately: an agent that reads one line of this answer should read the line
+    // that saves it the most turns. The whole contract is still below it.
+    start:
+      'BUILDING A DECK? Call origami_guide({ topic: "quickstart" }) first - under 3 KB: the five calls that build a deck (create_deck -> add_fold / add_ledger, wrapped in run_batch -> apply_theme -> inspect_render -> save_deck) and ONE complete add_fold example carrying a chart and a table. Everything below is the full contract, for when you need it.',
+  };
   for (const [key, value] of Object.entries(g)) {
     if (key === 'kinds') {
       out.kinds = kindIndex();
@@ -216,12 +297,17 @@ export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
       out.starters = { ...starters, folds: pointer('ready-made folds', starters.folds.length, 'starters') };
     } else if (key === 'recipes') {
       out.recipes = { ...recipes, cards: pointer('recipe cards', Object.keys(recipes.cards).length, 'recipes') };
+    } else if (key === 'tools') {
+      const full = value as Record<string, string>;
+      out.tools = toolIndex(full);
+      out.toolsHowTo = `Every tool on this page, one line each. The full entries — including the writers undo covers, what each of save_deck's three outcomes means, and the inline-editable block vocabulary — are in origami_guide({ topic: "tools" }).`;
     } else {
       out[key] = value;
     }
   }
   out.topics = {
     howToUse: 'Every section below is also available on its own: origami_guide({ topic }). Ask for one when you need the part this answer only points at.',
+    quickstart: 'The fast path: the five calls that build a deck, with one complete add_fold example. Under 3 KB - read this one first.',
     contract: 'The protocol: what a Fold is, the read→edit→write loop, the inert/active rules, the capability model.',
     kinds: 'Every slide/block kind with its FULL markup schema and its own how-to-add line — the bodies behind the index above.',
     recipes: 'Ready-to-paste free-card inners for the idioms the kind schemas name but do not spell out.',

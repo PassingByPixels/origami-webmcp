@@ -10,17 +10,20 @@ import type { ActivityEntry, ActivityLog } from '../core/activity.js';
  * the proposal cards keep their place at the head of it.
  */
 
-/* The chip vocabulary. The design spec names ten; 29 tools do not fit in ten, so three more
+/* The chip vocabulary. The design spec names ten; the tool list does not fit in ten, so three more
    were added rather than leaving rows chipless: STAGE (a propose_* that changed nothing yet),
    REVIEW (resolving one) and READ (every read-only tool). Nothing is invented per row — the
    chip is a pure function of the tool name. */
 const CHIPS: Record<string, string> = {
   add_chunk: 'ADD',
+  add_fold: 'ADD',
+  add_ledger: 'ADD',
   add_custom_fold: 'ADD',
   write_chunk: 'EDIT',
   move_chunk: 'MOVE',
   set_chunk_meta: 'META',
   set_deck_meta: 'META',
+  apply_theme: 'META',
   set_header: 'META',
   set_fold_type: 'META',
   define_block: 'META',
@@ -44,6 +47,8 @@ const CHIPS: Record<string, string> = {
   set_venn: 'EDIT',
   set_roadmap: 'EDIT',
   set_caption: 'META',
+  /* /folio/'s typed block writer (src/core/block-tools.ts). get_block falls through to READ. */
+  set_block: 'EDIT',
   /* the page's own events — pushed, not invoked */
   open: 'OPEN',
   /* a mini tool page minting its seeded document. It replaces the whole deck, exactly as
@@ -61,9 +66,12 @@ const UNDOABLE = new Set([
   'write_chunk',
   'add_chunk',
   'add_custom_fold',
+  'add_fold',
+  'add_ledger',
   'move_chunk',
   'set_chunk_meta',
   'set_deck_meta',
+  'apply_theme',
   'delete_chunk',
   'define_block',
   'delete_block',
@@ -78,6 +86,7 @@ const UNDOABLE = new Set([
   'set_venn',
   'set_roadmap',
   'set_caption',
+  'set_block',
 ]);
 
 /** Events that RESET the undo stack — nothing before one of these is reversible. */

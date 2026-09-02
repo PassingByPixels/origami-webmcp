@@ -7,7 +7,7 @@ import type { JsonSchema, JsonSchemaProp, ToolDef, ToolRegistry } from '../core/
  * so everything in this app is exercisable in plain Chrome with no flags and nothing
  * connected. It is a first-class surface, not a debug hatch.
  *
- * Two things make 29 tools usable by hand: the list is GROUPED by what a call is for, and the
+ * Two things make the tool list usable by hand: the list is GROUPED by what a call is for, and the
  * arguments have a FORM generated from each tool's own inputSchema. The form is a writer, not
  * a second call path — every control writes into the JSON textarea, and the textarea is what
  * `Invoke` sends. So what the box shows is always what the agent surface would receive.
@@ -19,10 +19,10 @@ import type { JsonSchema, JsonSchemaProp, ToolDef, ToolRegistry } from '../core/
 export type ToolGroups = ReadonlyArray<readonly [string, readonly string[]]>;
 
 export const FOLIO_GROUPS: ToolGroups = [
-  ['Learn', ['origami_guide', 'get_kind_schema', 'list_starters', 'list_block_defs', 'list_chunks', 'read_chunk', 'inspect_render', 'list_proposals', 'list_activity']],
-  ['Author', ['create_deck', 'add_chunk', 'add_custom_fold', 'write_chunk', 'move_chunk', 'set_chunk_meta', 'delete_chunk', 'define_block', 'delete_block', 'set_header', 'set_deck_meta', 'set_fold_type', 'undo']],
+  ['Learn', ['origami_guide', 'get_kind_schema', 'list_starters', 'list_block_defs', 'list_chunks', 'read_chunk', 'get_block', 'list_themes', 'inspect_render', 'list_proposals', 'list_activity']],
+  ['Author', ['create_deck', 'add_fold', 'add_ledger', 'add_chunk', 'add_custom_fold', 'write_chunk', 'set_block', 'move_chunk', 'set_chunk_meta', 'delete_chunk', 'define_block', 'delete_block', 'set_header', 'set_deck_meta', 'apply_theme', 'save_theme', 'delete_theme', 'set_fold_type', 'undo']],
   ['Review', ['propose_chunk', 'propose_add', 'propose_delete', 'accept_proposal', 'reject_proposal']],
-  ['File', ['save_deck', 'export_deck']],
+  ['File', ['run_batch', 'save_deck', 'export_deck']],
 ];
 
 type Mode = 'form' | 'json';

@@ -1,4 +1,5 @@
-import { proposalView, type DeckModel, type Op, type Proposal, type ProposalView } from '../../vendor/format-dist/index.js';
+import { proposalView, type DeckModel, type Op, type Proposal, type ProposalView, type Violation } from '../../vendor/format-dist/index.js';
+import { DATA_BLOCK_REFUSAL, validateDataBlocks } from './data-blocks.js';
 import type { DeckStore } from './deck-store.js';
 import { sha256Hex } from './ids.js';
 import { videoCapsNeeded } from './video-caps.js';
@@ -17,6 +18,8 @@ export interface AcceptFail {
   targetId?: string;
   proposed?: string;
   current?: string;
+  /** Data-block schema violations found when the proposal was re-gated at accept time. */
+  violations?: Violation[];
 }
 export type AcceptResult = AcceptOk | AcceptFail;
 
@@ -126,6 +129,14 @@ export class ProposalStore {
     // slide.insert never conflicts — it carries a fresh id
 
     const newInner = p.op.t === 'slide.inner' || p.op.t === 'slide.insert' ? p.op.inner : '';
+    /* The data gate again, against the CURRENT deck. propose_* already ran it, but the registry
+       it validated against can have moved since: delete_block between staging and accepting
+       leaves a composite instance naming a def this Fold no longer carries. Re-gating is the
+       difference between refusing that and writing a Fold save_deck would then reject. */
+    if (newInner) {
+      const violations = validateDataBlocks(newInner, m.blocks);
+      if (violations.length > 0) return { ok: false, conflicted: false, error: DATA_BLOCK_REFUSAL, targetId: p.targetId, violations };
+    }
     const caps = newInner ? videoCapsNeeded(newInner).filter((c) => !m.capabilities.includes(c)) : [];
     const ops: Op[] = [p.op];
     if (caps.length > 0) ops.push({ t: 'deck.caps', capabilities: [...m.capabilities, ...caps] });

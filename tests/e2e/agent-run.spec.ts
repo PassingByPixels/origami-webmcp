@@ -59,7 +59,7 @@ async function tableData(page: Page): Promise<any> {
 test('an agent builds a scroll Fold with two data kinds and resolves its own proposal', async ({ page }) => {
   await installHost(page);
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 29 tools');
+  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 38 tools');
 
   /* 1. onboard — the default guide indexes the kinds; the schema itself lives behind the
      topic call and get_kind_schema, and both routes must agree in the SHIPPED bundle */
@@ -123,7 +123,7 @@ test('an agent builds a scroll Fold with two data kinds and resolves its own pro
   /* 7. the table of contents agrees */
   const toc = await tool(page, 'list_chunks');
   expect(toc.body.foldType).toBe('scroll');
-  expect(toc.body.chunks.map((c: any) => c.kind)).toEqual(['free', 'venn', 'flow']);
+  expect(toc.body.chunks.map((c: any) => c.kind)).toEqual(['cover', 'venn', 'flow']);
   expect(toc.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'What a Fold is', 'The review path']);
 
   /* 8. finish on save_deck — no writable handle in a fresh tab, so it must say so, not throw */

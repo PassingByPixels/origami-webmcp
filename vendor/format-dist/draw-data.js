@@ -22,11 +22,129 @@ export const DRAW_FILL_STYLES = ['none', 'hachure', 'cross', 'solid'];
 export const DRAW_STROKE_STYLES = ['solid', 'dashed', 'dotted'];
 export const DRAW_FONTS = ['playfair', 'lora', 'inter', 'source-serif', 'caveat'];
 export const DRAW_TEXT_ALIGNS = ['left', 'center', 'right'];
+/** Arrowheads an arrow may carry. Absent = "end", the shape every arrow drawn before this had, so
+    no deck changes on load. A LINE with a head is an arrow, so the field is arrow-only. */
+export const DRAW_ARROW_HEADS = ['end', 'both'];
 const HEX = /^#[0-9a-fA-F]{3,8}$/;
 const isHex = (x) => typeof x === 'string' && HEX.test(x);
 const finite = (x) => typeof x === 'number' && Number.isFinite(x);
 const inRange = (x, lo, hi) => finite(x) && x >= lo && x <= hi;
 const bounded = (x) => finite(x) && Math.abs(x) <= COORD_LIMIT;
+/** id (unique across the scene) + type. The id is added to `ids` only when it is BOTH well-formed
+    and new, so a duplicate never registers itself and the attach pass below cannot resolve to it. */
+function checkElementIdentity(e, ids, at) {
+    if (typeof e.id !== 'string' || e.id.length === 0 || e.id.length > 40)
+        at('id', 'id must be a non-empty string (max 40)');
+    else if (ids.has(e.id))
+        at('id', `duplicate id "${e.id}"`);
+    else
+        ids.add(e.id);
+    if (!DRAW_TYPES.includes(e.type))
+        at('type', `type must be one of ${DRAW_TYPES.join('|')}`);
+}
+/** The element's box: where it sits, how big it is, how far it is turned, what it is called. */
+function checkElementBox(e, at) {
+    if (!bounded(e.x) || !bounded(e.y))
+        at('xy', 'x and y must be finite numbers within ±100000');
+    if (!bounded(e.width) || !bounded(e.height) || e.width < 0 || e.height < 0) {
+        at('size', 'width and height must be numbers ≥ 0 within ±100000');
+    }
+    if (e.angle !== undefined && !finite(e.angle))
+        at('angle', 'angle must be a finite number (degrees)');
+    if (e.name !== undefined && (typeof e.name !== 'string' || e.name.trim().length === 0 || e.name.length > 40)) {
+        at('name', 'name must be a non-empty string of at most 40 characters');
+    }
+}
+/** The ink: what the outline and the interior are drawn with. Every field is absent-by-default
+    except `stroke`, which every element carries. */
+function checkElementStroke(e, at) {
+    if (!isHex(e.stroke))
+        at('stroke', 'stroke must be a #hex colour');
+    if (e.fill !== undefined && !(e.fill === '' || isHex(e.fill)))
+        at('fill', 'fill must be "" or a #hex');
+    if (e.fillStyle !== undefined && !DRAW_FILL_STYLES.includes(e.fillStyle)) {
+        at('fillStyle', `fillStyle must be one of ${DRAW_FILL_STYLES.join('|')}`);
+    }
+    if (e.strokeWidth !== undefined && !inRange(e.strokeWidth, 1, 8))
+        at('strokeWidth', 'strokeWidth must be 1-8');
+    if (e.strokeStyle !== undefined && !DRAW_STROKE_STYLES.includes(e.strokeStyle)) {
+        at('strokeStyle', `strokeStyle must be one of ${DRAW_STROKE_STYLES.join('|')}`);
+    }
+    if (e.roughness !== undefined && ![0, 1, 2].includes(e.roughness))
+        at('roughness', 'roughness must be 0, 1 or 2');
+}
+// heads and smoothing each belong to ONE element type, like attach below and text/fontSize
+// above — a head on a rect or a smoothing on a text is confused data, so it is rejected
+function checkTypeOnlyFields(e, at) {
+    if (e.heads !== undefined) {
+        if (e.type !== 'arrow')
+            at('heads', 'heads is only valid on arrow elements');
+        else if (!DRAW_ARROW_HEADS.includes(e.heads)) {
+            at('heads', `heads must be one of ${DRAW_ARROW_HEADS.join('|')}`);
+        }
+    }
+    if (e.smoothing !== undefined) {
+        if (e.type !== 'freedraw')
+            at('smoothing', 'smoothing is only valid on freedraw elements');
+        else if (![0, 1, 2].includes(e.smoothing))
+            at('smoothing', 'smoothing must be 0, 1 or 2');
+    }
+}
+/** How the element is RENDERED rather than what shape it is: how solid it looks, and the seed the
+    rough renderer draws its wobble from. */
+function checkElementRenderOptions(e, at) {
+    if (e.opacity !== undefined && !inRange(e.opacity, 0, 100))
+        at('opacity', 'opacity must be 0-100');
+    const seed = e.seed;
+    if (seed !== undefined && !(typeof seed === 'number' && Number.isInteger(seed) && seed >= 1 && seed <= 2147483647)) {
+        at('seed', 'seed must be an integer 1..2147483647');
+    }
+}
+/** The path types carry their own vertex list; every other type has none to check. */
+function checkElementPoints(e, at) {
+    if (e.type !== 'arrow' && e.type !== 'line' && e.type !== 'freedraw')
+        return;
+    if (!Array.isArray(e.points) || e.points.length < 2) {
+        at('points', `${e.type} needs a points array of at least 2 [x, y] pairs`);
+        return;
+    }
+    if (e.points.length > DRAW_MAX_POINTS)
+        at('points', `points must hold at most ${DRAW_MAX_POINTS} entries`);
+    e.points.forEach((p, j) => {
+        if (!Array.isArray(p) || p.length !== 2 || !bounded(p[0]) || !bounded(p[1])) {
+            at('points', `point ${j} must be a [x, y] pair of finite numbers within ±100000`);
+        }
+    });
+}
+/** The text type's own carrier and its typography. */
+function checkTextElement(e, at) {
+    if (e.type !== 'text')
+        return;
+    if (typeof e.text !== 'string' || e.text.length === 0)
+        at('text', 'text needs a non-empty string');
+    else if (e.text.length > DRAW_TEXT_MAX)
+        at('text', `text must hold at most ${DRAW_TEXT_MAX} characters`);
+    if (e.fontSize !== undefined && !inRange(e.fontSize, 6, 200))
+        at('fontSize', 'fontSize must be 6-200');
+    if (e.font !== undefined && !DRAW_FONTS.includes(e.font))
+        at('font', `font must be one of ${DRAW_FONTS.join('|')}`);
+    if (e.textAlign !== undefined && !DRAW_TEXT_ALIGNS.includes(e.textAlign)) {
+        at('textAlign', `textAlign must be one of ${DRAW_TEXT_ALIGNS.join('|')}`);
+    }
+}
+/** ONE element, checked in the order its violations are expected in: what it IS, where it sits,
+    what it is drawn with, the fields only its own type may carry, then its type's own carrier. */
+function checkDrawElement(raw, i, ids, bad) {
+    const e = (raw ?? {});
+    const at = (rule, detail) => bad(`element.${rule}`, `element ${i}: ${detail}`);
+    checkElementIdentity(e, ids, at);
+    checkElementBox(e, at);
+    checkElementStroke(e, at);
+    checkTypeOnlyFields(e, at);
+    checkElementRenderOptions(e, at);
+    checkElementPoints(e, at);
+    checkTextElement(e, at);
+}
 /** Strict shape check for a draw data block. REJECT, never repair. */
 export function validateDrawData(data) {
     const v = [];
@@ -67,75 +185,7 @@ export function validateDrawData(data) {
         bad('elements.count', `a drawing holds at most ${DRAW_MAX_ELEMENTS} elements`);
     }
     const ids = new Set();
-    d.elements.forEach((raw, i) => {
-        const e = (raw ?? {});
-        const at = (rule, detail) => bad(`element.${rule}`, `element ${i}: ${detail}`);
-        if (typeof e.id !== 'string' || e.id.length === 0 || e.id.length > 40)
-            at('id', 'id must be a non-empty string (max 40)');
-        else if (ids.has(e.id))
-            at('id', `duplicate id "${e.id}"`);
-        else
-            ids.add(e.id);
-        if (!DRAW_TYPES.includes(e.type))
-            at('type', `type must be one of ${DRAW_TYPES.join('|')}`);
-        if (!bounded(e.x) || !bounded(e.y))
-            at('xy', 'x and y must be finite numbers within ±100000');
-        if (!bounded(e.width) || !bounded(e.height) || e.width < 0 || e.height < 0) {
-            at('size', 'width and height must be numbers ≥ 0 within ±100000');
-        }
-        if (e.angle !== undefined && !finite(e.angle))
-            at('angle', 'angle must be a finite number (degrees)');
-        if (e.name !== undefined && (typeof e.name !== 'string' || e.name.trim().length === 0 || e.name.length > 40)) {
-            at('name', 'name must be a non-empty string of at most 40 characters');
-        }
-        if (!isHex(e.stroke))
-            at('stroke', 'stroke must be a #hex colour');
-        if (e.fill !== undefined && !(e.fill === '' || isHex(e.fill)))
-            at('fill', 'fill must be "" or a #hex');
-        if (e.fillStyle !== undefined && !DRAW_FILL_STYLES.includes(e.fillStyle)) {
-            at('fillStyle', `fillStyle must be one of ${DRAW_FILL_STYLES.join('|')}`);
-        }
-        if (e.strokeWidth !== undefined && !inRange(e.strokeWidth, 1, 8))
-            at('strokeWidth', 'strokeWidth must be 1-8');
-        if (e.strokeStyle !== undefined && !DRAW_STROKE_STYLES.includes(e.strokeStyle)) {
-            at('strokeStyle', `strokeStyle must be one of ${DRAW_STROKE_STYLES.join('|')}`);
-        }
-        if (e.roughness !== undefined && ![0, 1, 2].includes(e.roughness))
-            at('roughness', 'roughness must be 0, 1 or 2');
-        if (e.opacity !== undefined && !inRange(e.opacity, 0, 100))
-            at('opacity', 'opacity must be 0-100');
-        const seed = e.seed;
-        if (seed !== undefined && !(typeof seed === 'number' && Number.isInteger(seed) && seed >= 1 && seed <= 2147483647)) {
-            at('seed', 'seed must be an integer 1..2147483647');
-        }
-        if (e.type === 'arrow' || e.type === 'line' || e.type === 'freedraw') {
-            if (!Array.isArray(e.points) || e.points.length < 2) {
-                at('points', `${e.type} needs a points array of at least 2 [x, y] pairs`);
-            }
-            else {
-                if (e.points.length > DRAW_MAX_POINTS)
-                    at('points', `points must hold at most ${DRAW_MAX_POINTS} entries`);
-                e.points.forEach((p, j) => {
-                    if (!Array.isArray(p) || p.length !== 2 || !bounded(p[0]) || !bounded(p[1])) {
-                        at('points', `point ${j} must be a [x, y] pair of finite numbers within ±100000`);
-                    }
-                });
-            }
-        }
-        if (e.type === 'text') {
-            if (typeof e.text !== 'string' || e.text.length === 0)
-                at('text', 'text needs a non-empty string');
-            else if (e.text.length > DRAW_TEXT_MAX)
-                at('text', `text must hold at most ${DRAW_TEXT_MAX} characters`);
-            if (e.fontSize !== undefined && !inRange(e.fontSize, 6, 200))
-                at('fontSize', 'fontSize must be 6-200');
-            if (e.font !== undefined && !DRAW_FONTS.includes(e.font))
-                at('font', `font must be one of ${DRAW_FONTS.join('|')}`);
-            if (e.textAlign !== undefined && !DRAW_TEXT_ALIGNS.includes(e.textAlign)) {
-                at('textAlign', `textAlign must be one of ${DRAW_TEXT_ALIGNS.join('|')}`);
-            }
-        }
-    });
+    d.elements.forEach((raw, i) => checkDrawElement(raw, i, ids, bad));
     // attachments must name elements that exist (either direction of definition order)
     for (let i = 0; i < d.elements.length; i++) {
         const e = (d.elements[i] ?? {});

@@ -10,7 +10,9 @@ import type { KindBehaviour } from './blocks/types.js';
 export { KIND_BEHAVIOURS };
 export type { KindBehaviour };
 /** Count-ups are core block behaviour, swept on EVERY slide kind (like
-    mountCharts) — a stat card behaves identically wherever it sits. */
+    mountCharts) — a stat card behaves identically wherever it sits. The LAST frame
+    writes the attribute verbatim, so what the reader is left looking at is
+    byte-identical to what the author wrote. */
 export declare function mountCountUps(slide: HTMLElement): void;
 export declare function finalizeCountUps(slide: HTMLElement): void;
 export declare function mountSparklines(slide: HTMLElement): void;

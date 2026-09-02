@@ -1,9 +1,12 @@
-# Vendored artifacts — provenance
+# Vendored artifacts - provenance
 
 Source repo: the Origami Folio monorepo (private)
-Source state: master @ fc7cece — "0.4.3 UAT close-out: origamilabs.nl link sweep, swim-lane
-              invariant, Venn label gestures, What's New" (the venn/lane/wrap arc, committed)
-Copied: 2026-08-30 (refresh; the first copy was 7b94bad + an uncommitted working tree)
+Source state: branch opt/lean-2026-09 @ a508490 (the 2026-09-02 optimize arc, merged: format
+              complexity batch 1, runtime batches 3+5, runtime fixes - count-up formatting, flow
+              viewBox fit, flow cycle layout + back-edge arc, drag read-back basis, stdio ledger
+              bake). Not yet on Folio master.
+Previous:     master @ fc7cece (2026-08-30 copy)
+Copied: 2026-09-02
 
 - format-dist/    = packages/format/dist   (built ESM + d.ts; zero deps, browser-safe)
 - runtime-dist/   = packages/runtime/dist  (viewer IIFE + assembleDeck ESM; fixtures pruned)

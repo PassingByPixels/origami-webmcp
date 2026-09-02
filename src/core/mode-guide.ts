@@ -1,7 +1,7 @@
 /* The PAGE-SCOPED guide.
    ------------------------------------------------------------------------------------------
    /folio/'s origami_guide is the whole Origami contract: every kind schema, the recipe cards,
-   the starter catalog, the 29-tool catalog. On a mini page most of that is noise — there is one
+   the starter catalog, the whole Folio tool catalog. On a mini page most of that is noise — there is one
    fold, one block, and eleven-to-thirteen tools — and an agent that reads 56 KB to move a
    rectangle has paid for a library it cannot use.
 
