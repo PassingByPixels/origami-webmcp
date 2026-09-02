@@ -9,6 +9,7 @@
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
 import { buildBlockTools, buildFolioBlockTools } from './block-tools.js';
 import { buildComposeTools } from './compose-tools.js';
+import { buildThemeTools } from './theme-tools.js';
 import type { DeckStore } from './deck-store.js';
 import { pageGuideTool } from './mode-guide.js';
 import type { ToolMode } from './modes.js';
@@ -28,6 +29,7 @@ export function createModeRegistry(deps: ToolDeps, mode: ToolMode): ToolRegistry
     // writers need no address and there is no second fold to compose.
     for (const t of buildFolioBlockTools(d)) registry.register(t);
     for (const t of buildComposeTools(d)) registry.register(t);
+    for (const t of buildThemeTools(d)) registry.register(t);
     return registry;
   }
 

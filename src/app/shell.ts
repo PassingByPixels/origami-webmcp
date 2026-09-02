@@ -14,6 +14,7 @@ import { Toasts } from './toast.js';
 import {
   canSaveInPlace,
   clearAutosave,
+  LocalThemeStore,
   pickFile,
   readAutosave,
   downloadBlob,
@@ -60,6 +61,9 @@ export function bootShell(mode: ToolMode): void {
       // inspect_render measures in its OWN off-screen frame at a fixed, stated viewport, so the
       // verdict does not change with the human's window size and the visible deck is never disturbed.
       measure: measureRender,
+      // a palette an agent saves belongs to the human, not to one session — localStorage keeps
+      // it across reloads (and a browser that refuses storage degrades to in-memory)
+      themes: new LocalThemeStore(),
     },
     mode
   );

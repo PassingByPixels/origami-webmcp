@@ -9,6 +9,7 @@ import { createModeRegistry } from '../../src/core/mode-registry.js';
 import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
 import { COMPOSED_PLOT_HEIGHT } from '../../src/core/compose.js';
+import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
@@ -19,7 +20,7 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 33 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 37 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -28,10 +29,12 @@ describe('tool surface', () => {
       'add_custom_fold',
       'add_fold',
       'add_ledger',
+      'apply_theme',
       'create_deck',
       'define_block',
       'delete_block',
       'delete_chunk',
+      'delete_theme',
       'export_deck',
       'get_block',
       'get_kind_schema',
@@ -41,6 +44,7 @@ describe('tool surface', () => {
       'list_chunks',
       'list_proposals',
       'list_starters',
+      'list_themes',
       'move_chunk',
       'origami_guide',
       'propose_add',
@@ -49,6 +53,7 @@ describe('tool surface', () => {
       'read_chunk',
       'reject_proposal',
       'save_deck',
+      'save_theme',
       'set_block',
       'set_chunk_meta',
       'set_deck_meta',
@@ -1519,10 +1524,11 @@ describe('tool annotations', () => {
     'list_chunks',
     'list_proposals',
     'list_starters',
+    'list_themes',
     'origami_guide',
     'read_chunk',
   ];
-  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk'];
+  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk', 'delete_theme'];
 
   it('marks exactly the read-only tools readOnlyHint', () => {
     const h = harness();
@@ -2715,5 +2721,182 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
     const mid = await h.json('add_fold', { title: 'Middle', position: 1, blocks: [{ text: '<p>m</p>' }] });
     expect(mid.index).toBe(1);
     expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Middle', 'Last']);
+  });
+});
+
+describe('S4 — themes an agent can own', () => {
+  /* Two things went wrong in trial, and both are fixed here.
+       - set_deck_meta({themeName:"boardroom"}) renamed the theme and changed NOTHING. themeName
+         is a label; no preset existed to apply and nothing said so.
+       - A cold model sent {primary, background} — plausible token names from every OTHER design
+         system, neither read by the deck stylesheet. validateThemeTokens only checks the VALUE,
+         so they were stored in the manifest for ever and did nothing at all. */
+
+  const tokensOf = (h: ReturnType<typeof harness>) => h.deck.model().theme.tokens;
+
+  it('lists the four runtime presets with their complete token maps', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const res = await h.json('list_themes');
+    expect(res.themes.map((t: any) => t.name)).toEqual(['origami-default', 'boardroom', 'meadow', 'dusk']);
+    for (const t of res.themes) {
+      expect(t.source, t.name).toBe('preset');
+      expect(Object.keys(t.tokens).length, t.name).toBeGreaterThanOrEqual(14);
+      // a preset that named a token the stylesheet does not read would be a lie in the catalog
+      expect(unknownTokens(t.tokens), t.name).toEqual([]);
+    }
+    expect(res.tokensTheDeckReads).toEqual([...THEME_TOKENS]);
+  });
+
+  it('apply_theme really changes the colours, where set_deck_meta({themeName}) does not', async () => {
+    /* Read the accent OUT OF THE SERIALIZED FOLD, not out of model.theme.tokens: a fresh deck's
+       token map is empty and the style block holds the palette, so the model field would report
+       "undefined -> the default" and call that a change. The bytes are the truth here. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const accentInForce = () => /--accent\s*:\s*([^;]+);/.exec(h.deck.serialize())![1]!.trim();
+    const before = accentInForce();
+    expect(before).toBe('#3F7268');
+
+    // the trial's failure, reproduced: a rename is a rename
+    await h.json('set_deck_meta', { themeName: 'boardroom' });
+    expect(h.deck.model().theme.name).toBe('boardroom');
+    expect(accentInForce(), 'renaming must not restyle').toBe(before);
+
+    const res = await h.json('apply_theme', { name: 'boardroom' });
+    expect(res.applied).toBe('boardroom');
+    expect(res.source).toBe('preset');
+    expect(accentInForce()).toBe('#38628F');
+    expect(tokensOf(h).bg).toBe('#F3F5F8');
+    // a token the preset does NOT name survives the merge. The presets carry the fourteen
+    // palette tokens; the three masthead ones are only ever set by hand, and applying a theme
+    // must not silently strip a masthead a human tuned.
+    await h.json('set_deck_meta', { themeTokens: { 'chrome-pad': '18px' } });
+    await h.json('apply_theme', { name: 'meadow' });
+    expect(tokensOf(h)['chrome-pad']).toBe('18px');
+    expect(accentInForce()).not.toBe('#38628F');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('is one undo step, and an unknown name is refused with the names that exist', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const before = h.deck.serialize();
+    await h.json('apply_theme', { name: 'dusk' });
+    expect(h.deck.serialize()).not.toBe(before);
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+
+    const bad = await h.call('apply_theme', { name: 'corporate-blue' });
+    expect(bad.isError).toBe(true);
+    const body = JSON.parse(bad.content[0]!.text);
+    expect(body.error).toMatch(/unknown theme "corporate-blue"/);
+    expect(body.availableThemes).toContain('boardroom');
+  });
+
+  it("REFUSES Haiku's primary/background with the tokens the stylesheet really reads", async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const res = await h.call('save_theme', { name: 'house', tokens: { primary: '#38628F', background: '#F3F5F8' } });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.violations.map((v: any) => v.rule)).toEqual(['theme.token-name', 'theme.token-name']);
+    expect(body.violations[0].detail).toMatch(/"primary" is not read by the deck stylesheet/);
+    expect(body.tokensTheDeckReads).toEqual([...THEME_TOKENS]);
+    // and nothing was kept: a refusal that half-saved would be worse than storing the typo
+    expect((await h.json('list_themes')).themes.filter((t: any) => t.source === 'saved')).toEqual([]);
+  });
+
+  it('saves a one-token variant of a preset, and apply_theme can then use it', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    const saved = await h.json('save_theme', { name: 'house-navy', label: 'House navy', tokens: { accent: '#1F3A5F' }, basedOn: 'boardroom' });
+    expect(saved).toMatchObject({ saved: 'house-navy', replaced: false, basedOn: 'boardroom' });
+    // basedOn is the BASE, not a reference: the rest of boardroom came with it
+    expect(saved.tokens.accent).toBe('#1F3A5F');
+    expect(saved.tokens.bg).toBe('#F3F5F8');
+    // saving changes nothing on the Fold
+    expect(tokensOf(h).accent).not.toBe('#1F3A5F');
+
+    const listed = (await h.json('list_themes')).themes.find((t: any) => t.name === 'house-navy');
+    expect(listed).toMatchObject({ source: 'saved', label: 'House navy' });
+
+    await h.json('apply_theme', { name: 'house-navy' });
+    expect(tokensOf(h).accent).toBe('#1F3A5F');
+    expect(tokensOf(h).bg).toBe('#F3F5F8');
+  });
+
+  it('reports WCAG contrast and warns below 4.5:1', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+
+    // black on white is the top of the scale
+    expect(contrastRatio('#000000', '#FFFFFF')).toBe(21);
+    expect(contrastRatio('#FFFFFF', '#FFFFFF')).toBe(1);
+    // a value no ratio can be measured from is null, not a guess
+    expect(contrastRatio('rgba(0,0,0,0.5)', '#FFFFFF')).toBeNull();
+    expect(contrastRatio('Georgia, serif', '#FFFFFF')).toBeNull();
+
+    const ok = await h.json('save_theme', { name: 'readable', tokens: { ink: '#111111', bg: '#FFFFFF', paper: '#FFFFFF', accent: '#2F5F4A', chrome: '#FFFFFF', 'chrome-ink': '#111111' } });
+    expect(ok.contrast.warnings).toEqual([]);
+    expect(ok.contrast.pairs.find((p: any) => p.pair === 'ink/bg').ratio).toBeGreaterThan(15);
+
+    const faint = await h.json('save_theme', { name: 'faint', tokens: { ink: '#AAAAAA', bg: '#FFFFFF', paper: '#FFFFFF', accent: '#CCCCCC', chrome: '#FFFFFF', 'chrome-ink': '#111111' } });
+    expect(faint.saved).toBe('faint');
+    expect(faint.contrast.warnings.length).toBeGreaterThanOrEqual(2);
+    expect(faint.contrast.warnings.join(' ')).toMatch(/below the 4\.5:1 WCAG AA minimum/);
+    expect(faint.note).toMatch(/read the contrast warnings/);
+    // a pair whose colours cannot be read is reported as unmeasured WITH the reason
+    const partial = await h.json('save_theme', { name: 'fonts-only', tokens: { 'font-body': 'Georgia, serif' } });
+    const inkBg = partial.contrast.pairs.find((p: any) => p.pair === 'ink/bg');
+    expect(inkBg).toMatchObject({ ratio: null, passesAA: null });
+    expect(inkBg.why).toMatch(/not set in this theme/);
+  });
+
+  it('refuses to overwrite or delete a preset, and refuses a name that is not a key', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    expect((await h.call('save_theme', { name: 'boardroom', tokens: { accent: '#000000' } })).isError).toBe(true);
+    expect((await h.call('delete_theme', { name: 'boardroom' })).isError).toBe(true);
+    expect((await h.call('save_theme', { name: 'House Navy!', tokens: { accent: '#000000' } })).isError).toBe(true);
+    expect((await h.json('list_themes')).themes.find((t: any) => t.name === 'boardroom').tokens.accent).toBe('#38628F');
+  });
+
+  it('delete_theme forgets the palette but leaves a deck already wearing it alone', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Themes' });
+    await h.json('save_theme', { name: 'gone-soon', tokens: { accent: '#B3402A' }, basedOn: 'meadow' });
+    await h.json('apply_theme', { name: 'gone-soon' });
+    expect(tokensOf(h).accent).toBe('#B3402A');
+
+    const del = await h.json('delete_theme', { name: 'gone-soon' });
+    expect(del).toMatchObject({ deleted: 'gone-soon', remaining: [] });
+    expect(tokensOf(h).accent, 'a theme is applied BY VALUE — deleting it cannot restyle the deck').toBe('#B3402A');
+    expect((await h.call('apply_theme', { name: 'gone-soon' })).isError).toBe(true);
+    expect((await h.call('delete_theme', { name: 'gone-soon' })).isError).toBe(true);
+  });
+
+  it('keeps saved themes in the injected store, so the page can persist them', async () => {
+    /* The tools never touch storage themselves: they take a ThemeStore. That is what lets the
+       page put them in localStorage (proved surviving a real reload in tests/e2e/app.spec.ts)
+       while every other host gets the in-memory one and behaves the same. */
+    const store = new MemoryThemeStore();
+    const deck = new DeckStore();
+    const registry = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, themes: store }, FOLIO_MODE);
+    await registry.invoke('create_deck', { title: 'Store' });
+    await registry.invoke('save_theme', { name: 'kept', tokens: { accent: '#123456' } });
+    expect(store.all().map((t) => t.name)).toEqual(['kept']);
+    expect(store.get('kept')!.tokens.accent).toBe('#123456');
+
+    // a second registry over the SAME store sees it — which is what a reload is
+    const second = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, themes: store }, FOLIO_MODE);
+    const listed = JSON.parse((await second.invoke('list_themes', {})).content[0]!.text);
+    expect(listed.themes.find((t: any) => t.name === 'kept')).toMatchObject({ source: 'saved' });
+  });
+
+  it('set_deck_meta now SAYS that themeName is only a label', async () => {
+    const h = harness();
+    expect(h.registry.get('set_deck_meta')!.description).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
+    expect(h.registry.get('set_deck_meta')!.description).toMatch(/apply_theme/);
   });
 });

@@ -28,6 +28,9 @@ async function invoke(page: Page, tool: string, args: unknown): Promise<any> {
 
 const preview = (page: Page) => page.frameLocator('[data-testid="preview"]').locator('body');
 
+/** The bytes the preview is rendering right now — the deck as it stands, without a tool call. */
+const deckTextNow = async (page: Page): Promise<string> => (await page.getByTestId('preview').getAttribute('srcdoc')) ?? '';
+
 async function openSample(page: Page) {
   await page.goto('/folio/index.html');
   await expect(page.getByTestId('empty-state')).toBeVisible();
@@ -47,10 +50,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('33');
+  await expect(page.getByTestId('tool-count')).toHaveText('37');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('33 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('37 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);
@@ -560,4 +563,41 @@ test('a fold composed by add_fold FITS a 1280x720 screen — measured, not asser
   // and the whole thing is a saveable Fold
   const saved = await invoke(page, 'save_deck', {});
   expect(saved.body.validated).toBe(true);
+});
+
+test('a saved theme survives a real page reload, and apply_theme restyles the deck on screen', async ({ page }) => {
+  /* save_theme is the only tool whose result outlives the session, so it is the only one whose
+     promise a unit test cannot keep: the store is injected there. This drives the REAL page,
+     which puts it in localStorage, and reloads the browser to check. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Theme persistence', discard: true });
+
+  const saved = await invoke(page, 'save_theme', { name: 'house-navy', label: 'House navy', tokens: { accent: '#1F3A5F' }, basedOn: 'boardroom' });
+  expect(saved.state).toContain('ok');
+  expect(saved.body.tokens.bg, 'basedOn brought the rest of boardroom with it').toBe('#F3F5F8');
+  expect(saved.body.contrast.warnings).toEqual([]);
+
+  // the tool never touched the deck
+  expect(await deckTextNow(page)).toContain('#3F7268');
+
+  await page.reload();
+  await expect(page.getByTestId('mcp-status')).toBeVisible();
+  const listed = await invoke(page, 'list_themes', {});
+  const mine = listed.body.themes.find((t: any) => t.name === 'house-navy');
+  expect(mine, 'the saved theme came back after a reload').toBeTruthy();
+  expect(mine.source).toBe('saved');
+  expect(mine.tokens.accent).toBe('#1F3A5F');
+
+  // and it restyles the Fold the human is looking at
+  await invoke(page, 'create_deck', { title: 'Theme persistence', discard: true });
+  const applied = await invoke(page, 'apply_theme', { name: 'house-navy' });
+  expect(applied.body.applied).toBe('house-navy');
+  await expect.poll(() => deckTextNow(page), { timeout: 5000 }).toContain('#1F3A5F');
+  await expect(page.frameLocator('[data-testid="preview"]').locator('#origami-theme-css')).toBeAttached();
+
+  const gone = await invoke(page, 'delete_theme', { name: 'house-navy' });
+  expect(gone.body.deleted).toBe('house-navy');
+  expect((await invoke(page, 'list_themes', {})).body.themes.some((t: any) => t.name === 'house-navy')).toBe(false);
+  // the deck keeps the colours: a theme is applied by value
+  expect(await deckTextNow(page)).toContain('#1F3A5F');
 });

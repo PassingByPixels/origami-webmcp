@@ -34,6 +34,7 @@ import { fail, ok, refuse } from './result.js';
 import { type ToolDef } from './registry.js';
 import { FOLD_STARTERS, findStarter, starterCatalog } from './fold-starters.js';
 import { FREE_STARTER_INNER, TABLE_STARTER_INNER } from './starters.js';
+import type { ThemeStore } from './themes.js';
 import { videoCapsNeeded } from './video-caps.js';
 
 /* ---------------------------------------------------------------------------------------
@@ -206,9 +207,12 @@ export interface ToolDeps {
   /** Injected by the page. Absent === this host cannot lay a deck out, so inspect_render
       reports that instead of guessing (see src/core/inspect.ts). */
   measure?: MeasureFn;
-  /** The log ToolRegistry.invoke writes into. createRegistry passes the registry's OWN log
+  /** The log ToolRegistry.invoke writes into. createModeRegistry passes the registry's OWN log
       here, so list_activity reads exactly what the hook recorded — never a second list. */
   activity?: ActivityLog;
+  /** Where save_theme keeps a palette between calls. The page implements it on localStorage so
+      a theme survives a reload; absent === in-memory, which is every non-DOM host. */
+  themes?: ThemeStore;
 }
 
 const utf8Bytes = (s: string): number => new TextEncoder().encode(s).length;
@@ -227,7 +231,7 @@ const EXPORT_MAX_BYTES = 4 * 1024 * 1024;
    so a patch (or a bare rename) merges onto them instead of erasing them. */
 const THEME_BLOCK_RE = /<style id="origami-theme-css"[^>]*>([\s\S]*?)<\/style>/;
 
-function themeTokensInForce(m: DeckModel): Record<string, string> | null {
+export function themeTokensInForce(m: DeckModel): Record<string, string> | null {
   if (Object.keys(m.theme.tokens).length > 0) return { ...m.theme.tokens };
   const block = THEME_BLOCK_RE.exec(m.base.text);
   if (!block) return null;
@@ -753,7 +757,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       // exposes no theme control at all.
       name: 'set_deck_meta',
       description:
-        'Set the deck-level title and/or theme of the open Fold — this CHANGES THE DECK the human is looking at and re-renders it. `title` is the name in the manifest and the header bar; it does NOT rename the file (the suggested filename was fixed when the Fold was created, and only the human choosing "Save as…" changes where bytes land). `themeName` renames the theme; on its own it changes the label, NOT the colours — pass themeTokens for those. `themeTokens` patches CSS custom properties: the tokens you name are merged onto the ones the deck is already using, so the rest survive. The tokens the deck stylesheet actually reads are bg, paper, ink, ink-soft, rule, rule-soft, accent, tint-a, tint-b, chrome, chrome-ink, chrome-soft, font-display and font-body, plus chrome-mark, chrome-mark-h and chrome-pad for the masthead bar; a name outside that set is stored and simply never read. Values are colours or font stacks — braces, semicolons, angle brackets, @ and url() are rejected, and nothing is applied when they are. Supply at least one of the three. One call is one undo step.',
+        'Set the deck-level title and/or theme of the open Fold — this CHANGES THE DECK the human is looking at and re-renders it. `title` is the name in the manifest and the header bar; it does NOT rename the file (the suggested filename was fixed when the Fold was created, and only the human choosing "Save as…" changes where bytes land). `themeName` renames the theme; ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE — for actual colours use apply_theme (a whole named palette, preset or saved) or pass themeTokens here. `themeTokens` patches CSS custom properties: the tokens you name are merged onto the ones the deck is already using, so the rest survive. The tokens the deck stylesheet actually reads are bg, paper, ink, ink-soft, rule, rule-soft, accent, tint-a, tint-b, chrome, chrome-ink, chrome-soft, font-display and font-body, plus chrome-mark, chrome-mark-h and chrome-pad for the masthead bar; a name outside that set is stored and simply never read. Values are colours or font stacks — braces, semicolons, angle brackets, @ and url() are rejected, and nothing is applied when they are. Supply at least one of the three. One call is one undo step.',
       inputSchema: {
         type: 'object',
         additionalProperties: false,
