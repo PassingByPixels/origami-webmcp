@@ -43,7 +43,7 @@ const KINDS_HOW_TO = {
 
 /** The sections `origami_guide({topic})` can return. Every byte of the full guide is
     reachable through exactly one of them, so the default answer can point instead of paste. */
-export const GUIDE_TOPICS = ['contract', 'kinds', 'recipes', 'starters', 'issues', 'tools'] as const;
+export const GUIDE_TOPICS = ['quickstart', 'contract', 'kinds', 'recipes', 'starters', 'issues', 'tools'] as const;
 export type GuideTopic = (typeof GUIDE_TOPICS)[number];
 
 /** The keys that make up the `contract` topic: the protocol prose an agent needs before it
@@ -60,6 +60,51 @@ const CONTRACT_KEYS = [
   'capabilities',
   'notAvailableHere',
 ] as const;
+
+/**
+ * THE FAST PATH, under 3 KB.
+ *
+ * The default guide is the whole contract, and an agent that reads it knows everything; it is
+ * also 15 KB of reading before the first call, and two cold-agent trials spent their opening
+ * turns on it and then still hand-assembled figure markup. This answer is the other shape: the
+ * five calls that build a deck, and ONE complete add_fold example carrying a chart and a table,
+ * so the block vocabulary is learned by copying rather than by reading a schema.
+ *
+ * It is deliberately INCOMPLETE, and the last key says so. A guide that pointed nowhere would
+ * be a trap rather than a shortcut.
+ */
+const QUICKSTART = {
+  topic: 'quickstart',
+  theFastPath: [
+    '1. create_deck({ title }) - a blank Fold, open in this tab.',
+    '2. add_fold({ title, eyebrow, blocks }) - ONE call per fold. add_ledger({ title, columns, rows, formulas }) for a spreadsheet fold. Wrap several in run_batch({ calls: [{ tool, args }, ...] }) and the whole deck is ONE turn.',
+    '3. apply_theme({ name }) - a whole palette; list_themes names them. set_deck_meta({ themeName }) only renames the label.',
+    '4. inspect_render() - lays the deck out for real and names what OVERFLOWS, renders BLANK or is CLIPPED. You cannot see the deck; this is how you check it.',
+    '5. save_deck() - always end here, and READ the result: it says whether bytes reached disk or the human must press Save.',
+  ],
+  blocks:
+    'Each entry names EXACTLY ONE of: chart, venn, flow, graph, gantt, draw, table (that kind\u2019s own JSON + optional caption), or text (HTML: p, p.lede, h3, ul/li), bullets (strings), stats (up to 4 { value, label }), quote ({ text, by }). Data is validated against its own schema BEFORE anything lands - refused here, never at save.',
+  /* The example is a compact JSON STRING, not a nested object. Tool results are serialized
+     with JSON.stringify(..., null, 2), so a nested example is charged two spaces of
+     indentation per level - it cost 2 KB of this 3 KB answer as an object and 700 bytes as
+     a string. It is also what an agent copies: one line it can paste. */
+  example: {
+    call: 'add_fold',
+    args:
+      '{"title":"Revenue by quarter","eyebrow":"Q3 review","blocks":[{"text":"<p class=\\"lede\\">Revenue held; the cost of delivery did not.</p>"},{"stats":[{"value":"48","label":"Decks shipped"},{"value":"2.1%","label":"Churn"}]},{"chart":{"type":"bar","labels":["Q1","Q2","Q3","Q4"],"series":[{"name":"Revenue","color":"#38628F","values":[12,19,15,24]}],"yMax":null},"caption":"EUR m"},{"table":{"columns":[{"label":"Line"},{"label":"Plan","align":"right"},{"label":"Actual","align":"right"},{"label":"Delta","align":"right"}],"rows":[["Engineering","120000","118400",""],["Total","","",""]],"formulas":{"D1":"=B1-C1","B2":"=SUM(B1:B1)","C2":"=SUM(C1:C1)","D2":"=SUM(D1:D1)"}},"caption":"Formulas are baked into values on the way in"}]}',
+    returns:
+      'chunkId, index, label, and the (kind, nth) address of every data block - what set_block({ chunkId, kind, nth, data }) takes, so a block is rewritten without reading the fold back.',
+  },
+  fiveThingsThatCatchAgents: [
+    'A table column `format` is an OBJECT - { "kind": "currency" } - not a string.',
+    'A data block that describes nothing ({ "nodes": [], "edges": [] }) is REFUSED at add time, not at save.',
+    'A flow/graph figure sits on a fixed 1200x660 viewBox: alone on a fold it overflows a 720px screen. Check with inspect_render.',
+    'Themes read 17 token names only (list_themes reports them). "primary" and "background" are REFUSED, not stored.',
+    'add_fold names the fold from its title, so the tabs read as words. Pass `label` only to override it.',
+  ],
+  thisIsNotEverything:
+    'The fast path, not the contract. origami_guide() with no topic is the whole thing; get_kind_schema(kind) is one kind at a time.',
+};
 
 const pointer = (what: string, count: number, topic: GuideTopic): string =>
   `${count} ${what} — omitted here to keep this answer small. Call origami_guide({ topic: "${topic}" }) for them in full.`;
@@ -165,6 +210,7 @@ function fullGuide(): Record<string, unknown> {
       apply_theme: 'Put a whole named palette on the open Fold — THE tool that restyles a deck. One undo step.',
       save_theme: 'Keep a palette of your own (in this browser) for apply_theme, optionally based on another. Only the 17 tokens the deck stylesheet reads are accepted; anything else is refused, not silently stored. Returns a WCAG contrast report.',
       delete_theme: 'Forget a theme you saved. Presets cannot be deleted, and a deck already wearing the colours keeps them.',
+      run_batch: 'Run several tool calls in ONE turn, in order, stopping at the first failure. The whole build in one turn; undo still reverses them one at a time.',
       list_activity: 'The feed: what has been done to this Fold, newest first — one entry per tool call, with source, outcome and timing.',
       save_deck: 'Write the Fold to disk if the page holds a writable handle; otherwise persist the working copy and report that the human must press Save.',
       export_deck: 'Hand YOURSELF the whole .origami.html text (the agent\'s copy). It saves nothing — save_deck is still the human\'s route to disk.',
@@ -200,6 +246,7 @@ const kindIndex = (): Record<string, unknown> =>
  * agent still learns from the default answer what exists and how to ask for the rest.
  */
 export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
+  if (topic === 'quickstart') return { ...QUICKSTART };
   const g = fullGuide();
   if (topic === 'kinds') return { topic, kinds: g.kinds };
   if (topic === 'issues') return { topic, knownIssues: g.knownIssues };
@@ -215,7 +262,12 @@ export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
   const starters = g.starters as { folds: unknown[] } & Record<string, unknown>;
   // built key by key rather than by spread-and-override, so kindsHowTo sits with the index it
   // explains instead of at the far end of the answer
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = {
+    // FIRST, deliberately: an agent that reads one line of this answer should read the line
+    // that saves it the most turns. The whole contract is still below it.
+    start:
+      'BUILDING A DECK? Call origami_guide({ topic: "quickstart" }) first - under 3 KB: the five calls that build a deck (create_deck -> add_fold / add_ledger, wrapped in run_batch -> apply_theme -> inspect_render -> save_deck) and ONE complete add_fold example carrying a chart and a table. Everything below is the full contract, for when you need it.',
+  };
   for (const [key, value] of Object.entries(g)) {
     if (key === 'kinds') {
       out.kinds = kindIndex();
@@ -230,6 +282,7 @@ export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
   }
   out.topics = {
     howToUse: 'Every section below is also available on its own: origami_guide({ topic }). Ask for one when you need the part this answer only points at.',
+    quickstart: 'The fast path: the five calls that build a deck, with one complete add_fold example. Under 3 KB - read this one first.',
     contract: 'The protocol: what a Fold is, the read→edit→write loop, the inert/active rules, the capability model.',
     kinds: 'Every slide/block kind with its FULL markup schema and its own how-to-add line — the bodies behind the index above.',
     recipes: 'Ready-to-paste free-card inners for the idioms the kind schemas name but do not spell out.',

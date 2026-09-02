@@ -80,7 +80,7 @@ export function bootShell(mode: ToolMode): void {
      still the button's accessible name, so nothing that could be read before is unreadable now.
 
      The count is THIS PAGE's registry, never a constant: a mini tool registers a different set,
-     and a status line that claimed 29 tools on a page holding thirteen would be the one number
+     and a status line that claimed the Folio count on a page holding thirteen would be the one number
      in the app nobody could check.
 
      It is built BEFORE the rail: the rail's empty feed asks whether an agent is connected, so the

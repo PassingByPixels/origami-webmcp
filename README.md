@@ -20,9 +20,10 @@ document.modelContext.registerTool({
 });
 ```
 
-**An agent can run the whole job unattended.** All 29 tools are on the WebMCP surface: an agent
+**An agent can run the whole job unattended.** All 38 tools are on the WebMCP surface: an agent
 creates the deck, authors every kind, stages proposals, resolves them, and calls `save_deck`
-without a human ever clicking anything. When a human *is* watching, staged proposals also render
+without a human ever clicking anything. A whole titled fold is ONE call (`add_fold`), a whole
+build can be one turn (`run_batch`), and the palette is a named theme rather than raw CSS tokens. When a human *is* watching, staged proposals also render
 as review cards they can Accept or Reject — the same code path, a second front door.
 
 It is a static site: `npm run build` produces the whole of **origami.gratis** in one `dist/` you
@@ -151,7 +152,7 @@ or *not available (console only)* — it never claims a connection it does not h
    and relaunch. (Flag confirmed at
    [developer.chrome.com/docs/ai/webmcp](https://developer.chrome.com/docs/ai/webmcp).)
 3. Load `http://127.0.0.1:5173`. The status pill now reads
-   **“WebMCP: connected via document.modelContext — 29 tools”**.
+   **“WebMCP: connected via document.modelContext — 38 tools”**.
 4. To call the tools, install the **WebMCP – Model Context Tool Inspector** extension
    ([Chrome Web Store](https://chromewebstore.google.com/detail/gbpdfapgefenggkahomfgkhfehlcenpd),
    [source](https://github.com/beaufortfrancois/model-context-tool-inspector)). Its side panel lists
@@ -162,7 +163,7 @@ or *not available (console only)* — it never claims a connection it does not h
 Or drive them straight from DevTools — this is the real API, no extension required:
 
 ```js
-const tools = await document.modelContext.getTools();          // 29 of them
+const tools = await document.modelContext.getTools();          // 38 of them
 const t = tools.find((x) => x.name === 'create_deck');
 await document.modelContext.executeTool(t, JSON.stringify({ title: 'Hello' }));
 ```
@@ -176,8 +177,10 @@ you do not need HTTPS.
 Chrome** (`channel: 'chrome'`) in a throwaway profile with WebMCP enabled from the command line,
 and drives the app through Chrome's own `document.modelContext.getTools()` / `.executeTool()` —
 no mock host anywhere in that file. Last run, on **Chrome 151.0.7922.174** — taken before
-`move_chunk`, `set_chunk_meta`, `set_deck_meta`, `list_activity` and `export_deck` were added, so
-the tool count below reads 24 and not 29; it is left as measured rather than edited to match:
+`move_chunk`, `set_chunk_meta`, `set_deck_meta`, `list_activity`, `export_deck` and the v3 tools
+(`add_fold`, `add_ledger`, `get_block`, `set_block`, the four theme tools, `run_batch`) were
+added, so the tool count below reads 24 and not 38; it is left as measured rather than edited to
+match:
 
 ```
   no flags                  -> {"document":false,"navigator":false,"secureContext":true}
@@ -212,7 +215,15 @@ nothing is lost: the test console does everything.
 src/core/          the deck + tools; no DOM, so vitest exercises exactly what ships
   deck-store.ts      the ONE in-memory DeckModel; mutate() applies ops and notifies views
   proposal-store.ts  the review queue + accept/reject, shared by the cards and the tools
-  tools.ts           the 29 tool defs: 21 ported from vendor/mcp-reference/server.ts, 8 web-only
+  tools.ts           the 29 core tool defs: 21 ported from vendor/mcp-reference/server.ts, 8 web-only
+  data-blocks.ts     the data gate: every <script data-odata> block, by its own kind's validator
+  block-tools.ts     the typed block writers — the mini pages' own, plus get_block/set_block
+  compose.ts         add_fold's fold builder: blocks-as-data -> one .slide-inner
+  compose-tools.ts   add_fold + add_ledger
+  themes.ts          the 17 tokens the stylesheet reads, the ThemeStore seam, WCAG contrast
+  theme-tools.ts     list_themes / apply_theme / save_theme / delete_theme
+  batch-tool.ts      run_batch — several calls in one turn, through registry.invoke
+  mode-registry.ts   the ONE registry builder: Folio gets everything, a mini page its own list
   registry.ts        ToolRegistry + the document/navigator.modelContext feature-detect shim
   activity.ts        the ActivityLog every registry.invoke writes one entry into
   guide.ts           origami_guide's payload, built from the live KINDS/FORMAT_VERSION
@@ -232,7 +243,8 @@ src/app/           the page
   measure.ts         inspect_render's off-screen measuring frame + injected measurer
   review.ts          the proposal cards and their Accept / Reject buttons
   console.ts         the test console
-  files.ts           File System Access open/save (permission-checked, byte-verified), autosave
+  files.ts           File System Access open/save (permission-checked, byte-verified), autosave,
+                     and LocalThemeStore (saved palettes in localStorage)
   opfs.ts            the Origin Private File System backstop + the "Download last save" pointer
   index.html         the shell
   styles.css         the brand

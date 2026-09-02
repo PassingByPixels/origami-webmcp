@@ -9,6 +9,7 @@
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
 import { buildBlockTools, buildFolioBlockTools } from './block-tools.js';
 import { buildComposeTools } from './compose-tools.js';
+import { buildBatchTool } from './batch-tool.js';
 import { buildThemeTools } from './theme-tools.js';
 import type { DeckStore } from './deck-store.js';
 import { pageGuideTool } from './mode-guide.js';
@@ -30,6 +31,9 @@ export function createModeRegistry(deps: ToolDeps, mode: ToolMode): ToolRegistry
     for (const t of buildFolioBlockTools(d)) registry.register(t);
     for (const t of buildComposeTools(d)) registry.register(t);
     for (const t of buildThemeTools(d)) registry.register(t);
+    // LAST: run_batch drives the registry it lives in, and it checks every call's tool name
+    // before running anything - so every other tool has to be registered before it is.
+    registry.register(buildBatchTool(registry));
     return registry;
   }
 

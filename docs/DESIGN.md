@@ -47,7 +47,8 @@ The old 34px status bar row is gone. Its tenants move:
 - Center: deck title only (serif 15px, ink-soft, ellipsis). No filename here.
 - Right: status dot · `New` · `Open…` · `Save` (primary, with a chevron menu).
   - **Status dot**: 8px circle. Green = agent access on (popover: "Agent access is on —
-    29 tools registered. An agent in this browser can author this Fold."), grey = off
+    N tools registered. An agent in this browser can author this Fold." — N is THIS page's
+    registry, never a constant: a mini tool page registers a different set), grey = off
     (popover: what WebMCP is in one line + how to enable: `chrome://flags/#enable-webmcp-testing`
     or `--enable-features=WebMCP`, then reload), amber = partial (some tools refused).
   - **Save menu** (chevron on the Save button): filename + save-state line ("Unsaved
@@ -127,7 +128,7 @@ Centered column, max-width 560px:
 
 - Visible label: **"Tool console"** (testids unchanged).
 - Collapsed by default.
-- The flat 24→29 tool list gains small-caps group headers: **Learn** (origami_guide,
+- The flat tool list gains small-caps group headers: **Learn** (origami_guide,
   get_kind_schema, list_starters, list_block_defs, list_chunks, read_chunk,
   inspect_render, list_proposals, list_activity) · **Author** (create_deck, add_chunk,
   add_custom_fold, write_chunk, move_chunk, set_chunk_meta, delete_chunk, define_block,

@@ -50,10 +50,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('37');
+  await expect(page.getByTestId('tool-count')).toHaveText('38');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('37 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('38 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);

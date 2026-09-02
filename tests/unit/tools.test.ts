@@ -10,6 +10,7 @@ import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
 import { COMPOSED_PLOT_HEIGHT } from '../../src/core/compose.js';
 import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
+import { BATCH_MAX } from '../../src/core/batch-tool.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
@@ -20,7 +21,7 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 37 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 38 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -52,6 +53,7 @@ describe('tool surface', () => {
       'propose_delete',
       'read_chunk',
       'reject_proposal',
+      'run_batch',
       'save_deck',
       'save_theme',
       'set_block',
@@ -2151,7 +2153,11 @@ describe('origami_guide by topic', () => {
     sizes.whole = size(whole);
     console.log('origami_guide bytes (JSON.stringify(...,null,2).length):', JSON.stringify(sizes, null, 2));
 
-    // the budget this slice was built to: a cold agent's first call stays under 20 KB
+    // THE STANDING BUDGETS. quickstart is the answer a cold agent is pointed at first and it
+    // has to be cheap enough to read before acting; the default is the whole contract and has
+    // to stay a fraction of the guide it replaced. Both are re-measured on every run, so a
+    // section that grows into either one is a failing test rather than a slow surprise.
+    expect(sizes.quickstart!, 'quickstart must stay under 3 KB — it is the FIRST thing a cold agent reads').toBeLessThanOrEqual(3_000);
     expect(sizes.default!).toBeLessThanOrEqual(20_000);
     expect(sizes.default!).toBeLessThan(sizes.whole! / 2);
     // the cheapest routes an agent has: the protocol alone, and the tool catalog alone
@@ -2898,5 +2904,148 @@ describe('S4 — themes an agent can own', () => {
     const h = harness();
     expect(h.registry.get('set_deck_meta')!.description).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
     expect(h.registry.get('set_deck_meta')!.description).toMatch(/apply_theme/);
+  });
+});
+
+describe('S5 — turns and bytes', () => {
+  /* The lead's latency probe found every tool under 6 ms except inspect_render (2.4 s) and
+     save_deck (53 ms). So the cost of a deck is not compute — it is turns and payload bytes,
+     and these two are the only levers left after add_fold made one fold one call. */
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+
+  it('builds a whole deck in ONE call, in order', async () => {
+    const h = harness();
+    const res = await h.json('run_batch', {
+      calls: [
+        { tool: 'create_deck', args: { title: 'Batched', discard: true } },
+        { tool: 'add_fold', args: { title: 'Opening', blocks: [{ text: '<p class="lede">One turn.</p>' }] } },
+        { tool: 'add_fold', args: { title: 'The numbers', blocks: [{ chart: CHART }] } },
+        { tool: 'add_ledger', args: { title: 'Budget', columns: [{ label: 'Line' }, { label: 'Cost' }], rows: [['Rent', '1200'], ['Total', '']], formulas: { B2: '=SUM(B1:B1)' } } },
+        { tool: 'apply_theme', args: { name: 'boardroom' } },
+      ],
+    });
+    expect(res).toMatchObject({ requested: 5, completed: 5 });
+    expect(res.stoppedAt).toBeUndefined();
+    expect(res.results.map((r: any) => r.tool)).toEqual(['create_deck', 'add_fold', 'add_fold', 'add_ledger', 'apply_theme']);
+    expect(res.results.every((r: any) => r.ok)).toBe(true);
+    // the results are the tools' OWN bodies, parsed — one payload, not five strings to re-parse
+    expect(res.results[1].result.chunkId).toBeTypeOf('string');
+    expect(res.results[3].result.blocks).toEqual([{ kind: 'table', nth: 0 }]);
+
+    expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Opening', 'The numbers', 'Budget']);
+    expect(h.deck.serialize()).toContain('#38628F');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('records every inner call in the feed, and undo reverses them ONE AT A TIME', async () => {
+    /* The batch is a driver, not a second dispatcher: each call goes through
+       ToolRegistry.invoke. That is what makes the feed and the undo stack see six steps rather
+       than one opaque one — and an agent that undoes after a batch must get its last fold back,
+       not the whole build. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const before = h.deck.serialize();
+    await h.json('run_batch', {
+      calls: [
+        { tool: 'add_fold', args: { title: 'One', blocks: [{ text: '<p>1</p>' }] } },
+        { tool: 'add_fold', args: { title: 'Two', blocks: [{ text: '<p>2</p>' }] } },
+        { tool: 'add_fold', args: { title: 'Three', blocks: [{ text: '<p>3</p>' }] } },
+      ],
+    });
+    expect(h.deck.model().order).toHaveLength(4);
+
+    const feed = (await h.json('list_activity', { limit: 20 })).entries.map((e: any) => e.tool);
+    expect(feed.filter((t: string) => t === 'add_fold')).toHaveLength(3);
+    expect(feed).toContain('run_batch');
+
+    await h.json('undo');
+    expect(h.deck.model().order, 'ONE undo takes back ONE fold').toHaveLength(3);
+    await h.json('undo');
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('stops at the FIRST failure and says exactly where, leaving what already landed', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const res = await h.json('run_batch', {
+      calls: [
+        { tool: 'add_fold', args: { title: 'Good', blocks: [{ text: '<p>ok</p>' }] } },
+        { tool: 'add_fold', args: { title: 'Bad', blocks: [{ flow: { nodes: [], edges: [] } }] } },
+        { tool: 'add_fold', args: { title: 'Never', blocks: [{ text: '<p>no</p>' }] } },
+      ],
+    });
+    expect(res).toMatchObject({ requested: 3, completed: 1, stoppedAt: 1, stoppedOn: 'add_fold' });
+    expect(res.results).toHaveLength(2); // the failure is returned, the call after it never ran
+    expect(res.results[1].ok).toBe(false);
+    expect(res.results[1].result.violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+    expect(res.note).toMatch(/DID land/);
+    // the first fold really is on the deck: a half-batch is reported, not rolled back
+    expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Good']);
+  });
+
+  it('checks the whole list before running anything, so a typo never half-builds a deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const before = h.deck.serialize();
+    const res = await h.call('run_batch', {
+      calls: [
+        { tool: 'add_fold', args: { title: 'Good', blocks: [{ text: '<p>ok</p>' }] } },
+        { tool: 'add_fould', args: {} },
+      ],
+    });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/calls\[1\] names unknown tool "add_fould" — nothing was run/);
+    expect(body.availableTools).toContain('add_fold');
+    expect(h.deck.serialize(), 'the valid first call must NOT have run').toBe(before);
+  });
+
+  it('refuses a batch inside a batch, and a batch longer than the cap', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Batched' });
+    const nested = await h.call('run_batch', { calls: [{ tool: 'run_batch', args: { calls: [] } }] });
+    expect(nested.isError).toBe(true);
+    expect(JSON.parse(nested.content[0]!.text).error).toMatch(/cannot contain another batch/);
+
+    const long = await h.call('run_batch', { calls: Array.from({ length: BATCH_MAX + 1 }, () => ({ tool: 'list_chunks', args: {} })) });
+    expect(long.isError).toBe(true);
+    expect(JSON.parse(long.content[0]!.text)).toMatchObject({ max: BATCH_MAX });
+
+    expect((await h.call('run_batch', { calls: [] })).isError).toBe(true);
+    expect((await h.call('run_batch', { calls: [{ args: {} }] })).isError).toBe(true);
+  });
+
+  it('origami_guide({topic:"quickstart"}) is the fast path, under 3 KB, with a real example', async () => {
+    const h = harness();
+    const q = await h.json('origami_guide', { topic: 'quickstart' });
+    expect(new TextEncoder().encode(JSON.stringify(q, null, 2)).length).toBeLessThanOrEqual(3_000);
+
+    // the five calls, named in order
+    const path = q.theFastPath.join(' ');
+    for (const tool of ['create_deck', 'add_fold', 'add_ledger', 'run_batch', 'apply_theme', 'inspect_render', 'save_deck']) {
+      expect(path, tool).toContain(tool);
+    }
+    // and ONE example that really works — parsed out of the answer and RUN
+    expect(q.example.call).toBe('add_fold');
+    const args = JSON.parse(q.example.args);
+    expect(args.blocks.some((b: any) => b.chart), 'the example carries a chart').toBe(true);
+    expect(args.blocks.some((b: any) => b.table), 'the example carries a table').toBe(true);
+
+    await h.json('create_deck', { title: 'From the guide' });
+    const built = await h.json('add_fold', args);
+    expect(built.chunkId).toBeTypeOf('string');
+    expect(built.blocks).toEqual([{ kind: 'chart', nth: 0 }, { kind: 'table', nth: 0 }]);
+    expect(validateDeck(parseDeck(h.deck.serialize())), 'the guide example must produce a VALID Fold').toEqual([]);
+  });
+
+  it("the default guide's FIRST key points at the quickstart", async () => {
+    const h = harness();
+    const dflt = await h.json('origami_guide');
+    expect(Object.keys(dflt)[0]).toBe('start');
+    expect(dflt.start).toMatch(/topic: "quickstart"/);
+    expect(dflt.topics.quickstart).toMatch(/read this one first/);
+    expect(GUIDE_TOPICS).toContain('quickstart');
   });
 });
