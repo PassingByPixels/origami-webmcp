@@ -64,6 +64,10 @@ const INDENT_MAX = 15;
 const DIM_MAX = 4096;
 /** char cap for a cellName / KPI name / KPI ref. */
 const NAME_MAX = 64;
+/** The name the editor SHOWS on the sole pill of a ledger nobody has renamed. It is a display default,
+    never stored: `normalize` and the strip collapse both reap a `tabName` equal to it, so an unrenamed
+    single-sheet ledger keeps pristine pre-tabs bytes. Renaming to anything else IS stored. */
+export const DEFAULT_SHEET_NAME = 'Sheet 1';
 const AGG_FNS = new Set(['SUM', 'AVG', 'MIN', 'MAX', 'COUNT']);
 /** The conditional-format rule kinds + the ONLY fields a rule may carry (allowlist; per-kind checks
     below then forbid the fields that don't belong to a given kind). */
@@ -729,17 +733,18 @@ function checkTabEntry(tab, i, names, v, bad) {
 // --- Multi-tab strip (block-level; see TABLE_FIELD_KIND). The ACTIVE sheet is this top-level data
 // (named by `tabName`); the inactive sheets ride in `tabs`; `tabPos` is the active sheet's strip slot.
 // Each tab is a FULLY INDEPENDENT sheet — the entry's `data` is recursed through validateSheet, minus
-// the block-level fields. All omitted on a single-sheet ledger, so it serializes byte-identically. ---
+// the block-level fields. `tabs`/`tabPos` are omitted on a single-sheet ledger, and so is `tabName`
+// UNLESS the author renamed the sole sheet — an untouched ledger serializes byte-identically. ---
 function checkTabStrip(d, v, bad) {
     const hasTabs = d.tabs !== undefined;
     const hasTabName = d.tabName !== undefined;
-    // tabName: display text (spaces allowed), non-empty, <= NAME_MAX; only meaningful alongside `tabs`.
+    // tabName: display text (spaces allowed), non-empty, <= NAME_MAX — the same rule tabs[].name follows.
+    // It does NOT require `tabs`: the sole sheet of a single-sheet ledger can be renamed, and then its name
+    // is the only thing `tabName` carries. (`tabs` still requires it — a strip must name its active sheet.)
     if (hasTabName) {
         if (typeof d.tabName !== 'string' || d.tabName.length === 0 || d.tabName.length > NAME_MAX) {
             bad('tabName', `tabName must be a non-empty string (max ${NAME_MAX})`);
         }
-        if (!hasTabs)
-            bad('tabName', 'tabName requires tabs — it only names the active sheet within a multi-tab strip');
     }
     // tabs: a non-empty array of { name, data }; requires `tabName`; every name UNIQUE across the strip
     // (tabs[].name + tabName). Each entry's `data` is a FULL sheet (recursed), minus block-level fields.

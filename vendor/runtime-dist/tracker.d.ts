@@ -1,11 +1,11 @@
-import type { TrackerData } from '@origami/format';
-export declare const TRACKER_STATUSES: readonly ["Open", "In progress", "Blocked", "Closed"];
+import { TRACKER_STATUSES, type TrackerData } from '@origami/format';
+export { TRACKER_STATUSES };
 /** Lenient normalize — junk degrades to defaults, never throws. */
 export declare function normalizeTrackerData(raw: unknown): TrackerData;
 /** Read + normalize the slide's data block. null = no/unparseable block. */
 export declare function parseTrackerSlideData(slide: Element): TrackerData | null;
 export interface TrackerRenderOpts {
-    /** Wire the search / hide-completed filters (viewer + canvas). */
+    /** Wire the search / chips / hide-completed / sort affordances (viewer + canvas). */
     interactive?: boolean;
     /** Studio canvas only: render the editing controls and commit through this. */
     edit?: {

@@ -1,10 +1,10 @@
 # Vendored artifacts - provenance
 
 Source repo: the Origami Folio monorepo (private)
-Source state: branch opt/lean-2026-09 @ a508490 (the 2026-09-02 optimize arc, merged: format
-              complexity batch 1, runtime batches 3+5, runtime fixes - count-up formatting, flow
-              viewBox fit, flow cycle layout + back-edge arc, drag read-back basis, stdio ledger
-              bake). Not yet on Folio master.
+Source state: Folio opt/lean-2026-09 @ f3888a9 (the 2026-09-02 optimize + UAT arcs, merged: format
+              complexity batch 1, runtime batches 3+5, runtime fixes, tracker v2 generic columns +
+              collapsible options + attached listboxes, ledger sole-sheet tabName rule, ledger
+              headroom/fit). Pushed to master the same day.
 Previous:     master @ fc7cece (2026-08-30 copy)
 Copied: 2026-09-02
 

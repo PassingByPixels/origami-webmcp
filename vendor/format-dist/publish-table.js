@@ -167,8 +167,16 @@ export function publishTable(data) {
     // when a single sheet collapses to pristine form). Re-attached at the block wrapper, right after `id`.
     const nameHead = data.name !== undefined ? { name: data.name } : {};
     // one survivor → pristine single-sheet form (no strip descriptors, no hidden) + the presentation name.
-    if (kept.length === 1)
-        return { ...nameHead, ...kept[0].sheet };
+    // A block that was ALREADY single-sheet keeps its sole sheet's own name: that name is display text the
+    // reader sees (runtime/table.ts draws it as a one-pill name row), so publishing must not silently strip
+    // it. A block that HAD a strip still collapses to pristine form — its survivor's name was a switcher
+    // label, and there is nothing left to switch between.
+    if (kept.length === 1) {
+        const sole = { ...nameHead, ...kept[0].sheet };
+        if (tabs.length === 0 && typeof data.tabName === 'string' && data.tabName)
+            sole.tabName = data.tabName;
+        return sole;
+    }
     // >=2 survivors → the active sheet stays top-level (else the first shown is promoted); the rest ride in
     // `tabs`, strip order preserved. The BLOCK id (block-level, chart-link target) rides first when present.
     let topIdx = kept.findIndex((s) => s.active);

@@ -291,8 +291,12 @@ export interface TableData {
         sheet on a tab swap and is allowed inside a tab entry. Editor-only affordance; the recipient never
         sees a hidden-unbaked sheet (it isn't rendered and its data is unreachable). */
     hidden?: true;
-    /** Display name of the ACTIVE sheet (the top-level data). Absent on a single-sheet ledger
-        (byte-stability); REQUIRED once `tabs` is present (it disambiguates the strip). Display text —
+    /** Display name of the sheet that is ACTIVE (the top-level data). REQUIRED once `tabs` is present
+        (it disambiguates the strip) and OPTIONAL without it: a single-sheet ledger may name its sole
+        sheet, which the reader shows as a one-pill name row and a cross-sheet formula can qualify by.
+        An UNNAMED sole sheet omits the field entirely, so a ledger nobody renamed stays byte-identical
+        to the pre-tabs shape — the editor's display default ("Sheet 1", DEFAULT_SHEET_NAME) is never
+        stamped into the data, and is reaped on the way out if it ever lands there. Display text —
         spaces allowed, ≤NAME_MAX — NOT an identifier. */
     tabName?: string;
     /** The additional INACTIVE sheets, in strip order. The active sheet is NOT in this array — it occupies
@@ -303,6 +307,10 @@ export interface TableData {
         editor's default → a leading-active ledger stays byte-identical); a written 0 still validates. */
     tabPos?: number;
 }
+/** The name the editor SHOWS on the sole pill of a ledger nobody has renamed. It is a display default,
+    never stored: `normalize` and the strip collapse both reap a `tabName` equal to it, so an unrenamed
+    single-sheet ledger keeps pristine pre-tabs bytes. Renaming to anything else IS stored. */
+export declare const DEFAULT_SHEET_NAME = "Sheet 1";
 /** A ledger is a spreadsheet, not a display grid — it gets a far wider column ceiling than
     GRID_MAX_COLS (Excel-classic width, column IV). The author calculates across the whole sheet;
     Bake picks the crop that actually presents. colA1 addresses multi-letter columns (AA…IV), so

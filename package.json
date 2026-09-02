@@ -1,6 +1,6 @@
 {
   "name": "origami-folio-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Origami Folio Web — open a Fold in the browser, register Origami's authoring tools to in-page agents over WebMCP, accept or reject their proposals by hand, save back to disk.",
