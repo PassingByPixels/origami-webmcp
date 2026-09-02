@@ -171,6 +171,138 @@ function lerpHex(from, to, t) {
     };
     return '#' + ch(0) + ch(1) + ch(2);
 }
+/** Is (r,c) a cell a merge SWALLOWS — inside a merge rect but not its anchor? Such a cell holds no
+    value of its own, so no rule ever considers it. */
+function isCoveredByMerge(rects, r, c) {
+    for (const m of rects)
+        if (r >= m.r0 && r <= m.r1 && c >= m.c0 && c <= m.c1 && !(m.r0 === r && m.c0 === c))
+            return true;
+    return false;
+}
+/** The range's live cells, gathered once per rule: in-grid (the range is CLAMPED to the value grid,
+    so a hostile/oversized range can never loop past the data) and not covered by a merge. */
+function collectRangeCells(values, rect, covered) {
+    const cells = [];
+    const rEnd = Math.min(rect.r1, values.length - 1);
+    for (let r = rect.r0; r <= rEnd; r++) {
+        const row = values[r];
+        if (!row)
+            continue;
+        const cEnd = Math.min(rect.c1, row.length - 1);
+        for (let c = rect.c0; c <= cEnd; c++) {
+            if (covered(r, c))
+                continue;
+            cells.push({ r, c, s: row[c] ?? '' });
+        }
+    }
+    return cells;
+}
+/** The numeric cells' values — the only ones gt/lt/top/bot/scale ever consider. */
+function numericValues(cells) {
+    return cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
+}
+/** dupes: compares NORMALIZED (trimmed, case-sensitive) strings; empty cells never match. */
+function paintDupes(cells, rule, put) {
+    const counts = new Map();
+    for (const cell of cells) {
+        const s = cell.s.trim();
+        if (s !== '')
+            counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+    for (const cell of cells) {
+        const s = cell.s.trim();
+        if (s !== '' && (counts.get(s) ?? 0) >= 2)
+            put(cell.r, cell.c, rule.fill, rule.color);
+    }
+}
+/** eq: a NUMERIC target only ever matches a numeric cell (numeric equality, so "5"/"5.0"/" 5 " all
+    match 5); a TEXT target matches by trimmed, CASE-INSENSITIVE string compare (Excel semantics). */
+function paintEq(cells, rule, put) {
+    const target = (rule.text ?? '').trim();
+    if (target === '')
+        return;
+    const targetIsNum = isNumeric(target);
+    const numTarget = targetIsNum ? Number(target) : 0;
+    const targetLower = target.toLowerCase();
+    for (const cell of cells) {
+        const s = cell.s.trim();
+        if (s === '')
+            continue; // empty cells never match
+        const match = targetIsNum ? (isNumeric(s) && Number(s) === numTarget) : s.toLowerCase() === targetLower;
+        if (match)
+            put(cell.r, cell.c, rule.fill, rule.color);
+    }
+}
+/** gt/lt: does the value clear the rule's threshold? An absent threshold reads as 0. */
+function clearsThreshold(v, rule) {
+    const th = rule.value ?? 0;
+    if (rule.kind === 'gt')
+        return v > th;
+    return v < th;
+}
+/** gt/lt: a plain threshold comparison over the numeric cells. */
+function paintCompare(cells, rule, put) {
+    for (const cell of cells) {
+        if (!isNumeric(cell.s))
+            continue;
+        if (clearsThreshold(Number(cell.s), rule))
+            put(cell.r, cell.c, rule.fill, rule.color);
+    }
+}
+/** top/bot: is the value on the ranked side of the cutoff? Inclusive, so TIES all match. */
+function withinRank(v, cutoff, rule) {
+    if (rule.kind === 'top')
+        return v >= cutoff;
+    return v <= cutoff;
+}
+/** top/bot: the n-th ranked numeric value becomes a cutoff, so TIES all match. */
+function paintRank(cells, rule, put) {
+    const nums = numericValues(cells);
+    if (!nums.length)
+        return;
+    const n = Math.max(1, Math.floor(rule.n ?? 1));
+    const sorted = nums.slice().sort((x, y) => (rule.kind === 'top' ? y - x : x - y));
+    const cutoff = sorted[Math.min(n, sorted.length) - 1];
+    for (const cell of cells) {
+        if (!isNumeric(cell.s))
+            continue;
+        if (withinRank(Number(cell.s), cutoff, rule))
+            put(cell.r, cell.c, rule.fill, rule.color);
+    }
+}
+/** scale: interpolate from/to across the numeric range. A single-value range resolves to `to`. */
+function paintScale(cells, rule, put) {
+    if (!rule.from || !rule.to)
+        return;
+    const nums = numericValues(cells);
+    if (!nums.length)
+        return;
+    let mn = nums[0], mx = nums[0];
+    for (const v of nums) {
+        if (v < mn)
+            mn = v;
+        if (v > mx)
+            mx = v;
+    }
+    const span = mx - mn;
+    for (const cell of cells) {
+        if (!isNumeric(cell.s))
+            continue;
+        const t = span === 0 ? 1 : (Number(cell.s) - mn) / span;
+        put(cell.r, cell.c, lerpHex(rule.from, rule.to, t));
+    }
+}
+/* A Map, not a plain object: `kind` reaches here straight off a parsed file, and an object literal
+   would answer a lookup for "constructor" or "toString" with something off Object.prototype. */
+const COND_PAINTERS = new Map([
+    ['dupes', paintDupes],
+    ['eq', paintEq],
+    ['gt', paintCompare],
+    ['lt', paintCompare],
+    ['top', paintRank],
+    ['bot', paintRank],
+    ['scale', paintScale],
+]);
 /** Evaluate conditional-format rules over a BAKED value grid → per-cell {fill?,color?} overlays keyed
     by A1. PURE + calc-free (value comparisons + a hex interpolator; never a formula). Used IDENTICALLY
     by the editor and the inert viewer, evaluated against the FULL sheet (the viewer then windows the
@@ -181,18 +313,16 @@ function lerpHex(from, to, t) {
     never match; merged COVERED cells are skipped (they hold no value); ties in top/bot all match; a
     single-value scale range resolves to the `to` colour. When two rules paint the same cell+channel,
     the LATER rule wins. Rows beyond the grid contribute nothing (the range is clamped to the value
-    grid, so a hostile/oversized range can never loop past the data). */
+    grid, so a hostile/oversized range can never loop past the data).
+
+    The body is a DISPATCHER: each kind's semantics live in its own painter above, and the rules run
+    in file order, so the later-rule-wins overwrite is preserved by the loop and nothing else. */
 export function evaluateCondFmt(values, rules, merges) {
     const out = new Map();
     if (!rules || !rules.length)
         return out;
     const rects = merges ?? [];
-    const covered = (r, c) => {
-        for (const m of rects)
-            if (r >= m.r0 && r <= m.r1 && c >= m.c0 && c <= m.c1 && !(m.r0 === r && m.c0 === c))
-                return true;
-        return false;
-    };
+    const covered = (r, c) => isCoveredByMerge(rects, r, c);
     const put = (r, c, fill, color) => {
         if (!fill && !color)
             return;
@@ -208,97 +338,10 @@ export function evaluateCondFmt(values, rules, merges) {
         const rect = a1RangeToRect(rule.range);
         if (!rect)
             continue;
-        // gather the range's live (non-covered, in-grid) cells once
-        const cells = [];
-        const rEnd = Math.min(rect.r1, values.length - 1);
-        for (let r = rect.r0; r <= rEnd; r++) {
-            const row = values[r];
-            if (!row)
-                continue;
-            const cEnd = Math.min(rect.c1, row.length - 1);
-            for (let c = rect.c0; c <= cEnd; c++) {
-                if (covered(r, c))
-                    continue;
-                cells.push({ r, c, s: row[c] ?? '' });
-            }
-        }
-        if (rule.kind === 'dupes') {
-            const counts = new Map();
-            for (const cell of cells) {
-                const s = cell.s.trim();
-                if (s !== '')
-                    counts.set(s, (counts.get(s) ?? 0) + 1);
-            }
-            for (const cell of cells) {
-                const s = cell.s.trim();
-                if (s !== '' && (counts.get(s) ?? 0) >= 2)
-                    put(cell.r, cell.c, rule.fill, rule.color);
-            }
-        }
-        else if (rule.kind === 'eq') {
-            const target = (rule.text ?? '').trim();
-            if (target === '')
-                continue;
-            // a NUMERIC target only ever matches a numeric cell (numeric equality, so "5"/"5.0"/" 5 " all
-            // match 5); a TEXT target matches by trimmed, CASE-INSENSITIVE string compare (Excel semantics).
-            const targetIsNum = isNumeric(target);
-            const numTarget = targetIsNum ? Number(target) : 0;
-            const targetLower = target.toLowerCase();
-            for (const cell of cells) {
-                const s = cell.s.trim();
-                if (s === '')
-                    continue; // empty cells never match
-                const match = targetIsNum ? (isNumeric(s) && Number(s) === numTarget) : s.toLowerCase() === targetLower;
-                if (match)
-                    put(cell.r, cell.c, rule.fill, rule.color);
-            }
-        }
-        else if (rule.kind === 'gt' || rule.kind === 'lt') {
-            const th = rule.value ?? 0;
-            for (const cell of cells) {
-                if (!isNumeric(cell.s))
-                    continue;
-                const v = Number(cell.s);
-                if (rule.kind === 'gt' ? v > th : v < th)
-                    put(cell.r, cell.c, rule.fill, rule.color);
-            }
-        }
-        else if (rule.kind === 'top' || rule.kind === 'bot') {
-            const nums = cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
-            if (!nums.length)
-                continue;
-            const n = Math.max(1, Math.floor(rule.n ?? 1));
-            const sorted = nums.slice().sort((x, y) => (rule.kind === 'top' ? y - x : x - y));
-            const cutoff = sorted[Math.min(n, sorted.length) - 1];
-            for (const cell of cells) {
-                if (!isNumeric(cell.s))
-                    continue;
-                const v = Number(cell.s);
-                if (rule.kind === 'top' ? v >= cutoff : v <= cutoff)
-                    put(cell.r, cell.c, rule.fill, rule.color);
-            }
-        }
-        else if (rule.kind === 'scale') {
-            if (!rule.from || !rule.to)
-                continue;
-            const nums = cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
-            if (!nums.length)
-                continue;
-            let mn = nums[0], mx = nums[0];
-            for (const v of nums) {
-                if (v < mn)
-                    mn = v;
-                if (v > mx)
-                    mx = v;
-            }
-            const span = mx - mn;
-            for (const cell of cells) {
-                if (!isNumeric(cell.s))
-                    continue;
-                const t = span === 0 ? 1 : (Number(cell.s) - mn) / span;
-                put(cell.r, cell.c, lerpHex(rule.from, rule.to, t));
-            }
-        }
+        const paint = COND_PAINTERS.get(rule.kind);
+        if (!paint)
+            continue;
+        paint(collectRangeCells(values, rect, covered), rule, put);
     }
     return out;
 }

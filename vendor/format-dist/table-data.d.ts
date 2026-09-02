@@ -309,7 +309,10 @@ export interface TableData {
     the calc engine + editor already handle the full width. Rows stay at GRID_MAX_ROWS. */
 export declare const TABLE_MAX_COLS = 256;
 /** Strict shape check. REJECT, never repair. Reuses grid's column/row/tone/caps
-    validation (re-prefixed table.*) and adds SHAPE-ONLY formula/named checks. */
+    validation (re-prefixed table.*) and adds SHAPE-ONLY formula/named checks.
+
+    The body is a DISPATCHER: the ACTIVE sheet is validated as a sheet, then the four BLOCK-level
+    concerns are checked in the order their violations are expected in. */
 export declare function validateTableData(data: unknown): Violation[];
 /** Serialize table data for embedding — "<" escaped (same invariant as gridDataJson). */
 export declare function tableDataJson(data: TableData): string;

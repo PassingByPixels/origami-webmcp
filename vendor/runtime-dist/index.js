@@ -3848,17 +3848,129 @@ function lerpHex(from, to, t) {
   };
   return "#" + ch(0) + ch(1) + ch(2);
 }
+function isCoveredByMerge(rects, r, c) {
+  for (const m of rects)
+    if (r >= m.r0 && r <= m.r1 && c >= m.c0 && c <= m.c1 && !(m.r0 === r && m.c0 === c))
+      return true;
+  return false;
+}
+function collectRangeCells(values, rect, covered) {
+  const cells = [];
+  const rEnd = Math.min(rect.r1, values.length - 1);
+  for (let r = rect.r0; r <= rEnd; r++) {
+    const row = values[r];
+    if (!row)
+      continue;
+    const cEnd = Math.min(rect.c1, row.length - 1);
+    for (let c = rect.c0; c <= cEnd; c++) {
+      if (covered(r, c))
+        continue;
+      cells.push({ r, c, s: row[c] ?? "" });
+    }
+  }
+  return cells;
+}
+function numericValues(cells) {
+  return cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
+}
+function paintDupes(cells, rule, put) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const cell of cells) {
+    const s2 = cell.s.trim();
+    if (s2 !== "")
+      counts.set(s2, (counts.get(s2) ?? 0) + 1);
+  }
+  for (const cell of cells) {
+    const s2 = cell.s.trim();
+    if (s2 !== "" && (counts.get(s2) ?? 0) >= 2)
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function paintEq(cells, rule, put) {
+  const target = (rule.text ?? "").trim();
+  if (target === "")
+    return;
+  const targetIsNum = isNumeric(target);
+  const numTarget = targetIsNum ? Number(target) : 0;
+  const targetLower = target.toLowerCase();
+  for (const cell of cells) {
+    const s2 = cell.s.trim();
+    if (s2 === "")
+      continue;
+    const match = targetIsNum ? isNumeric(s2) && Number(s2) === numTarget : s2.toLowerCase() === targetLower;
+    if (match)
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function clearsThreshold(v, rule) {
+  const th = rule.value ?? 0;
+  if (rule.kind === "gt")
+    return v > th;
+  return v < th;
+}
+function paintCompare(cells, rule, put) {
+  for (const cell of cells) {
+    if (!isNumeric(cell.s))
+      continue;
+    if (clearsThreshold(Number(cell.s), rule))
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function withinRank(v, cutoff, rule) {
+  if (rule.kind === "top")
+    return v >= cutoff;
+  return v <= cutoff;
+}
+function paintRank(cells, rule, put) {
+  const nums = numericValues(cells);
+  if (!nums.length)
+    return;
+  const n = Math.max(1, Math.floor(rule.n ?? 1));
+  const sorted = nums.slice().sort((x, y) => rule.kind === "top" ? y - x : x - y);
+  const cutoff = sorted[Math.min(n, sorted.length) - 1];
+  for (const cell of cells) {
+    if (!isNumeric(cell.s))
+      continue;
+    if (withinRank(Number(cell.s), cutoff, rule))
+      put(cell.r, cell.c, rule.fill, rule.color);
+  }
+}
+function paintScale(cells, rule, put) {
+  if (!rule.from || !rule.to)
+    return;
+  const nums = numericValues(cells);
+  if (!nums.length)
+    return;
+  let mn = nums[0], mx = nums[0];
+  for (const v of nums) {
+    if (v < mn)
+      mn = v;
+    if (v > mx)
+      mx = v;
+  }
+  const span2 = mx - mn;
+  for (const cell of cells) {
+    if (!isNumeric(cell.s))
+      continue;
+    const t = span2 === 0 ? 1 : (Number(cell.s) - mn) / span2;
+    put(cell.r, cell.c, lerpHex(rule.from, rule.to, t));
+  }
+}
+var COND_PAINTERS = /* @__PURE__ */ new Map([
+  ["dupes", paintDupes],
+  ["eq", paintEq],
+  ["gt", paintCompare],
+  ["lt", paintCompare],
+  ["top", paintRank],
+  ["bot", paintRank],
+  ["scale", paintScale]
+]);
 function evaluateCondFmt(values, rules, merges) {
   const out = /* @__PURE__ */ new Map();
   if (!rules || !rules.length)
     return out;
   const rects = merges ?? [];
-  const covered = (r, c) => {
-    for (const m of rects)
-      if (r >= m.r0 && r <= m.r1 && c >= m.c0 && c <= m.c1 && !(m.r0 === r && m.c0 === c))
-        return true;
-    return false;
-  };
+  const covered = (r, c) => isCoveredByMerge(rects, r, c);
   const put = (r, c, fill, color) => {
     if (!fill && !color)
       return;
@@ -3874,90 +3986,10 @@ function evaluateCondFmt(values, rules, merges) {
     const rect = a1RangeToRect(rule.range);
     if (!rect)
       continue;
-    const cells = [];
-    const rEnd = Math.min(rect.r1, values.length - 1);
-    for (let r = rect.r0; r <= rEnd; r++) {
-      const row = values[r];
-      if (!row)
-        continue;
-      const cEnd = Math.min(rect.c1, row.length - 1);
-      for (let c = rect.c0; c <= cEnd; c++) {
-        if (covered(r, c))
-          continue;
-        cells.push({ r, c, s: row[c] ?? "" });
-      }
-    }
-    if (rule.kind === "dupes") {
-      const counts = /* @__PURE__ */ new Map();
-      for (const cell of cells) {
-        const s2 = cell.s.trim();
-        if (s2 !== "")
-          counts.set(s2, (counts.get(s2) ?? 0) + 1);
-      }
-      for (const cell of cells) {
-        const s2 = cell.s.trim();
-        if (s2 !== "" && (counts.get(s2) ?? 0) >= 2)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "eq") {
-      const target = (rule.text ?? "").trim();
-      if (target === "")
-        continue;
-      const targetIsNum = isNumeric(target);
-      const numTarget = targetIsNum ? Number(target) : 0;
-      const targetLower = target.toLowerCase();
-      for (const cell of cells) {
-        const s2 = cell.s.trim();
-        if (s2 === "")
-          continue;
-        const match = targetIsNum ? isNumeric(s2) && Number(s2) === numTarget : s2.toLowerCase() === targetLower;
-        if (match)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "gt" || rule.kind === "lt") {
-      const th = rule.value ?? 0;
-      for (const cell of cells) {
-        if (!isNumeric(cell.s))
-          continue;
-        const v = Number(cell.s);
-        if (rule.kind === "gt" ? v > th : v < th)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "top" || rule.kind === "bot") {
-      const nums = cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
-      if (!nums.length)
-        continue;
-      const n = Math.max(1, Math.floor(rule.n ?? 1));
-      const sorted = nums.slice().sort((x, y) => rule.kind === "top" ? y - x : x - y);
-      const cutoff = sorted[Math.min(n, sorted.length) - 1];
-      for (const cell of cells) {
-        if (!isNumeric(cell.s))
-          continue;
-        const v = Number(cell.s);
-        if (rule.kind === "top" ? v >= cutoff : v <= cutoff)
-          put(cell.r, cell.c, rule.fill, rule.color);
-      }
-    } else if (rule.kind === "scale") {
-      if (!rule.from || !rule.to)
-        continue;
-      const nums = cells.filter((x) => isNumeric(x.s)).map((x) => Number(x.s));
-      if (!nums.length)
-        continue;
-      let mn = nums[0], mx = nums[0];
-      for (const v of nums) {
-        if (v < mn)
-          mn = v;
-        if (v > mx)
-          mx = v;
-      }
-      const span2 = mx - mn;
-      for (const cell of cells) {
-        if (!isNumeric(cell.s))
-          continue;
-        const t = span2 === 0 ? 1 : (Number(cell.s) - mn) / span2;
-        put(cell.r, cell.c, lerpHex(rule.from, rule.to, t));
-      }
-    }
+    const paint = COND_PAINTERS.get(rule.kind);
+    if (!paint)
+      continue;
+    paint(collectRangeCells(values, rect, covered), rule, put);
   }
   return out;
 }
