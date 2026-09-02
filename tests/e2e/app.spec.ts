@@ -356,12 +356,16 @@ test('inspect_render reports a clean deck as clean, and never touches the previe
 
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
   await page.goto('/folio/index.html');
-  const created = await invoke(page, 'create_deck', { title: 'Playwright Deck' });
+  const created = await invoke(page, 'create_deck', { title: 'Playwright Deck', subtitle: 'A real cover line' });
   expect(created.state).toContain('ok');
   expect(created.body.title).toBe('Playwright Deck');
   await expect(page.getByTestId('deck-name')).toHaveText('Playwright Deck');
   await expect(page.getByTestId('save-file')).toHaveText('playwright-deck.origami.html');
-  await expect(preview(page)).toContainText('New fold');
+  // the first fold is a real COVER carrying the deck's own title, not a placeholder to overwrite
+  expect(created.body.chunks[0].kind).toBe('cover');
+  await expect(preview(page)).toContainText('Playwright Deck');
+  await expect(preview(page)).toContainText('A real cover line');
+  await expect(preview(page)).not.toContainText('New fold');
 
   const marker = `Second fold ${Date.now()}`;
   const added = await invoke(page, 'add_chunk', {
@@ -600,4 +604,46 @@ test('a saved theme survives a real page reload, and apply_theme restyles the de
   expect((await invoke(page, 'list_themes', {})).body.themes.some((t: any) => t.name === 'house-navy')).toBe(false);
   // the deck keeps the colours: a theme is applied by value
   expect(await deckTextNow(page)).toContain('#1F3A5F');
+});
+
+test('a composed chart fold fits 1280x720 even when the card also carries prose', async ({ page }) => {
+  /* S6. Haiku's trial fold added a lede above its chart and went over: the paragraph is height
+     the chart no longer has. MEASURED at 1280x720 on the same fold: 849px at plotHeight 318,
+     781 at 250, 751 at 220, 731 at 200, and it FITS at 180. So a paragraph costs the chart
+     107px, which is more than the distance from the no-prose default to the floor — any prose on
+     the card puts the chart at the 180 floor, and that is what has to fit. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Prose fit', subtitle: 'A cover, not a placeholder', eyebrow: 'S6', discard: true });
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2', 'Q3', 'Q4'], series: [{ name: 'Revenue', color: '#38628F', values: [12, 19, 15, 24] }], yMax: null };
+
+  const withProse = await invoke(page, 'add_fold', {
+    title: 'Revenue by quarter',
+    eyebrow: 'Q3 review',
+    blocks: [
+      { text: '<p class="lede">Revenue held; the cost of delivery did not. This is the paragraph that pushed the trial fold over.</p>' },
+      { chart: CHART, caption: 'EUR m' },
+    ],
+  });
+  expect(withProse.state).toContain('ok');
+
+  const alone = await invoke(page, 'add_fold', { title: 'Chart only', eyebrow: 'Control', blocks: [{ chart: CHART, caption: 'EUR m' }] });
+
+  const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
+  expect(res.body.measured).toBe(true);
+  const fold = (id: string) => res.body.folds.find((f: any) => f.id === id);
+
+  expect(fold(withProse.body.chunkId).fits, `prose+chart measured ${fold(withProse.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(withProse.body.chunkId).rendersAnything).toBe(true);
+  expect(fold(alone.body.chunkId).fits).toBe(true);
+
+  // the cover is a real fold with real content on it, and it fits too
+  const cover = res.body.folds[0];
+  expect(cover.rendersAnything).toBe(true);
+  expect(cover.fits).toBe(true);
+  expect(await deckTextNow(page)).not.toContain('New fold');
+  expect(await deckTextNow(page)).toContain('A cover, not a placeholder');
+
+  console.log(`  add_fold @1280x720: prose+chart fits=${fold(withProse.body.chunkId).fits}, chart alone fits=${fold(alone.body.chunkId).fits}, cover fits=${cover.fits}`);
+  expect((await invoke(page, 'save_deck', {})).body.validated).toBe(true);
 });

@@ -41,8 +41,7 @@ export function buildThemeTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'list_themes',
       annotations: { readOnlyHint: true },
-      description:
-        'Every palette apply_theme can put on this deck: the four presets the runtime ships (origami-default, boardroom, meadow, dusk) plus anything save_theme has kept in this browser, each with its complete token map and whether it is a preset or saved. Call this before apply_theme rather than guessing a name. Changes nothing.',
+      description: "Every palette apply_theme can use: the four presets the runtime ships (origami-default, boardroom, meadow, dusk) plus anything save_theme kept in this browser, each with its complete token map and whether it is a preset or saved. Call this before apply_theme rather than guessing a name. Changes nothing.",
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const themes = catalog(store);
@@ -57,8 +56,7 @@ export function buildThemeTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'apply_theme',
-      description:
-        'Put a whole named palette on the open Fold — this CHANGES THE COLOURS the human is looking at and re-renders it immediately. `name` is a preset or a saved theme from list_themes; an unknown name is refused with the names that exist, never approximated. The theme\'s tokens are merged onto the ones the Fold is already using, so tokens it does not name (the masthead ones, usually) survive. This is the tool that actually restyles a deck: set_deck_meta({themeName}) only renames the label. Returns the applied tokens and a contrast report. One call is one undo step.',
+      description: "Put a whole named palette on the open Fold — this CHANGES THE COLOURS the human is looking at and re-renders it. `name` is a preset or saved theme from list_themes; an unknown name is refused with the ones that exist. Its tokens merge onto the ones in force, so tokens it does not name survive. This is the tool that restyles a deck: set_deck_meta({themeName}) only renames the label. One undo step.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -92,8 +90,7 @@ export function buildThemeTools(deps: ToolDeps): ToolDef[] {
 
     {
       name: 'save_theme',
-      description:
-        `Keep a palette of your own so apply_theme can put it on this deck (and on the next one) — it is stored IN THIS BROWSER and survives a reload; it does NOT change the open Fold. Pass \`tokens\`, and \`basedOn\` to start from a preset or a saved theme: the base's tokens are taken first and yours merged on top, so a one-colour variant is one token. Only the seventeen custom properties the deck stylesheet actually reads are accepted — bg, paper, ink, ink-soft, rule, rule-soft, accent, tint-a, tint-b, chrome, chrome-ink, chrome-soft, font-display, font-body, chrome-mark, chrome-mark-h, chrome-pad. Anything else (primary, background, textColor — the names every OTHER design system uses) is REFUSED with this list rather than stored and silently ignored. Returns a WCAG contrast report for ink/bg, ink/paper, accent/paper and chrome-ink/chrome, warning on anything under 4.5:1. Saving over one of your own themes replaces it; a preset name is refused.`,
+      description: "Keep a palette of your own so apply_theme can use it — stored IN THIS BROWSER, surviving a reload; it does NOT change the open Fold. `basedOn` takes a preset or saved theme as the base and merges your tokens on top, so a one-colour variant is one token. ONLY the 17 custom properties the deck stylesheet reads are accepted (list_themes reports them); anything else — primary, background, textColor — is REFUSED with that list, never stored and silently ignored. Returns a WCAG contrast report for ink/bg, ink/paper, accent/paper and chrome-ink/chrome, warning under 4.5:1. A preset name is refused; one of your own is replaced.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -142,8 +139,7 @@ export function buildThemeTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'delete_theme',
       annotations: { destructiveHint: true },
-      description:
-        'Forget a theme you saved — it is GONE from this browser and apply_theme can no longer name it (undo does not cover this: it is not part of the Fold). A deck already wearing those colours KEEPS them, because a theme is applied by value. Presets cannot be deleted.',
+      description: "Forget a theme you saved — it is GONE from this browser and apply_theme can no longer name it. undo does not cover this: a theme is not part of the Fold. A deck already wearing those colours KEEPS them, because a theme is applied by value. Presets cannot be deleted.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,

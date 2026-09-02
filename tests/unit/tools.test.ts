@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { FORMAT_BLOCKS, KINDS, buildModel, parseDeck, validateDeck } from '../../vendor/format-dist/index.js';
 import { FLOW_INNER, VENN_INNER } from '../fixtures.js';
+import { formatCell } from '../../vendor/format-dist/index.js';
+import { CHARTS_MODE } from '../../src/core/modes.js';
 import { ACTIVITY_CAP, ActivityLog } from '../../src/core/activity.js';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { GUIDE_TOPICS } from '../../src/core/guide.js';
@@ -8,13 +10,13 @@ import { ProposalStore, restorableProposals } from '../../src/core/proposal-stor
 import { createModeRegistry } from '../../src/core/mode-registry.js';
 import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
-import { COMPOSED_PLOT_HEIGHT } from '../../src/core/compose.js';
+import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, chartPlotHeight } from '../../src/core/compose.js';
 import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
 import { BATCH_MAX } from '../../src/core/batch-tool.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
-import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
+import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harness.js';
 
 /* These run against the REAL vendored @origami/format + @origami/runtime — no mocks, no
    stubs. Every assertion is about observable deck state (what the model holds, what the
@@ -2096,7 +2098,18 @@ describe('origami_guide by topic', () => {
     // the sections the default answer keeps whole must be byte-for-byte the same by topic —
     // a topic that quietly returned a different edition would be a second source of truth
     expect((await h.json('origami_guide', { topic: 'issues' })).knownIssues).toEqual(dflt.knownIssues);
-    expect((await h.json('origami_guide', { topic: 'tools' })).tools).toEqual(dflt.tools);
+
+    /* tools is now abridged in the default answer too: per-turn description bytes are the scarce
+       thing, so the prose the tool DESCRIPTIONS no longer carry moved into this topic. The
+       default keeps the COMPLETE list of names with one line each — an agent must be able to
+       trust it on its own — and each of those lines has to be the real entry's opening, not a
+       separate blurb that could drift from it. */
+    const tools = (await h.json('origami_guide', { topic: 'tools' })).tools;
+    expect(Object.keys(tools).sort()).toEqual(Object.keys(dflt.tools).sort());
+    for (const name of Object.keys(tools)) {
+      expect(tools[name].startsWith(dflt.tools[name]), name).toBe(true);
+    }
+    expect(dflt.toolsHowTo).toMatch(/origami_guide\(\{ topic: "tools" \}\)/);
 
     // kinds is the third abridged section: the default has the index, the topic has the bodies
     const kinds = (await h.json('origami_guide', { topic: 'kinds' })).kinds;
@@ -2160,9 +2173,13 @@ describe('origami_guide by topic', () => {
     expect(sizes.quickstart!, 'quickstart must stay under 3 KB — it is the FIRST thing a cold agent reads').toBeLessThanOrEqual(3_000);
     expect(sizes.default!).toBeLessThanOrEqual(20_000);
     expect(sizes.default!).toBeLessThan(sizes.whole! / 2);
-    // the cheapest routes an agent has: the protocol alone, and the tool catalog alone
+    // the cheapest route an agent has: the protocol alone
     expect(sizes.contract!).toBeLessThan(6_000);
-    expect(sizes.tools!).toBeLessThan(6_000);
+    /* The tools topic is DELIBERATELY the biggest of the cheap ones: it is where the prose the
+       tool descriptions no longer carry now lives. Descriptions are paid on every turn (the
+       /folio/ registry's total is asserted in tests/unit/tool-bytes.test.ts); this answer is
+       fetched at most once, and only when an agent wants the detail. */
+    expect(sizes.tools!).toBeLessThan(10_000);
   });
 
   it('advertises every registered tool in the catalog, default answer included', async () => {
@@ -3047,5 +3064,264 @@ describe('S5 — turns and bytes', () => {
     expect(dflt.start).toMatch(/topic: "quickstart"/);
     expect(dflt.topics.quickstart).toMatch(/read this one first/);
     expect(GUIDE_TOPICS).toContain('quickstart');
+  });
+});
+
+describe('S6 — what BOTH trial agents still tripped on', () => {
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+  const innerOf = (h: ReturnType<typeof harness>, id: string) => h.deck.model().slides.get(id)!.inner;
+
+  /* ---- 1. no placeholder in a fresh deck ---------------------------------------------- */
+
+  it('mints a real COVER, so a fresh Fold carries no placeholder text at all', async () => {
+    /* create_deck used to mint an h2 reading "New fold" and a lede reading "Write here."
+       Haiku overwrote it (read_chunk + write_chunk); Sonnet added its own cover and then had to
+       list_chunks + delete_chunk to remove the placeholder. Between them that is five calls
+       spent on text the deck could have written itself. */
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Q3 review', subtitle: 'Revenue held; delivery cost did not', eyebrow: 'Board pack' });
+
+    expect(created.chunks[0].kind, 'the cover KIND, whose whole schema is .eyebrow / h1 / .lede').toBe('cover');
+    const inner = innerOf(h, created.chunks[0].id);
+    expect(inner).toContain('<p class="eyebrow anim" style="--i:0">Board pack</p>');
+    expect(inner).toContain('<h1 class="anim" style="--i:1">Q3 review</h1>');
+    expect(inner).toContain('<p class="lede anim" style="--i:2">Revenue held; delivery cost did not</p>');
+
+    const text = h.deck.serialize();
+    expect(text, 'no placeholder ANYWHERE in a fresh Fold').not.toContain('New fold');
+    expect(text).not.toContain('Write here.');
+    expect(validateDeck(parseDeck(text))).toEqual([]);
+  });
+
+  it('emits no empty element when subtitle and eyebrow are absent', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Bare' });
+    const inner = innerOf(h, created.chunks[0].id);
+    expect(inner.trim()).toBe('<div class="slide-inner"><h1 class="anim" style="--i:0">Bare</h1></div>');
+    expect(inner).not.toContain('eyebrow');
+    expect(inner).not.toContain('lede');
+    // and it still paints: a cover with a title on it is real content, not a blank fold
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('escapes a title that would otherwise be markup', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'A < B & C', subtitle: '<script>x</script>' });
+    const inner = innerOf(h, h.deck.model().order[0]!);
+    expect(inner).toContain('A &lt; B &amp; C');
+    expect(inner).toContain('&lt;script&gt;');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('leaves the mini pages minting their own free card, not a cover', async () => {
+    // a mini page seeds ONE free card holding its block; the cover kind would be wrong there
+    const mini = await miniHarness(CHARTS_MODE);
+    expect(mini.deck.model().slides.get(mini.deck.model().order[0]!)!.kind).toBe('free');
+  });
+
+  /* ---- 2. required-but-blank diagram fields ------------------------------------------- */
+
+  it('fills flow/graph tone and edge label, which the validator requires and agents read as optional', async () => {
+    /* MEASURED against the vendored validators: a flow node with no `tone` is refused with
+       "tone must be one of accent|green|amber|red or \"\"" and an edge with no `label` with
+       "label must be a string". Both trial agents wrote a diagram without them. "" is the legal
+       blank for both, so filling it is a pure default. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Diagrams' });
+
+    const flow = await h.json('add_fold', {
+      title: 'Process',
+      blocks: [{ flow: { nodes: [{ id: 'a', label: 'Draft', shape: 'pill' }, { id: 'b', label: 'Ship', shape: 'pill' }], edges: [{ from: 'a', to: 'b' }] } }],
+    });
+    const stored = (await h.json('get_block', { chunkId: flow.chunkId, kind: 'flow' })).data;
+    expect(stored.nodes.map((n: any) => n.tone)).toEqual(['', '']);
+    expect(stored.edges.map((e: any) => e.label)).toEqual(['']);
+
+    const graph = await h.json('add_fold', {
+      title: 'Map',
+      blocks: [{ graph: { nodes: [{ id: 'a', label: 'A', x: 20, y: 20 }, { id: 'b', label: 'B', x: 60, y: 60 }], edges: [{ from: 'a', to: 'b' }] } }],
+    });
+    const g = (await h.json('get_block', { chunkId: graph.chunkId, kind: 'graph' })).data;
+    expect(g.nodes.every((n: any) => n.tone === '')).toBe(true);
+    expect(g.edges.every((e: any) => e.label === '')).toBe(true);
+  });
+
+  it('set_block fills them too, and a tone the agent DID write is never overwritten', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Diagrams' });
+    const added = await h.json('add_chunk', { starter: 'flowchart' });
+    await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'flow',
+      data: { nodes: [{ id: 'a', label: 'A', shape: 'pill', tone: 'green' }, { id: 'b', label: 'B', shape: 'box' }], edges: [{ from: 'a', to: 'b', label: 'yes' }, { from: 'b', to: 'a' }] },
+    });
+    const d = (await h.json('get_block', { chunkId: added.chunkId, kind: 'flow' })).data;
+    expect(d.nodes.map((n: any) => n.tone)).toEqual(['green', '']);
+    expect(d.edges.map((e: any) => e.label)).toEqual(['yes', '']);
+  });
+
+  it('does NOT default anything that carries meaning', async () => {
+    /* The line this stops at. A gantt card's `effort` is EASY|MED|DEFER with no blank member, so
+       filling one would be inventing content rather than supplying a blank — it stays a refusal. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Gantt' });
+    const res = await h.call('add_fold', {
+      title: 'Plan',
+      blocks: [{ gantt: { totalWeeks: 4, startDate: null, lenses: [{ name: 'Plan', color: '#4a8cc4' }], swimlanes: [{ name: 'A', owner: 'O' }], cards: [{ id: 'C1', title: 'Do it', swimlane: 'A', start: 'W1', durationWeeks: 1, lens: 'Plan', type: 'Process' }], milestones: [] } }],
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('gantt.card.effort');
+  });
+
+  it('tells an agent where the filling stops', async () => {
+    const h = harness();
+    const kinds = (await h.json('origami_guide', { topic: 'kinds' })).kinds;
+    for (const k of ['flow', 'graph']) {
+      expect(kinds[k].howToAdd, k).toMatch(/REQUIRED-BUT-BLANK/);
+      expect(kinds[k].howToAdd, k).toMatch(/write_chunk and the propose_\* tools do not/);
+    }
+    expect(kinds.gantt.howToAdd).not.toMatch(/REQUIRED-BUT-BLANK/);
+  });
+
+  /* ---- 3. add_ledger currency + inlined shapes ---------------------------------------- */
+
+  it('puts one currency prefix on every currency column, which is what both agents got wrong', async () => {
+    /* MEASURED in the vendored cell-format: `const sym = fmt?.currency ?? '$'`, printed
+       LITERALLY. Both trial agents wrote € in the prose and the table rendered $. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const res = await h.json('add_ledger', {
+      title: 'Q3 budget',
+      currency: '€',
+      columns: [{ label: 'Line' }, { label: 'Plan', align: 'right', format: { kind: 'currency' } }, { label: 'Actual', align: 'right', format: { kind: 'currency' } }, { label: 'Share', format: { kind: 'percent' } }],
+      rows: [['Engineering', '120000', '118400', '0.62'], ['Total', '', '', '']],
+      formulas: { B2: '=SUM(B1:B1)', C2: '=SUM(C1:C1)' },
+    });
+    const cols = (await h.json('get_block', { chunkId: res.chunkId, kind: 'table' })).data.columns;
+    expect(cols[1].format).toEqual({ kind: 'currency', currency: '€' });
+    expect(cols[2].format).toEqual({ kind: 'currency', currency: '€' });
+    expect(cols[3].format, 'a non-currency column is untouched').toEqual({ kind: 'percent' });
+    expect(cols[0].format, 'a column with no format at all is untouched').toBeUndefined();
+    expect(formatCell('1234.5', cols[1].format)).toBe('€1,234.50');
+  });
+
+  it('leaves a column that names its own currency alone, and is a no-op when unset', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const res = await h.json('add_ledger', {
+      title: 'Mixed',
+      currency: '€',
+      columns: [{ label: 'EUR', format: { kind: 'currency' } }, { label: 'GBP', format: { kind: 'currency', currency: '£' } }],
+      rows: [['1', '2']],
+    });
+    const cols = (await h.json('get_block', { chunkId: res.chunkId, kind: 'table' })).data.columns;
+    expect(cols.map((c: any) => c.format.currency)).toEqual(['€', '£']);
+
+    const plain = await h.json('add_ledger', { title: 'Default', columns: [{ label: 'Cost', format: { kind: 'currency' } }], rows: [['1']] });
+    const one = (await h.json('get_block', { chunkId: plain.chunkId, kind: 'table' })).data.columns[0];
+    expect(one.format.currency, 'unset means the format library decides').toBeUndefined();
+    expect(formatCell('1234.5', one.format), 'and what it decides is $').toBe('$1,234.50');
+  });
+
+  it('carries the kpis / totals / formulas shapes in its own description, so no schema round trip is needed', async () => {
+    /* The description is the only thing an agent has when it decides how to call a tool. A KPI
+       built from it ALONE has to validate — so the example is parsed straight out of the text. */
+    const h = harness();
+    const d = h.registry.get('add_ledger')!.description;
+    const kpi = JSON.parse(/`kpis` pins cards above the table: (\[.*?\]) /.exec(d)![1]!);
+    const totals = JSON.parse(/`totals` is a footer row: (\{.*?\}\}) /.exec(d)![1]!);
+    expect(d).toMatch(/format` is an OBJECT/);
+    expect(d).toMatch(/prints "\$"/);
+
+    await h.json('create_deck', { title: 'From the description' });
+    const res = await h.json('add_ledger', {
+      title: 'KPI',
+      currency: '€',
+      columns: [{ label: 'Line' }, { label: 'Plan', format: { kind: 'currency' } }],
+      rows: [['Engineering', '120000'], ['Design', '42000'], ['x', ''], ['x', ''], ['Total', '']],
+      formulas: { B5: '=SUM(B1:B4)' },
+      kpis: kpi,
+      totals,
+    });
+    expect(res.blocks).toEqual([{ kind: 'table', nth: 0 }]);
+    expect(validateDeck(parseDeck(h.deck.serialize())), 'a ledger built from the description alone must be VALID').toEqual([]);
+  });
+
+  /* ---- 5. fit with prose --------------------------------------------------------------- */
+
+  it('shrinks a composed chart when the card also carries prose', async () => {
+    /* MEASURED at 1280x720 through the real render: the same lede+chart fold is 849px at
+       plotHeight 318, 781 at 250, 751 at 220, 731 at 200 and FITS at 180. A paragraph costs the
+       chart 107px, which is more than the distance from 250 to the floor — so any prose on the
+       card puts the chart at the floor. The e2e test measures it; this pins the arithmetic. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Fit' });
+
+    const alone = await h.json('add_fold', { title: 'Chart only', blocks: [{ chart: CHART }] });
+    expect((await h.json('get_block', { chunkId: alone.chunkId, kind: 'chart' })).data.plotHeight).toBe(COMPOSED_PLOT_HEIGHT);
+
+    for (const prose of [{ text: '<p class="lede">A line.</p>' }, { bullets: ['a', 'b'] }, { stats: [{ value: '1', label: 'x' }] }, { quote: { text: 'Said.' } }]) {
+      const withProse = await h.json('add_fold', { title: 'With prose', blocks: [prose, { chart: CHART }] });
+      const ph = (await h.json('get_block', { chunkId: withProse.chunkId, kind: 'chart' })).data.plotHeight;
+      expect(ph, JSON.stringify(Object.keys(prose))).toBe(MIN_PLOT_HEIGHT);
+      expect(ph).toBeLessThan(COMPOSED_PLOT_HEIGHT);
+    }
+
+    // the floor holds however much prose is piled on
+    const crowded = await h.json('add_fold', { title: 'Crowded', blocks: [{ text: '<p>a</p>' }, { bullets: ['b'] }, { quote: { text: 'c' } }, { chart: CHART }] });
+    expect((await h.json('get_block', { chunkId: crowded.chunkId, kind: 'chart' })).data.plotHeight).toBe(MIN_PLOT_HEIGHT);
+
+    // and a chart that names its own height is obeyed, prose or not
+    const own = await h.json('add_fold', { title: 'Own', blocks: [{ text: '<p>a</p>' }, { chart: { ...CHART, plotHeight: 600 } }] });
+    expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(600);
+  });
+
+  it('states the rule in the arithmetic, not just in a comment', () => {
+    expect(chartPlotHeight([])).toBe(COMPOSED_PLOT_HEIGHT);
+    expect(chartPlotHeight([{ chart: {} }])).toBe(COMPOSED_PLOT_HEIGHT);
+    expect(chartPlotHeight([{ text: '<p>a</p>' }])).toBe(MIN_PLOT_HEIGHT);
+    expect(MIN_PLOT_HEIGHT).toBe(180);
+    expect(COMPOSED_PLOT_HEIGHT).toBeGreaterThan(MIN_PLOT_HEIGHT);
+  });
+
+  /* ---- 4. per-turn bytes kept honest ---------------------------------------------------- */
+
+  it('keeps every destructive warning and measured caveat that the trim could have cost', () => {
+    /* The budget is only worth having if it did not buy the bytes by dropping a warning. Each of
+       these is a caveat an agent cannot recover from being wrong about. */
+    const h = harness();
+    const d = (n: string) => h.registry.get(n)!.description;
+
+    expect(d('delete_chunk')).toMatch(/removes the slide template entirely/);
+    expect(d('delete_chunk')).toMatch(/set_chunk_meta\(\{chunkId, hidden:false\}\)/);
+    expect(d('delete_theme')).toMatch(/GONE from this browser/);
+    expect(d('create_deck')).toMatch(/discard:true/);
+    expect(d('save_deck')).toMatch(/saved:true means/);
+    expect(d('save_deck')).toMatch(/NEVER reported as saved/);
+    expect(d('export_deck')).toMatch(/writes NOTHING, saves NOTHING/);
+    expect(d('inspect_render')).toMatch(/NOT a clean bill of health unless measured is true/);
+    expect(d('set_deck_meta')).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
+    expect(d('save_theme')).toMatch(/REFUSED/);
+    expect(d('move_chunk')).toMatch(/REFUSED rather than clamped/);
+    expect(d('undo')).toMatch(/no redo/);
+    expect(d('add_custom_fold')).toMatch(/padlock/);
+
+    // and every writer still says it writes — a dropped annotation must never be the difference
+    for (const name of ['write_chunk', 'add_chunk', 'add_fold', 'add_ledger', 'set_block', 'move_chunk', 'set_chunk_meta', 'set_deck_meta', 'apply_theme', 'run_batch']) {
+      expect(d(name), name).toMatch(/CHANGES THE (DECK|COLOURS|OPEN FOLD)/);
+    }
+    for (const name of ['add_custom_fold', 'define_block', 'delete_block', 'set_header', 'set_fold_type']) {
+      expect(d(name), name).toMatch(/CHANGES THE OPEN FOLD/);
+    }
+  });
+
+  it('undo points at a guide entry that really lists the writers it covers', async () => {
+    // the description bought its bytes back by pointing; the pointer has to be true
+    const h = harness();
+    expect(h.registry.get('undo')!.description).toMatch(/origami_guide\(\{topic:"tools"\}\) lists them/);
+    const tools = (await h.json('origami_guide', { topic: 'tools' })).tools;
+    for (const name of ['write_chunk', 'add_fold', 'add_ledger', 'set_block', 'apply_theme', 'delete_chunk']) {
+      expect(tools.undo, name).toContain(name);
+    }
   });
 });

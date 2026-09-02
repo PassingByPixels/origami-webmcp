@@ -41,6 +41,7 @@ import {
   type DeckModel,
   type Violation,
 } from '../../vendor/format-dist/index.js';
+import { fillDiagramDefaults } from './data-blocks.js';
 import type { DeckStore } from './deck-store.js';
 import { blockJson, dataFigure } from './fold-starters.js';
 import { randomHex } from './ids.js';
@@ -522,8 +523,7 @@ function folioTools(deck: DeckStore): ToolDef[] {
     {
       name: 'get_block',
       annotations: { readOnlyHint: true },
-      description:
-        `READ A DATA BLOCK BEFORE YOU REPLACE IT. Returns the JSON of one data block on one fold, exactly as it is stored, plus its caption and its kind schema. Address it by chunkId + kind (${KIND_LIST}), and nth when the fold carries more than one of that kind (0 = the first, the default). Leave kind out to get EVERY data block on that fold — kind, nth, caption and data for each — which is one call instead of one per block. set_block REPLACES a block's JSON wholesale rather than patching it, so read it here, edit what you read, and send the whole thing back. Changes nothing.`,
+      description: "READ A DATA BLOCK BEFORE YOU REPLACE IT. Returns one data block's JSON exactly as stored, plus its caption and kind schema. Address it by chunkId + kind (chart | venn | flow | graph | gantt | draw | table) and nth when the fold holds more than one of that kind (0 = first, the default). Leave kind out to get EVERY data block on the fold — one call instead of one per block. set_block REPLACES a block rather than patching it, so read here, edit what you read, send the whole thing back. Changes nothing.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -560,8 +560,7 @@ function folioTools(deck: DeckStore): ToolDef[] {
 
     {
       name: 'set_block',
-      description:
-        `Replace the WHOLE JSON of one data block on one fold — this CHANGES THE DECK the human is looking at and re-renders it immediately. Address the block by chunkId + kind (${KIND_LIST}) + nth (0 = the first, the default), and pass the complete data: it REPLACES what is there, so call get_block first if you mean to keep part of it. The kind's own validator runs before anything is applied and a bad shape is refused with the violation named, leaving the fold untouched; a table's formulas are baked into values on the way in. A fold that carries no block of that kind is refused with the kinds it does carry — this tool never creates a block, use add_fold for that. One call is one undo step.`,
+      description: "Replace the WHOLE JSON of one data block on one fold — this CHANGES THE DECK the human is looking at and re-renders it. Address it by chunkId + kind (chart | venn | flow | graph | gantt | draw | table) + nth (0 = first, the default) and pass the COMPLETE data: it REPLACES what is there, so call get_block first to keep part of it. The kind's validator runs before anything is applied and a bad shape is refused with the violation named; a table's formulas are baked; a flow/graph node with no `tone` and an edge with no `label` get \"\" (their legal blank, no meaning changes). A fold with no block of that kind is refused with the kinds it has — this never CREATES one, use add_fold. One undo step.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -574,8 +573,10 @@ function folioTools(deck: DeckStore): ToolDef[] {
         },
         required: ['chunkId', 'kind', 'data'],
       },
-      execute: async ({ chunkId, kind, data, caption, nth }) => {
+      execute: async ({ chunkId, kind, data: raw, caption, nth }) => {
         const inner = innerOf(chunkId);
+        // flow/graph tone and edge label are required with "" as their blank — a pure default
+        const data = fillDiagramDefaults(kind, raw);
         const n = nth ?? 0;
         const site = figureAround(inner, kind, n);
         const script = site ?? dataScript(inner, kind, n);

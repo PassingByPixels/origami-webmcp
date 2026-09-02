@@ -31,6 +31,10 @@ export interface BlankDeckOpts {
   inner?: string;
   /** The single fold's sidebar label. Default "Cover". */
   label?: string;
+  /** The single fold's KIND. Default 'free' — what the stdio server's new-deck mints, and what
+      a mini tool page wants (a free card holding one block). create_deck passes 'cover', which
+      is a registered kind whose schema is exactly .eyebrow / h1 / .lede. */
+  kind?: string;
 }
 
 /* The dynamic import below code-splits the 440 KB runtime-dist chunk out of the first paint —
@@ -48,7 +52,7 @@ export function warmDeckAssembly(): void {
 
 export async function assembleBlankDeck(opts: BlankDeckOpts): Promise<string> {
   const { assembleDeck } = await import('../../vendor/runtime-dist/index.js');
-  const { title, foldType, now, id, slideId, runtimeJs, inner = FREE_STARTER_INNER, label = 'Cover' } = opts;
+  const { title, foldType, now, id, slideId, runtimeJs, inner = FREE_STARTER_INNER, label = 'Cover', kind = 'free' } = opts;
   const manifest: Manifest = {
     v: FORMAT_VERSION,
     id,
@@ -60,8 +64,8 @@ export async function assembleBlankDeck(opts: BlankDeckOpts): Promise<string> {
     ...(foldType !== 'deck' ? { foldType } : {}),
     order: [slideId],
     hidden: [],
-    slides: { [slideId]: { kind: 'free', label, notes: '' } },
-    kinds: ['free'],
+    slides: { [slideId]: { kind, label, notes: '' } },
+    kinds: [kind],
     customKinds: [],
     capabilities: [],
   };

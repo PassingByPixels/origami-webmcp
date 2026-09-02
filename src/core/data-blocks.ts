@@ -56,3 +56,37 @@ export function validateDataBlocks(inner: string, blocks: Record<string, Composi
   }
   return out;
 }
+
+/**
+ * Fill the two diagram fields that are REQUIRED but read as optional.
+ *
+ * validateFlowData refuses a node with no `tone` ("tone must be one of accent|green|amber|red
+ * or \"\"") and an edge with no `label` ("label must be a string"); validateGraphData refuses
+ * both the same way. Every schema example carries them, so an agent that copies the example is
+ * fine — and both cold-agent trials wrote a diagram without them and ate a refusal, because a
+ * field whose only legal blank value is "" reads as optional to anyone who has not read the
+ * validator.
+ *
+ * Filling them is a PURE DEFAULT: "" is the no-tone tone and the no-label label, so the picture
+ * is byte-identical to one the agent wrote them into by hand. Nothing that carries MEANING is
+ * defaulted this way — a gantt card's `effort` is EASY|MED|DEFER with no blank member, so
+ * guessing one would be inventing content, and it stays a refusal.
+ *
+ * Returns a COPY; the caller's object is never mutated.
+ */
+export function fillDiagramDefaults(kind: string, data: unknown): unknown {
+  if ((kind !== 'flow' && kind !== 'graph') || data === null || typeof data !== 'object' || Array.isArray(data)) return data;
+  const d = data as { nodes?: unknown; edges?: unknown };
+  const out: Record<string, unknown> = { ...(data as object) };
+  if (Array.isArray(d.nodes)) {
+    out.nodes = d.nodes.map((n) =>
+      n !== null && typeof n === 'object' && !Array.isArray(n) && (n as { tone?: unknown }).tone === undefined ? { ...(n as object), tone: '' } : n
+    );
+  }
+  if (Array.isArray(d.edges)) {
+    out.edges = d.edges.map((e) =>
+      e !== null && typeof e === 'object' && !Array.isArray(e) && (e as { label?: unknown }).label === undefined ? { ...(e as object), label: '' } : e
+    );
+  }
+  return out;
+}

@@ -27,6 +27,7 @@
         correctly at every frame AND stays inline-editable (the editor skips [data-count-to]). */
 
 import { escText, blockFigure, validatorFor } from './block-tools.js';
+import { fillDiagramDefaults } from './data-blocks.js';
 import type { Violation } from '../../vendor/format-dist/index.js';
 
 /** The data kinds a composed block may be, in the order add_fold documents them. */
@@ -44,6 +45,42 @@ export const COMPOSE_KINDS = [...COMPOSE_DATA_KINDS, ...COMPOSE_PROSE_KINDS] as 
  * keeping the marks large enough to read — see the fit test in tests/e2e/app.spec.ts.
  */
 export const COMPOSED_PLOT_HEIGHT = 250;
+
+/** The chart schema's own floor. A plot box under this is not a chart, it is a sparkline. */
+export const MIN_PLOT_HEIGHT = 180;
+
+/** What ONE prose block costs a chart on the same card, in viewBox units. MEASURED at 1280x720
+    through the real render: the same chart fold is 742px with no prose and 849px with one lede
+    paragraph above it, and the slope of rendered height against plotHeight is exactly 1.0 px
+    per unit (318 -> 849, 250 -> 781, 200 -> 731). So a paragraph costs 107. */
+const PROSE_COST = 107;
+
+/**
+ * How tall a composed chart's plot box may be on THIS card.
+ *
+ * MEASURED, not chosen, at 1280x720 through the real render:
+ *
+ *     eyebrow + h2 + captioned chart          plotHeight 318 -> 849 with a lede, 742 without
+ *     the same fold WITH one lede paragraph   318 -> 849 · 250 -> 781 · 220 -> 751 · 200 -> 731 · 180 -> FITS
+ *
+ * The schema's default of 318 overflows even with no prose (that is the 22px a cold agent hit);
+ * 250 fits. Then Haiku's trial fold added a lede above the chart and overflowed again, because
+ * the paragraph is height the chart no longer has — 107px of it.
+ *
+ * So every prose block on the card (text | bullets | stats | quote) takes PROSE_COST off the
+ * plot box, floored at MIN_PLOT_HEIGHT. In practice that makes the rule binary: one paragraph
+ * costs more than the distance from 250 to the floor, so a card with any prose on it gets 180.
+ * The floor is real rather than cosmetic — below it the marks stop being readable, and the
+ * honest answer for a card that still will not fit is that it is overfull, which is
+ * inspect_render's to say (a THREE-line paragraph will still overflow at 180). A chart that
+ * names its own plotHeight is obeyed and none of this applies.
+ */
+export function chartPlotHeight(blocks: unknown[]): number {
+  const prose = blocks.filter(
+    (b) => b !== null && typeof b === 'object' && !Array.isArray(b) && COMPOSE_PROSE_KINDS.some((k) => (b as Record<string, unknown>)[k] !== undefined)
+  ).length;
+  return Math.max(MIN_PLOT_HEIGHT, COMPOSED_PLOT_HEIGHT - prose * PROSE_COST);
+}
 
 /** A plain integer is the only value the runtime's count-up animates correctly. */
 const INTEGER = /^-?\d+$/;
@@ -71,8 +108,9 @@ const statCard = (value: unknown, label: unknown): string => {
   return `<div class="stat-card">${big}<div class="lbl">${escText(String(label ?? ''))}</div></div>`;
 };
 
-/** One block's markup, or the reason it cannot be built. `i` is only for the error message. */
-function blockHtml(b: Record<string, unknown>, i: number): { html: string; kind: string } | { error: string; extra?: Record<string, unknown> } {
+/** One block's markup, or the reason it cannot be built. `i` is only for the error message;
+    `plotHeight` is the height the CARD decided a chart on it can afford (see chartPlotHeight). */
+function blockHtml(b: Record<string, unknown>, i: number, plotHeight: number): { html: string; kind: string } | { error: string; extra?: Record<string, unknown> } {
   const named = COMPOSE_KINDS.filter((k) => b[k] !== undefined);
   if (named.length === 0) {
     return { error: `blocks[${i}] names no block — each block is exactly one of ${COMPOSE_KINDS.join(', ')}`, extra: { availableBlocks: [...COMPOSE_KINDS] } };
@@ -88,10 +126,13 @@ function blockHtml(b: Record<string, unknown>, i: number): { html: string; kind:
       return { error: `blocks[${i}].${kind} must be the block's JSON object — got ${JSON.stringify(value)}` };
     }
     // a chart with no plot height of its own is sized to FIT; one that names its own is obeyed
-    const data =
+    const sized =
       kind === 'chart' && (value as { plotHeight?: unknown }).plotHeight === undefined
-        ? { ...(value as object), plotHeight: COMPOSED_PLOT_HEIGHT }
+        ? { ...(value as object), plotHeight }
         : value;
+    // flow/graph tone and edge label are REQUIRED with "" as their blank; filling them changes
+    // no meaning and saves the refusal both trial agents ate (see fillDiagramDefaults)
+    const data = fillDiagramDefaults(kind, sized);
     const violations: Violation[] = validatorFor(kind)!(data);
     if (violations.length > 0) {
       return { error: `blocks[${i}].${kind} breaks its own schema — NOTHING was added and the Fold is unchanged`, extra: { violations } };
@@ -141,13 +182,14 @@ export function composeFold(args: ComposeArgs): ComposeResult {
   const columns = args.columns ?? 1;
   if (columns !== 1 && columns !== 2) return { error: `columns must be 1 or 2 — got ${JSON.stringify(args.columns)}` };
 
+  const plotHeight = chartPlotHeight(args.blocks);
   const parts: string[] = [];
   const blocks: ComposedBlock[] = [];
   const seen: Record<string, number> = {};
   for (let i = 0; i < args.blocks.length; i++) {
     const raw = args.blocks[i];
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { error: `blocks[${i}] must be an object naming one block kind` };
-    const built = blockHtml(raw as Record<string, unknown>, i);
+    const built = blockHtml(raw as Record<string, unknown>, i, plotHeight);
     if ('error' in built) return built;
     parts.push(built.html);
     if ((COMPOSE_DATA_KINDS as readonly string[]).includes(built.kind)) {
@@ -180,4 +222,28 @@ export function labelFromTitle(title: string, max = 28): string {
   const cut = t.slice(0, max);
   const space = cut.lastIndexOf(' ');
   return (space > max - 10 ? cut.slice(0, space) : cut).trimEnd() + '…';
+}
+
+/**
+ * The COVER a fresh Fold opens on — the deck's own title, not a placeholder.
+ *
+ * create_deck used to mint FREE_STARTER_INNER: an h2 reading "New fold" and a lede reading
+ * "Write here." Both cold-agent trials paid for that. One overwrote it (read_chunk +
+ * write_chunk, two turns); the other added its own cover fold and then had to list_chunks and
+ * delete_chunk to get rid of the placeholder, three. The deck already knows its title, so the
+ * first fold can simply BE the cover.
+ *
+ * The markup is the `cover` kind's own schema, verbatim: ".slide-inner wraps everything /
+ * .eyebrow = small uppercase label - h1 = deck title - .lede = supporting paragraph". An absent
+ * eyebrow or subtitle emits NO element rather than a placeholder one, so a fresh Fold contains
+ * no invented text anywhere.
+ */
+export function coverInner(title: string, subtitle?: string, eyebrow?: string): string {
+  const line = (cls: string, tag: string, text: string, i: number): string =>
+    `<${tag} class="${cls}anim" style="--i:${i}">${escText(text)}</${tag}>`;
+  const parts: string[] = [];
+  if (eyebrow && eyebrow.trim()) parts.push(line('eyebrow ', 'p', eyebrow.trim(), parts.length));
+  parts.push(line('', 'h1', title.trim(), parts.length));
+  if (subtitle && subtitle.trim()) parts.push(line('lede ', 'p', subtitle.trim(), parts.length));
+  return `<div class="slide-inner">${parts.join('')}</div>`;
 }

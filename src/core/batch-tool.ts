@@ -34,8 +34,7 @@ function body(res: ToolResult): unknown {
 export function buildBatchTool(registry: ToolRegistry): ToolDef {
   return {
     name: 'run_batch',
-    description:
-      `Run several tool calls in ONE turn — this CHANGES THE DECK exactly as the same calls made one at a time would, and re-renders after each. Pass \`calls\` as [{tool, args}] and they run IN ORDER, stopping at the FIRST failure: you get every result up to and including it, so a batch that half-lands tells you exactly where. Each call goes through the normal route, so the Activity feed records every step and undo reverses them ONE AT A TIME (a batch of six folds is six undo steps, not one). Use it for the bulk of a build — create_deck then five add_fold calls then apply_theme is one turn instead of seven. Do NOT put run_batch inside itself (refused), and do not exceed ${BATCH_MAX} calls. A read-only call is fine in a batch, but its answer only reaches you when the whole batch returns — put inspect_render at the END, or call it on its own.`,
+      description: "Run several tool calls in ONE turn — this CHANGES THE DECK exactly as the same calls made one at a time would. `calls` is [{tool, args}] run IN ORDER, stopping at the FIRST failure; you get every result up to and including it, so a batch that half-lands says where it stopped and what landed. Each call takes the normal route, so the feed records every step and undo reverses them ONE AT A TIME. create_deck then five add_fold calls then apply_theme is one turn instead of seven. Nesting is refused, the cap is 25, and a read-only answer only arrives when the batch returns — put inspect_render last.",
     inputSchema: {
       type: 'object',
       additionalProperties: false,

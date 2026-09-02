@@ -123,7 +123,7 @@ test('an agent builds a scroll Fold with two data kinds and resolves its own pro
   /* 7. the table of contents agrees */
   const toc = await tool(page, 'list_chunks');
   expect(toc.body.foldType).toBe('scroll');
-  expect(toc.body.chunks.map((c: any) => c.kind)).toEqual(['free', 'venn', 'flow']);
+  expect(toc.body.chunks.map((c: any) => c.kind)).toEqual(['cover', 'venn', 'flow']);
   expect(toc.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'What a Fold is', 'The review path']);
 
   /* 8. finish on save_deck — no writable handle in a fresh tab, so it must say so, not throw */
