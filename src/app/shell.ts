@@ -8,6 +8,7 @@ import { warmDeckAssembly } from '../core/blank-deck.js';
 import type { ToolMode } from '../core/modes.js';
 import { ActivityRail } from './activity.js';
 import { TestConsole } from './console.js';
+import { ThemeControl } from './theme-control.js';
 import { DEMO_CALLS, bindRefs, learnRefs } from './demo-script.js';
 import { Popover } from './popover.js';
 import { Toasts } from './toast.js';
@@ -53,6 +54,11 @@ export function bootShell(mode: ToolMode): void {
   const deck = new DeckStore();
   const proposals = new ProposalStore();
   const previewFrame = $<HTMLIFrameElement>('preview');
+  // a palette an agent saves belongs to the human, not to one session — localStorage keeps it
+  // across reloads (and a browser that refuses storage degrades to in-memory). Named so the
+  // Theme button (mode.landing only — see below) can read it directly, the same store the
+  // theme tools themselves write.
+  const themeStore = new LocalThemeStore();
   const registry = createModeRegistry(
     {
       deck,
@@ -61,9 +67,7 @@ export function bootShell(mode: ToolMode): void {
       // inspect_render measures in its OWN off-screen frame at a fixed, stated viewport, so the
       // verdict does not change with the human's window size and the visible deck is never disturbed.
       measure: measureRender,
-      // a palette an agent saves belongs to the human, not to one session — localStorage keeps
-      // it across reloads (and a browser that refuses storage degrades to in-memory)
-      themes: new LocalThemeStore(),
+      themes: themeStore,
     },
     mode
   );
@@ -155,6 +159,13 @@ export function bootShell(mode: ToolMode): void {
 
   /** Run a tool as the human. One code path, so a click is recorded exactly like an agent call. */
   const asHuman = (name: string, args: unknown) => registry.invoke(name, args, 'human');
+
+  /* The Theme button. Only on /folio/ (mode.landing) — a mini page's registry never gets
+     buildThemeTools (mode-registry.ts: they list their own tools explicitly and theme-tools.ts
+     is not among them), so there is nothing for this control to call there. Declared here,
+     built further down once its elements exist, so the deck.subscribe handler below can always
+     call `themeControl?.paint()` without caring which page it is. */
+  let themeControl: ThemeControl | null = null;
 
   const rail = new ActivityRail(
     registry.activity,
@@ -251,6 +262,9 @@ export function bootShell(mode: ToolMode): void {
       preview.schedule(deck);
     }
     refreshChrome();
+    // open/change/close every one changes what the button should show — a fresh Fold, an edited
+    // one, or none open at all.
+    themeControl?.paint();
     void review.refresh();
     // Opening or closing resets the undo stack, and neither is a tool call, so the rail has to be
     // told: otherwise the Undo button outlives the history it promises to reverse.
@@ -386,6 +400,11 @@ export function bootShell(mode: ToolMode): void {
     /* The landing's quiet line opens the SAME agent-access card the status dot does — one
        explanation of WebMCP in the app, reachable from the screen a newcomer is actually on. */
     $('btn-connect').addEventListener('click', () => statusPopover.show());
+
+    themeControl = new ThemeControl(
+      { button: $('btn-theme'), swatch: $('theme-swatch'), label: $('theme-label'), panel: $('theme-popover') },
+      { deck, store: themeStore, asHuman, say }
+    );
 
     wireReplay();
   }

@@ -45,7 +45,15 @@ The old 34px status bar row is gone. Its tenants move:
 - Left: crane mark 26px · "Origami" (serif 20px) · "FOLIO WEB" small-caps tag (the tag is
   one string — swap when the product name lands).
 - Center: deck title only (serif 15px, ink-soft, ellipsis). No filename here.
-- Right: status dot · `New` · `Open…` · `Save` (primary, with a chevron menu).
+- Right: status dot · **Theme** · `New` · `Open…` · `Save` (primary, with a chevron menu).
+  - **Theme**: a small dot in the deck's own `accent` token, plus the matching theme's label
+    ("Paper", "Boardroom", …, a saved theme's own name, or "Custom" when the tokens on the deck
+    match none of them). Disabled with no Fold open. Click → the popover primitive lists every
+    preset and saved theme (a 3-swatch strip, the label, a `saved` tag, the current one marked);
+    a row applies it, a saved row's quiet Delete forgets it. Both go through the registry as a
+    `human` call — the same list_themes / apply_theme / delete_theme an agent has — so the rail
+    narrates it and apply_theme's Undo works the normal way. `/folio/` only: a mini page's
+    registry never gets the theme tools (mode-registry.ts), so there is nothing here to show.
   - **Status dot**: 8px circle. Green = agent access on (popover: "Agent access is on —
     N tools registered. An agent in this browser can author this Fold." — N is THIS page's
     registry, never a constant: a mini tool page registers a different set), grey = off
