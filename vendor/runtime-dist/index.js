@@ -3752,6 +3752,90 @@ function videoEmbedUrl(data) {
   return spec.embedUrl(data.videoId);
 }
 
+// ../format/dist/tracker-data.js
+var TRACKER_STATUSES = ["Open", "In progress", "Blocked", "Closed"];
+var TRACKER_COLUMNS = ["action", "owner", "comments", "due", "status", "done"];
+var TRACKER_COLUMN_LABELS = {
+  action: "Action",
+  owner: "Owner",
+  comments: "Comments",
+  due: "Due",
+  status: "Status",
+  done: "Done"
+};
+var TRACKER_COLUMN_TYPES = ["text", "person", "date", "select", "check", "number"];
+var TRACKER_MAX_COLUMNS = 24;
+var TRACKER_TYPE_WIDTHS = {
+  text: 220,
+  person: 140,
+  date: 120,
+  select: 150,
+  check: 64,
+  number: 100
+};
+var TRACKER_LEGACY_WIDTHS = {
+  action: "26%",
+  owner: "12%",
+  comments: "",
+  due: "9%",
+  status: "12%",
+  done: "64px"
+};
+var TRACKER_LEGACY_TYPES = {
+  action: "text",
+  owner: "person",
+  comments: "text",
+  due: "date",
+  status: "select",
+  done: "check"
+};
+function trackerCustomColumns(data) {
+  return Array.isArray(data.columns) ? data.columns : null;
+}
+function trackerLegacyColumnSpecs(data) {
+  const labels = (Array.isArray(data.columns) ? void 0 : data.columns) ?? {};
+  const hidden = new Set(data.hidden ?? []);
+  const statuses = data.statuses && data.statuses.length > 0 ? data.statuses.slice() : [...TRACKER_STATUSES];
+  return TRACKER_COLUMNS.map((key) => {
+    const override = labels[key];
+    const spec = {
+      key,
+      label: typeof override === "string" && override.length > 0 ? override : TRACKER_COLUMN_LABELS[key],
+      type: TRACKER_LEGACY_TYPES[key]
+    };
+    if (key === "status") {
+      spec.options = statuses;
+      spec.status = true;
+    }
+    if (key === "done")
+      spec.done = true;
+    if (key !== "action" && hidden.has(key))
+      spec.hidden = true;
+    return spec;
+  });
+}
+function trackerColumnSpecs(data) {
+  return trackerCustomColumns(data) ?? trackerLegacyColumnSpecs(data);
+}
+function trackerVisibleColumnSpecs(data) {
+  return trackerColumnSpecs(data).filter((c) => c.hidden !== true);
+}
+function trackerStatusColumn(data) {
+  return trackerColumnSpecs(data).find((c) => c.type === "select" && c.status === true) ?? null;
+}
+function trackerDoneColumn(data) {
+  return trackerColumnSpecs(data).find((c) => c.type === "check" && c.done === true) ?? null;
+}
+function trackerStatuses(data) {
+  return trackerStatusColumn(data)?.options ?? [];
+}
+function trackerColumnWidth(data, spec) {
+  if (!trackerCustomColumns(data))
+    return TRACKER_LEGACY_WIDTHS[spec.key] ?? "";
+  const w = typeof spec.width === "number" ? spec.width : TRACKER_TYPE_WIDTHS[spec.type];
+  return `${w}px`;
+}
+
 // ../format/dist/table-core.js
 var A1_RE = /^([A-Z]+)([0-9]+)$/;
 var colA1 = (c) => {
@@ -7563,7 +7647,7 @@ function tableView(led) {
 function buildLedgerCard(slide, led, mount, doc) {
   const root = el2("div", "o-ledger", mount);
   const card = el2("div", "lv", root);
-  if (doc && doc.sheets.length >= 2) buildTabPills(slide, doc, card);
+  if (doc && (doc.sheets.length >= 2 || !!doc.sheets[0]?.name)) buildTabPills(slide, doc, card);
   if (led.views && led.views.length >= 2) buildViewPills(slide, led, card, doc);
   if (led.kpis.length) buildKpis(led, card);
   if (led.orefreshed) el2("div", "lv-asof", card).textContent = "as of " + led.orefreshed.slice(0, 10);
@@ -7862,7 +7946,8 @@ function mountTables(slide) {
     if (!root) return;
     const doc = parseTableDoc(root);
     if (!doc) return renderTableError(root);
-    renderTable(root, doc.sheets[doc.active].led, doc.sheets.length >= 2 ? doc : void 0);
+    const named = doc.sheets.length >= 2 || !!doc.sheets[0]?.name;
+    renderTable(root, doc.sheets[doc.active].led, named ? doc : void 0);
   });
 }
 var finalizeTables = mountTables;
@@ -8275,12 +8360,85 @@ function finalizeGrids(slide) {
 }
 
 // src/tracker.ts
-var TRACKER_STATUSES = ["Open", "In progress", "Blocked", "Closed"];
-function trackerStatuses(data) {
-  return data.statuses && data.statuses.length > 0 ? data.statuses : TRACKER_STATUSES;
+var TYPE_LABELS = {
+  text: "Text",
+  person: "Person",
+  date: "Date",
+  select: "Choice",
+  check: "Check",
+  number: "Number"
+};
+var NEW_SELECT_OPTIONS = ["To do", "Doing", "Done"];
+var SEARCHABLE = ["text", "person", "date", "select"];
+function cellText(row, spec) {
+  const v = row[spec.key];
+  return v === void 0 || v === null ? "" : String(v);
+}
+function coerceCell(v, type, options) {
+  if (type === "check") return v === true || v === "true" || typeof v === "number" && v !== 0;
+  if (type === "number") {
+    const raw = v === void 0 || v === null ? "" : String(v).trim();
+    const n = Number(raw);
+    return raw !== "" && Number.isFinite(n) ? n : "";
+  }
+  if (type === "select") {
+    const s2 = v === void 0 || v === null ? "" : String(v);
+    return options.includes(s2) ? s2 : options[0] ?? "";
+  }
+  return v === void 0 || v === null ? "" : String(v);
 }
 function normalizeTrackerData(raw) {
   const d = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  if (Array.isArray(d.columns)) {
+    const specs = normalizeColumnSpecs(d.columns);
+    if (specs.length > 0) return normalizeCustomTracker(d, specs);
+  }
+  return normalizeLegacyTracker(d);
+}
+function normalizeColumnSpecs(raw) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  let hasStatus = false;
+  let hasDone = false;
+  for (const item of raw.slice(0, TRACKER_MAX_COLUMNS)) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const c = item;
+    const key = typeof c.key === "string" ? c.key : "";
+    if (!key || seen.has(key)) continue;
+    let type = TRACKER_COLUMN_TYPES.includes(c.type) ? c.type : "text";
+    const options = Array.isArray(c.options) && c.options.length > 0 && c.options.every((s2) => typeof s2 === "string") ? c.options.slice(0, 12).map((s2) => s2.slice(0, 40)) : void 0;
+    if (type === "select" && !options) type = "text";
+    seen.add(key);
+    const spec = {
+      key,
+      label: typeof c.label === "string" && c.label.trim().length > 0 ? c.label.trim().slice(0, 40) : key,
+      type
+    };
+    if (type === "select" && options) spec.options = options;
+    if (typeof c.width === "number" && Number.isFinite(c.width)) spec.width = Math.round(c.width);
+    if (c.hidden === true) spec.hidden = true;
+    if (type === "select" && c.status === true && !hasStatus) {
+      spec.status = true;
+      hasStatus = true;
+    }
+    if (type === "check" && c.done === true && !hasDone) {
+      spec.done = true;
+      hasDone = true;
+    }
+    out.push(spec);
+  }
+  return out;
+}
+function normalizeCustomTracker(d, columns) {
+  const rows = (Array.isArray(d.rows) ? d.rows : []).map((r) => {
+    const o = r && typeof r === "object" && !Array.isArray(r) ? r : {};
+    const row = {};
+    for (const spec of columns) row[spec.key] = coerceCell(o[spec.key], spec.type, spec.options ?? []);
+    return row;
+  });
+  return { rows, columns };
+}
+function normalizeLegacyTracker(d) {
   const s2 = (x) => typeof x === "string" ? x : "";
   const statuses = Array.isArray(d.statuses) && d.statuses.length > 0 && d.statuses.every((x) => typeof x === "string") ? d.statuses.map((x) => x.slice(0, 40)) : void 0;
   const allowed = statuses ?? TRACKER_STATUSES;
@@ -8295,7 +8453,23 @@ function normalizeTrackerData(raw) {
       done: o.done === true
     };
   });
-  return statuses ? { rows, statuses } : { rows };
+  let columns;
+  if (d.columns && typeof d.columns === "object" && !Array.isArray(d.columns)) {
+    const raw = d.columns;
+    const kept = {};
+    for (const key of TRACKER_COLUMNS) {
+      const v = raw[key];
+      if (typeof v === "string" && v.trim().length > 0) kept[key] = v.trim().slice(0, 40);
+    }
+    if (Object.keys(kept).length > 0) columns = kept;
+  }
+  const hiddenIn = Array.isArray(d.hidden) ? d.hidden : [];
+  const hidden = TRACKER_COLUMNS.filter((c) => c !== "action" && hiddenIn.includes(c));
+  const out = { rows };
+  if (statuses) out.statuses = statuses;
+  if (columns) out.columns = columns;
+  if (hidden.length > 0) out.hidden = hidden;
+  return out;
 }
 function parseTrackerSlideData(slide) {
   const block = slide.querySelector('script[data-odata="tracker"]');
@@ -8317,9 +8491,57 @@ function renderTracker(slide, data, opts = {}) {
   if (!mount) return;
   mount.textContent = "";
   mount.classList.toggle("editing", !!opts.edit);
-  let search = "";
-  let hideDone = false;
-  const rerender = () => renderTrackerBody(slide, data, opts, { search, hideDone });
+  const filter = { search: "", hideDone: false, statuses: /* @__PURE__ */ new Set(), sort: null };
+  const rerender = () => renderTrackerBody(slide, data, opts, filter);
+  let headRow = null;
+  let chipBar = null;
+  let buildPop = () => {
+  };
+  const buildHead = () => {
+    if (!headRow) return;
+    headRow.textContent = "";
+    const visible = trackerVisibleColumnSpecs(data);
+    if (filter.sort && !visible.some((c) => c.key === filter.sort.key)) filter.sort = null;
+    for (const spec of visible) {
+      const sorted = filter.sort?.key === spec.key;
+      const th = el4("th", opts.interactive ? "o-tracker-th" + (sorted ? " sorted" : "") : "", headRow);
+      th.setAttribute("data-c", spec.key);
+      th.textContent = spec.label;
+      const width = trackerColumnWidth(data, spec);
+      if (width) th.style.width = width;
+      if (!opts.interactive) continue;
+      th.setAttribute("aria-sort", sorted ? filter.sort.dir === 1 ? "ascending" : "descending" : "none");
+      if (sorted) {
+        const mark = el4("span", "o-tracker-sortmark", th);
+        mark.textContent = filter.sort.dir === 1 ? "\u25B2" : "\u25BC";
+      }
+      th.addEventListener("click", () => {
+        if (!filter.sort || filter.sort.key !== spec.key) filter.sort = { key: spec.key, dir: 1 };
+        else if (filter.sort.dir === 1) filter.sort = { key: spec.key, dir: -1 };
+        else filter.sort = null;
+        buildHead();
+        rerender();
+      });
+    }
+    if (opts.edit) el4("th", "", headRow).style.width = "72px";
+  };
+  const buildChips = () => {
+    if (!chipBar) return;
+    chipBar.textContent = "";
+    for (const s2 of trackerStatuses(data)) {
+      const on = filter.statuses.has(s2);
+      const chip = el4("button", "o-tracker-chip" + (on ? " on" : ""), chipBar);
+      chip.setAttribute("type", "button");
+      chip.setAttribute("aria-pressed", on ? "true" : "false");
+      chip.textContent = s2;
+      chip.addEventListener("click", () => {
+        if (filter.statuses.has(s2)) filter.statuses.delete(s2);
+        else filter.statuses.add(s2);
+        buildChips();
+        rerender();
+      });
+    }
+  };
   if (opts.interactive) {
     const bar = el4("div", "o-tracker-filterbar", mount);
     const input = el4("input", "o-tracker-search", bar);
@@ -8329,24 +8551,30 @@ function renderTracker(slide, data, opts = {}) {
     const check = el4("input", "", toggle);
     check.setAttribute("type", "checkbox");
     toggle.appendChild(document.createTextNode(" Hide completed"));
+    if (!trackerDoneColumn(data) && !trackerStatusColumn(data)) toggle.style.display = "none";
     const clear = el4("button", "o-tracker-clear", bar);
     clear.setAttribute("type", "button");
     clear.textContent = "Clear";
     input.addEventListener("input", () => {
-      search = input.value;
+      filter.search = input.value;
       rerender();
     });
     check.addEventListener("change", () => {
-      hideDone = check.checked;
+      filter.hideDone = check.checked;
       rerender();
     });
     clear.addEventListener("click", () => {
-      search = "";
-      hideDone = false;
+      filter.search = "";
+      filter.hideDone = false;
+      filter.statuses.clear();
+      filter.sort = null;
       input.value = "";
       check.checked = false;
+      buildHead();
+      buildChips();
       rerender();
     });
+    chipBar = el4("div", "o-tracker-chips", mount);
   }
   if (opts.edit) {
     const toolbar = el4("div", "o-tracker-toolbar", mount);
@@ -8354,192 +8582,697 @@ function renderTracker(slide, data, opts = {}) {
     add.setAttribute("type", "button");
     add.textContent = "+ Add action";
     add.addEventListener("click", () => {
-      data.rows.push({ action: "New action", owner: "", comments: "", due: "", status: trackerStatuses(data)[0], done: false });
+      const specs = trackerColumnSpecs(data);
+      const row = {};
+      for (const spec of specs) row[spec.key] = coerceCell(void 0, spec.type, spec.options ?? []);
+      const subject = specs.find((c) => c.type === "text");
+      if (subject) row[subject.key] = "New action";
+      data.rows.push(row);
       opts.edit.onCommit(data);
       rerender();
-      const cells = mount.querySelectorAll('.o-tracker-cell[data-f="action"]');
+      const sel = subject ? `.o-tracker-cell[data-f="${subject.key}"]` : ".o-tracker-cell";
+      const cells = mount.querySelectorAll(sel);
       cells[cells.length - 1]?.focus();
     });
-    const editBtn = el4("button", "o-tracker-editstatuses", toolbar);
+    const setwrap = el4("div", "o-tracker-setwrap", toolbar);
+    const editBtn = el4("button", "o-tracker-editstatuses", setwrap);
     editBtn.setAttribute("type", "button");
-    editBtn.textContent = "\u2699 Statuses";
-    const pop = el4("div", "o-tracker-statuses", toolbar);
+    editBtn.textContent = "\u2699 Tracker";
+    const pop = el4("div", "o-tracker-settings", setwrap);
     pop.style.display = "none";
-    const commitStatuses = (next) => {
-      data.statuses = next;
-      data.rows.forEach((r) => {
-        if (!next.includes(r.status)) r.status = next[0];
-      });
+    let expandedOptions = /* @__PURE__ */ new Map();
+    const defaultOptionsExpanded = (spec) => (spec.options?.length ?? 0) === 0;
+    const optionsExpanded = (spec) => expandedOptions.has(spec.key) ? expandedOptions.get(spec.key) : defaultOptionsExpanded(spec);
+    let activeOption = null;
+    const commitActiveOption = (key) => {
+      if (activeOption && activeOption.key === key) {
+        const c = activeOption.commit;
+        activeOption = null;
+        c();
+      }
+    };
+    const commit = (rebuildPop) => {
       opts.edit.onCommit(data);
+      buildHead();
+      buildChips();
+      if (rebuildPop) buildPop();
       rerender();
     };
-    const buildPop = () => {
-      pop.textContent = "";
-      const list = trackerStatuses(data).slice();
-      list.forEach((s2, i) => {
-        const row = el4("div", "o-tracker-status-row", pop);
+    const ensureCustom = () => {
+      const existing = trackerCustomColumns(data);
+      if (existing) return existing;
+      const specs = trackerLegacyColumnSpecs(data);
+      data.columns = specs;
+      delete data.hidden;
+      delete data.statuses;
+      return specs;
+    };
+    const commitColumnLabel = (key, raw) => {
+      const label = raw.trim().slice(0, 40);
+      const custom = trackerCustomColumns(data);
+      if (custom) {
+        const spec = custom.find((c) => c.key === key);
+        if (spec && label) spec.label = label;
+      } else {
+        const k = key;
+        const next = { ...data.columns ?? {} };
+        if (!label || label === TRACKER_COLUMN_LABELS[k]) delete next[k];
+        else next[k] = label;
+        if (Object.keys(next).length > 0) data.columns = next;
+        else delete data.columns;
+      }
+      commit(false);
+    };
+    const commitColumnShown = (key, shown) => {
+      const custom = trackerCustomColumns(data);
+      if (custom) {
+        const spec = custom.find((c) => c.key === key);
+        if (!spec) return;
+        if (shown) delete spec.hidden;
+        else spec.hidden = true;
+      } else {
+        const set = new Set(data.hidden ?? []);
+        if (shown) set.delete(key);
+        else set.add(key);
+        const next = TRACKER_COLUMNS.filter((c) => c !== "action" && set.has(c));
+        if (next.length > 0) data.hidden = next;
+        else delete data.hidden;
+      }
+      commit(false);
+    };
+    const commitColumnType = (key, type) => {
+      const specs = ensureCustom();
+      const spec = specs.find((c) => c.key === key);
+      if (!spec || spec.type === type) return;
+      spec.type = type;
+      if (type === "select") {
+        if (!spec.options || spec.options.length === 0) spec.options = [...NEW_SELECT_OPTIONS];
+        expandedOptions.set(key, true);
+      } else {
+        delete spec.options;
+        delete spec.status;
+        expandedOptions.delete(key);
+      }
+      if (type !== "check") delete spec.done;
+      for (const row of data.rows) row[key] = coerceCell(row[key], type, spec.options ?? []);
+      filter.statuses.clear();
+      commit(true);
+    };
+    const commitColumnMark = (key, kind, on) => {
+      const specs = ensureCustom();
+      for (const c of specs) delete c[kind];
+      if (on) {
+        const spec = specs.find((c) => c.key === key);
+        if (spec) spec[kind] = true;
+      }
+      filter.statuses.clear();
+      commit(true);
+    };
+    const nextColumnKey = (specs) => {
+      const taken = new Set(specs.map((c) => c.key));
+      for (let i = 1; i <= TRACKER_MAX_COLUMNS + 1; i++) if (!taken.has(`col${i}`)) return `col${i}`;
+      return `col${specs.length + 1}`;
+    };
+    const commitColumnAdd = () => {
+      const specs = ensureCustom();
+      if (specs.length >= TRACKER_MAX_COLUMNS) return;
+      const key = nextColumnKey(specs);
+      specs.push({ key, label: "New column", type: "text" });
+      for (const row of data.rows) row[key] = "";
+      commit(true);
+    };
+    const canRemove = (specs, spec) => specs.length > 1 && (spec.type !== "text" || specs.filter((c) => c.type === "text").length > 1);
+    const commitColumnRemove = (key) => {
+      const specs = ensureCustom();
+      const i = specs.findIndex((c) => c.key === key);
+      if (i < 0 || !canRemove(specs, specs[i])) return;
+      specs.splice(i, 1);
+      for (const row of data.rows) delete row[key];
+      expandedOptions.delete(key);
+      filter.statuses.clear();
+      commit(true);
+    };
+    const commitColumnMove = (from, to) => {
+      const specs = ensureCustom();
+      if (from === to || from < 0 || to < 0 || from >= specs.length || to >= specs.length) return;
+      const [moved] = specs.splice(from, 1);
+      specs.splice(to, 0, moved);
+      commit(true);
+    };
+    const commitOptions = (key, next) => {
+      const custom = trackerCustomColumns(data);
+      if (custom) {
+        const spec = custom.find((c) => c.key === key);
+        if (!spec) return;
+        spec.options = next;
+      } else {
+        data.statuses = next;
+      }
+      data.rows.forEach((r) => {
+        if (!next.includes(String(r[key]))) r[key] = next[0];
+      });
+      for (const s2 of Array.from(filter.statuses)) if (!next.includes(s2)) filter.statuses.delete(s2);
+      commit(false);
+    };
+    const commitReset = () => {
+      delete data.columns;
+      delete data.hidden;
+      delete data.statuses;
+      const back = TRACKER_STATUSES;
+      data.rows = data.rows.map((r) => ({
+        action: String(r.action ?? ""),
+        owner: String(r.owner ?? ""),
+        comments: String(r.comments ?? ""),
+        due: String(r.due ?? ""),
+        status: back.includes(String(r.status)) ? String(r.status) : back[0],
+        done: r.done === true
+      }));
+      expandedOptions.clear();
+      filter.statuses.clear();
+      filter.sort = null;
+      commit(true);
+    };
+    const buildOptionsEditor = (parent, spec) => {
+      if (!optionsExpanded(spec)) {
+        const options2 = spec.options ?? [];
+        const summary = el4("button", "o-tracker-opt-summary", parent);
+        summary.setAttribute("type", "button");
+        summary.title = "Expand this column\u2019s options";
+        summary.textContent = `${options2.length} option${options2.length === 1 ? "" : "s"}: ${options2.join(" \xB7 ")}`;
+        summary.addEventListener("click", () => {
+          expandedOptions.set(spec.key, true);
+          buildPop();
+        });
+        return;
+      }
+      const isStatus = spec.status === true;
+      el4("div", "o-tracker-set-h", parent).textContent = isStatus ? "Statuses" : "Options";
+      const list = el4("div", "o-tracker-statuses", parent);
+      const options = (spec.options ?? []).slice();
+      options.forEach((s2, i) => {
+        const orow = el4("div", "o-tracker-status-row", list);
         const inp = document.createElement("input");
         inp.type = "text";
         inp.value = s2;
         inp.maxLength = 40;
-        inp.addEventListener("change", () => {
-          const next = trackerStatuses(data).slice();
+        const commitRename = () => {
+          const next = (spec.options ?? []).slice();
           next[i] = inp.value.trim() || next[i];
-          commitStatuses(next);
+          commitOptions(spec.key, next);
+        };
+        inp.addEventListener("focus", () => {
+          activeOption = { key: spec.key, commit: commitRename };
         });
-        row.appendChild(inp);
+        inp.addEventListener("blur", () => {
+          if (activeOption?.key === spec.key) activeOption = null;
+        });
+        inp.addEventListener("change", commitRename);
+        orow.appendChild(inp);
         const del = document.createElement("button");
         del.setAttribute("type", "button");
         del.textContent = "\xD7";
-        del.title = "Remove this status";
+        del.title = "Remove this option";
         del.addEventListener("click", () => {
-          const next = trackerStatuses(data).slice();
+          const next = (spec.options ?? []).slice();
           if (next.length <= 1) return;
           next.splice(i, 1);
-          commitStatuses(next);
+          commitOptions(spec.key, next);
           buildPop();
         });
-        row.appendChild(del);
+        orow.appendChild(del);
       });
-      const addS = document.createElement("button");
+      const foot = el4("div", "o-tracker-opt-foot", parent);
+      const addS = el4("button", "o-tracker-addstatus", foot);
       addS.setAttribute("type", "button");
-      addS.textContent = "+ status";
+      addS.textContent = isStatus ? "+ status" : "+ option";
       addS.addEventListener("click", () => {
-        commitStatuses([...trackerStatuses(data), "New status"]);
+        commitOptions(spec.key, [...spec.options ?? [], isStatus ? "New status" : "New option"]);
         buildPop();
       });
-      pop.appendChild(addS);
+      buildMarker(foot, spec, "status", "Status column", "The LAST option means done, the FIRST reopens");
+    };
+    let typeMenuKey = null;
+    let typeMenuEl = null;
+    let typeMenuTrigger = null;
+    let typeMenuCloser = null;
+    let typeMenuKeys = null;
+    const hasDocumentEvents = typeof document.addEventListener === "function";
+    const closeTypeMenu = () => {
+      if (hasDocumentEvents) {
+        if (typeMenuCloser) document.removeEventListener("mousedown", typeMenuCloser, true);
+        if (typeMenuKeys) document.removeEventListener("keydown", typeMenuKeys, true);
+      }
+      typeMenuCloser = null;
+      typeMenuKeys = null;
+      typeMenuTrigger?.setAttribute("aria-expanded", "false");
+      typeMenuTrigger = null;
+      typeMenuEl?.remove();
+      typeMenuEl = null;
+      typeMenuKey = null;
+    };
+    const openTypeMenu = (wrap2, trigger, spec) => {
+      closeTypeMenu();
+      const list = el4("div", "o-tracker-typemenu", wrap2);
+      list.setAttribute("role", "listbox");
+      list.setAttribute("aria-label", "Column type");
+      typeMenuEl = list;
+      typeMenuTrigger = trigger;
+      typeMenuKey = spec.key;
+      trigger.setAttribute("aria-expanded", "true");
+      list.addEventListener("mousedown", (e) => e.stopPropagation());
+      const items = [];
+      for (const t of TRACKER_COLUMN_TYPES) {
+        const b = el4("button", "o-tracker-typeopt", list);
+        b.setAttribute("type", "button");
+        b.setAttribute("role", "option");
+        b.setAttribute("data-type-value", t);
+        const on = t === spec.type;
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        if (on) b.classList.add("on");
+        b.textContent = TYPE_LABELS[t];
+        b.addEventListener("click", () => {
+          closeTypeMenu();
+          commitColumnType(spec.key, t);
+        });
+        items.push(b);
+      }
+      const closer = (e) => {
+        const target = e.target;
+        if (typeMenuEl && !typeMenuEl.contains(target) && target !== trigger) closeTypeMenu();
+      };
+      typeMenuCloser = closer;
+      if (hasDocumentEvents) {
+        setTimeout(() => {
+          if (typeMenuCloser === closer) document.addEventListener("mousedown", closer, true);
+        });
+      }
+      const keys = (e) => {
+        if (!typeMenuEl) return;
+        const at = items.indexOf(document.activeElement);
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          closeTypeMenu();
+          trigger.focus();
+        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          e.stopPropagation();
+          const step = e.key === "ArrowDown" ? 1 : -1;
+          const next = at < 0 ? step === 1 ? 0 : items.length - 1 : (at + step + items.length) % items.length;
+          items[next]?.focus();
+        }
+      };
+      typeMenuKeys = keys;
+      if (hasDocumentEvents) document.addEventListener("keydown", keys, true);
+      (items.find((b) => b.classList.contains("on")) ?? items[0])?.focus({ preventScroll: true });
+    };
+    const buildMarker = (parent, spec, kind, text, title) => {
+      const lab = el4("label", "o-tracker-mark", parent);
+      lab.title = title;
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = spec[kind] === true;
+      box.setAttribute("data-mark", kind);
+      box.setAttribute("data-c", spec.key);
+      box.addEventListener("change", () => commitColumnMark(spec.key, kind, box.checked));
+      lab.appendChild(box);
+      lab.appendChild(document.createTextNode(" " + text));
+    };
+    buildPop = () => {
+      closeTypeMenu();
+      pop.textContent = "";
+      const specs = trackerColumnSpecs(data);
+      const custom = trackerCustomColumns(data) !== null;
+      el4("div", "o-tracker-set-h", pop).textContent = "Columns";
+      const cols = el4("div", "o-tracker-cols", pop);
+      specs.forEach((spec, idx) => {
+        const row = el4("div", "o-tracker-col-row", cols);
+        row.setAttribute("data-c", spec.key);
+        const grip = el4("button", "o-tracker-colgrip", row);
+        grip.setAttribute("type", "button");
+        grip.setAttribute("draggable", "true");
+        grip.title = "Drag to reorder this column";
+        grip.textContent = "\u283F";
+        grip.addEventListener("dragstart", (e) => {
+          const dt = e.dataTransfer;
+          if (dt) {
+            dt.setData("text/plain", String(idx));
+            dt.effectAllowed = "move";
+          }
+          row.classList.add("o-tracker-dragging");
+        });
+        grip.addEventListener("dragend", () => row.classList.remove("o-tracker-dragging"));
+        row.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          row.classList.add("o-tracker-drop");
+        });
+        row.addEventListener("dragleave", () => row.classList.remove("o-tracker-drop"));
+        row.addEventListener("drop", (e) => {
+          e.preventDefault();
+          row.classList.remove("o-tracker-drop");
+          const src = Number(e.dataTransfer?.getData("text/plain"));
+          if (!Number.isInteger(src)) return;
+          commitColumnMove(src, idx);
+        });
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.maxLength = 40;
+        inp.value = spec.label;
+        inp.setAttribute("data-c", spec.key);
+        inp.placeholder = custom ? spec.label : TRACKER_COLUMN_LABELS[spec.key];
+        inp.addEventListener("input", () => {
+          const th = headRow?.querySelector(`th[data-c="${spec.key}"]`);
+          if (th) th.textContent = inp.value.trim() || spec.label;
+        });
+        inp.addEventListener("change", () => commitColumnLabel(spec.key, inp.value));
+        row.appendChild(inp);
+        const typeWrap = el4("span", "o-tracker-typewrap", row);
+        const tbtn = el4("button", "o-tracker-coltype", typeWrap);
+        tbtn.setAttribute("type", "button");
+        tbtn.setAttribute("data-type", spec.key);
+        tbtn.setAttribute("aria-haspopup", "listbox");
+        tbtn.setAttribute("aria-expanded", "false");
+        tbtn.title = "What this column holds";
+        tbtn.textContent = TYPE_LABELS[spec.type];
+        tbtn.addEventListener("click", () => {
+          if (typeMenuKey === spec.key) closeTypeMenu();
+          else openTypeMenu(typeWrap, tbtn, spec);
+        });
+        if (spec.type === "select") {
+          const open = optionsExpanded(spec);
+          const disc = el4("button", "o-tracker-col-disc", row);
+          disc.setAttribute("type", "button");
+          disc.setAttribute("aria-expanded", open ? "true" : "false");
+          disc.title = open ? "Collapse options" : "Expand options";
+          disc.textContent = open ? "\u25BE" : "\u25B8";
+          disc.addEventListener("click", () => {
+            const next = !optionsExpanded(spec);
+            if (!next) commitActiveOption(spec.key);
+            expandedOptions.set(spec.key, next);
+            buildPop();
+          });
+        } else {
+          el4("span", "o-tracker-col-disc", row);
+        }
+        if (!custom && spec.key === "action") {
+          el4("span", "o-tracker-col-fixed", row).textContent = "always shown";
+        } else {
+          const lab = el4("label", "o-tracker-col-show", row);
+          const box = document.createElement("input");
+          box.type = "checkbox";
+          box.checked = spec.hidden !== true;
+          box.setAttribute("data-show", spec.key);
+          box.addEventListener("change", () => commitColumnShown(spec.key, box.checked));
+          lab.appendChild(box);
+          lab.appendChild(document.createTextNode(" Show"));
+        }
+        const del = el4("button", "o-tracker-coldel", row);
+        del.setAttribute("type", "button");
+        del.textContent = "\xD7";
+        const removable = canRemove(specs, spec);
+        del.title = removable ? "Remove this column and its data" : "A tracker keeps at least one text column";
+        if (!removable) del.setAttribute("disabled", "");
+        del.addEventListener("click", () => commitColumnRemove(spec.key));
+        if (spec.type === "select") {
+          buildOptionsEditor(el4("div", "o-tracker-colopts", row), spec);
+        } else if (spec.type === "check") {
+          const box = el4("div", "o-tracker-colopts", row);
+          buildMarker(box, spec, "done", "Done column", "Ticking this column marks the row complete");
+        }
+      });
+      const foot = el4("div", "o-tracker-set-foot", pop);
+      const addCol = el4("button", "o-tracker-addcol", foot);
+      addCol.setAttribute("type", "button");
+      addCol.textContent = "+ column";
+      addCol.addEventListener("click", commitColumnAdd);
+      const reset = el4("button", "o-tracker-reset", foot);
+      reset.setAttribute("type", "button");
+      reset.textContent = "Reset to defaults";
+      reset.addEventListener("click", commitReset);
+      if (!trackerStatusColumn(data) && !trackerDoneColumn(data)) {
+        el4("div", "o-tracker-set-note", pop).textContent = "No status or done column \u2014 this tracker has no complete/reopen behaviour.";
+      }
     };
     editBtn.addEventListener("click", () => {
       const open = pop.style.display === "none";
       pop.style.display = open ? "" : "none";
-      if (open) buildPop();
+      if (open) {
+        expandedOptions = /* @__PURE__ */ new Map();
+        buildPop();
+      } else {
+        closeTypeMenu();
+      }
     });
   }
   const wrap = el4("div", "o-tracker-wrap", mount);
   const table = el4("table", "o-tracker-table", wrap);
   const thead = el4("thead", "", table);
-  const hr = el4("tr", "", thead);
-  const heads = [
-    ["Action", "26%"],
-    ["Owner", "12%"],
-    ["Comments", ""],
-    ["Due", "9%"],
-    ["Status", "12%"],
-    ["Done", "64px"]
-  ];
-  if (opts.edit) heads.push(["", "72px"]);
-  for (const [label, width] of heads) {
-    const th = el4("th", "", hr);
-    th.textContent = label;
-    if (width) th.style.width = width;
-  }
+  headRow = el4("tr", "", thead);
+  buildHead();
   el4("tbody", "", table);
   el4("div", "o-tracker-count", mount);
+  buildChips();
   rerender();
 }
+function compareCells(a, b, spec) {
+  const av = a[spec.key];
+  const bv = b[spec.key];
+  if (spec.type === "number") {
+    const n = (v) => typeof v === "number" && Number.isFinite(v) ? v : Number.NEGATIVE_INFINITY;
+    return n(av) - n(bv);
+  }
+  if (spec.type === "check") return (av === true ? 1 : 0) - (bv === true ? 1 : 0);
+  if (spec.type === "select") {
+    const o = spec.options ?? [];
+    return o.indexOf(String(av ?? "")) - o.indexOf(String(bv ?? ""));
+  }
+  return String(av ?? "").localeCompare(String(bv ?? ""), void 0, { sensitivity: "base", numeric: true });
+}
+var cellMenuKey = null;
+var cellMenuEl = null;
+var cellMenuTrigger = null;
+var cellMenuCloser = null;
+var cellMenuKeys = null;
+function closeCellMenu() {
+  if (typeof document.removeEventListener === "function") {
+    if (cellMenuCloser) document.removeEventListener("mousedown", cellMenuCloser, true);
+    if (cellMenuKeys) document.removeEventListener("keydown", cellMenuKeys, true);
+  }
+  cellMenuCloser = null;
+  cellMenuKeys = null;
+  cellMenuTrigger?.setAttribute("aria-expanded", "false");
+  cellMenuTrigger = null;
+  cellMenuEl?.remove();
+  cellMenuEl = null;
+  cellMenuKey = null;
+}
+function openCellMenu(menuKey, wrap, trigger, options, current, onPick) {
+  closeCellMenu();
+  const list = el4("div", "o-tracker-cellmenu", wrap);
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", trigger.title || "Choose");
+  cellMenuEl = list;
+  cellMenuTrigger = trigger;
+  cellMenuKey = menuKey;
+  trigger.setAttribute("aria-expanded", "true");
+  list.addEventListener("mousedown", (e) => e.stopPropagation());
+  const items = [];
+  for (const s2 of options) {
+    const b = el4("button", "o-tracker-cellopt", list);
+    b.setAttribute("type", "button");
+    b.setAttribute("role", "option");
+    b.setAttribute("data-value", s2);
+    const on = s2 === current;
+    b.setAttribute("aria-selected", on ? "true" : "false");
+    if (on) b.classList.add("on");
+    b.textContent = s2;
+    b.addEventListener("click", () => {
+      closeCellMenu();
+      onPick(s2);
+    });
+    items.push(b);
+  }
+  const hasDoc = typeof document.addEventListener === "function";
+  const closer = (e) => {
+    const target = e.target;
+    if (cellMenuEl && !cellMenuEl.contains(target) && target !== trigger) closeCellMenu();
+  };
+  cellMenuCloser = closer;
+  if (hasDoc) {
+    setTimeout(() => {
+      if (cellMenuCloser === closer) document.addEventListener("mousedown", closer, true);
+    });
+  }
+  const keys = (e) => {
+    if (!cellMenuEl) return;
+    const at = items.indexOf(document.activeElement);
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCellMenu();
+      trigger.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      const next = at < 0 ? step === 1 ? 0 : items.length - 1 : (at + step + items.length) % items.length;
+      items[next]?.focus();
+    }
+  };
+  cellMenuKeys = keys;
+  if (hasDoc) document.addEventListener("keydown", keys, true);
+  (items.find((b) => b.classList.contains("on")) ?? items[0])?.focus({ preventScroll: true });
+}
 function renderTrackerBody(slide, data, opts, filter) {
+  closeCellMenu();
   const mount = slide.querySelector("[data-tracker-mount]");
   const body = mount?.querySelector("tbody");
   if (!mount || !body) return;
   body.textContent = "";
   const q = filter.search.trim().toLowerCase();
   let shown = 0;
-  const allowed = trackerStatuses(data);
-  const doneStatus = allowed[allowed.length - 1];
-  const openStatus = allowed[0];
-  data.rows.forEach((row, i) => {
-    if (filter.hideDone && row.done) return;
+  const visible = trackerVisibleColumnSpecs(data);
+  const searchCols = visible.filter((c) => SEARCHABLE.includes(c.type));
+  const statusCol = trackerStatusColumn(data);
+  const doneCol = trackerDoneColumn(data);
+  const options = statusCol?.options ?? [];
+  const doneStatus = options[options.length - 1];
+  const openStatus = options[0];
+  const isDone = (row) => doneCol ? row[doneCol.key] === true : !!statusCol && row[statusCol.key] === doneStatus;
+  const order = data.rows.map((_, i) => i);
+  const sortSpec = filter.sort ? visible.find((c) => c.key === filter.sort.key) : void 0;
+  if (filter.sort && sortSpec) {
+    const dir = filter.sort.dir;
+    order.sort((x, y) => {
+      const d = compareCells(data.rows[x], data.rows[y], sortSpec);
+      return d !== 0 ? d * dir : x - y;
+    });
+  }
+  for (const i of order) {
+    const row = data.rows[i];
+    const done = isDone(row);
+    if (filter.hideDone && done) continue;
+    if (filter.statuses.size > 0 && (!statusCol || !filter.statuses.has(String(row[statusCol.key])))) continue;
     if (q) {
-      const hay = [row.action, row.owner, row.comments, row.due, row.status].join(" ").toLowerCase();
-      if (!hay.includes(q)) return;
+      if (!searchCols.map((c) => cellText(row, c)).join(" ").toLowerCase().includes(q)) continue;
     }
     shown++;
-    const tr = el4("tr", (row.done ? "done " : "") + (row.status === "Blocked" ? "blocked" : ""), body);
+    const blocked = !!statusCol && row[statusCol.key] === "Blocked";
+    const tr = el4("tr", (done ? "done " : "") + (blocked ? "blocked" : ""), body);
     const commit = () => opts.edit.onCommit(data);
     const rerenderBody = () => renderTrackerBody(slide, data, opts, filter);
-    for (const f of ["action", "owner", "comments", "due"]) {
-      const td = el4("td", "", tr);
+    for (const spec of visible) {
+      if (spec.type === "check") {
+        const td2 = el4("td", "o-tracker-done-td", tr);
+        if (opts.edit) {
+          const on = row[spec.key] === true;
+          const check = el4("button", "o-tracker-check" + (on ? " on" : ""), td2);
+          check.setAttribute("type", "button");
+          check.setAttribute("data-f", spec.key);
+          check.title = "Mark complete";
+          check.textContent = "\u2713";
+          check.addEventListener("click", () => {
+            const next = !on;
+            row[spec.key] = next;
+            if (spec.done && statusCol && doneStatus !== void 0) {
+              if (next && row[statusCol.key] !== doneStatus) row[statusCol.key] = doneStatus;
+              if (!next && row[statusCol.key] === doneStatus) row[statusCol.key] = openStatus;
+            }
+            commit();
+            rerenderBody();
+          });
+        } else if (row[spec.key] === true) {
+          td2.textContent = "\u2713";
+        }
+        continue;
+      }
+      if (spec.type === "select") {
+        const td2 = el4("td", "", tr);
+        if (opts.edit) {
+          const wrap = el4("span", "o-tracker-cellwrap", td2);
+          const sel = el4("button", "o-tracker-status" + (spec.status ? " o-tracker-statuscol" : ""), wrap);
+          sel.setAttribute("type", "button");
+          sel.setAttribute("data-f", spec.key);
+          sel.setAttribute("aria-haspopup", "listbox");
+          sel.setAttribute("aria-expanded", "false");
+          sel.title = spec.label;
+          sel.textContent = String(row[spec.key] ?? "");
+          sel.addEventListener("click", () => {
+            const menuKey = `${i}:${spec.key}`;
+            if (cellMenuKey === menuKey) {
+              closeCellMenu();
+              return;
+            }
+            openCellMenu(menuKey, wrap, sel, spec.options ?? [], row[spec.key], (value) => {
+              row[spec.key] = value;
+              if (spec.status && doneCol && value === doneStatus) row[doneCol.key] = true;
+              commit();
+              rerenderBody();
+            });
+          });
+        } else {
+          const span2 = el4("span", "o-tracker-status-text" + (spec.status ? " o-tracker-statuscol" : ""), td2);
+          span2.setAttribute("data-f", spec.key);
+          span2.textContent = cellText(row, spec);
+        }
+        continue;
+      }
+      const td = el4("td", spec.type === "number" ? "o-tracker-num-td" : "", tr);
       const cell = el4("div", "o-tracker-cell", td);
-      cell.setAttribute("data-f", f);
-      cell.textContent = row[f];
+      cell.setAttribute("data-f", spec.key);
+      cell.setAttribute("data-t", spec.type);
+      cell.textContent = cellText(row, spec);
       if (opts.edit) {
         cell.setAttribute("contenteditable", "plaintext-only");
         cell.addEventListener("blur", () => {
-          const next = (cell.textContent ?? "").trim();
-          if (next === row[f]) return;
-          row[f] = next;
+          const raw = (cell.textContent ?? "").trim();
+          const next = coerceCell(raw, spec.type, spec.options ?? []);
+          if (next === row[spec.key]) return;
+          row[spec.key] = next;
           commit();
           rerenderBody();
         });
       }
     }
-    const statusTd = el4("td", "", tr);
-    if (opts.edit) {
-      const sel = el4("select", "o-tracker-status", statusTd);
-      for (const s2 of allowed) {
-        const opt = document.createElement("option");
-        opt.textContent = s2;
-        opt.selected = s2 === row.status;
-        sel.appendChild(opt);
-      }
-      sel.addEventListener("change", () => {
-        row.status = sel.value;
-        if (row.status === doneStatus) row.done = true;
-        commit();
-        rerenderBody();
-      });
-    } else {
-      el4("span", "o-tracker-status-text", statusTd).textContent = row.status;
-    }
-    const doneTd = el4("td", "o-tracker-done-td", tr);
-    if (opts.edit) {
-      const check = el4("button", "o-tracker-check" + (row.done ? " on" : ""), doneTd);
-      check.setAttribute("type", "button");
-      check.title = "Mark complete";
-      check.textContent = "\u2713";
-      check.addEventListener("click", () => {
-        row.done = !row.done;
-        if (row.done && row.status !== doneStatus) row.status = doneStatus;
-        if (!row.done && row.status === doneStatus) row.status = openStatus;
-        commit();
-        rerenderBody();
-      });
-    } else if (row.done) {
-      doneTd.textContent = "\u2713";
-    }
     if (opts.edit) {
       const opsTd = el4("td", "o-tracker-ops-td", tr);
       const grip = el4("button", "o-tracker-grip", opsTd);
       grip.setAttribute("type", "button");
-      grip.setAttribute("draggable", "true");
-      grip.title = "Drag to reorder";
+      if (filter.sort) {
+        grip.setAttribute("disabled", "");
+        grip.setAttribute("draggable", "false");
+        grip.title = "Clear the sort to reorder rows by hand";
+      } else {
+        grip.setAttribute("draggable", "true");
+        grip.title = "Drag to reorder";
+        grip.addEventListener("dragstart", (e) => {
+          const dt = e.dataTransfer;
+          if (dt) {
+            dt.setData("text/plain", String(i));
+            dt.effectAllowed = "move";
+          }
+          tr.classList.add("o-tracker-dragging");
+        });
+        grip.addEventListener("dragend", () => tr.classList.remove("o-tracker-dragging"));
+        tr.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          tr.classList.add("o-tracker-drop");
+        });
+        tr.addEventListener("dragleave", () => tr.classList.remove("o-tracker-drop"));
+        tr.addEventListener("drop", (e) => {
+          e.preventDefault();
+          tr.classList.remove("o-tracker-drop");
+          const src = Number(e.dataTransfer?.getData("text/plain"));
+          if (!Number.isInteger(src) || src < 0 || src >= data.rows.length || src === i) return;
+          const [moved] = data.rows.splice(src, 1);
+          data.rows.splice(i, 0, moved);
+          commit();
+          rerenderBody();
+        });
+      }
       grip.textContent = "\u283F";
-      grip.addEventListener("dragstart", (e) => {
-        const dt = e.dataTransfer;
-        if (dt) {
-          dt.setData("text/plain", String(i));
-          dt.effectAllowed = "move";
-        }
-        tr.classList.add("o-tracker-dragging");
-      });
-      grip.addEventListener("dragend", () => tr.classList.remove("o-tracker-dragging"));
-      tr.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-        tr.classList.add("o-tracker-drop");
-      });
-      tr.addEventListener("dragleave", () => tr.classList.remove("o-tracker-drop"));
-      tr.addEventListener("drop", (e) => {
-        e.preventDefault();
-        tr.classList.remove("o-tracker-drop");
-        const src = Number(e.dataTransfer?.getData("text/plain"));
-        if (!Number.isInteger(src) || src < 0 || src >= data.rows.length || src === i) return;
-        const [moved] = data.rows.splice(src, 1);
-        data.rows.splice(i, 0, moved);
-        commit();
-        rerenderBody();
-      });
       const del = el4("button", "o-tracker-del", opsTd);
       del.setAttribute("type", "button");
       del.title = "Delete row (Ctrl+Z undoes)";
@@ -8550,18 +9283,18 @@ function renderTrackerBody(slide, data, opts, filter) {
         rerenderBody();
       });
     }
-  });
+  }
   if (shown === 0) {
     const tr = el4("tr", "", body);
     const td = el4("td", "o-tracker-empty", tr);
-    td.setAttribute("colspan", opts.edit ? "7" : "6");
+    td.setAttribute("colspan", String(Math.max(1, visible.length + (opts.edit ? 1 : 0))));
     td.textContent = data.rows.length === 0 ? "No actions yet." : "No actions match the current filters.";
   }
   const count = mount.querySelector(".o-tracker-count");
   if (count) {
-    const open = data.rows.filter((r) => !r.done).length;
+    const open = data.rows.filter((r) => !isDone(r)).length;
     let txt = `${data.rows.length} action${data.rows.length === 1 ? "" : "s"} \xB7 ${open} open`;
-    if (q || filter.hideDone) txt += ` \xB7 ${shown} shown`;
+    if (q || filter.hideDone || filter.statuses.size > 0) txt += ` \xB7 ${shown} shown`;
     count.textContent = txt;
   }
 }
@@ -10666,7 +11399,21 @@ var LEDGER_EDITOR_CSS = `
 .o-ledger .fbar .fb-prov.prov-source { color:var(--lg-ref-c); }
 /* the EDITOR ledger's height-capped canvas \u2014 the block-height grip's --obh drives it (default
    unchanged at 352px, 90vh the viewport guard, mirroring the --obw width pattern) */
-.o-ledger .viewport { max-height:min(var(--obh, 352px), 90vh); overflow:auto; background:var(--lg-cell); position:relative; }
+.o-ledger .viewport { max-height:min(var(--obh, var(--ofit, 352px)), 90vh); overflow:auto; background:var(--lg-cell); position:relative; }
+/* ...but a DEDICATED ledger fold is FITTED to the window by canvas-table's fitFoldViewport, which
+   publishes the measured height as --ofit as soon as the block is laid out. PRECEDENCE, and the
+   reason the fit is not an inline max-height: --obh is the AUTHOR's own height (the block-height
+   grip writes it and it is saved), so it must win. As the fallback INSIDE var(--obh, ...) the fit is
+   only ever the default \u2014 the moment the author drags the height grip, their number takes over and
+   the grip's edge tracks the pointer again (an inline max-height silently capped that drag). This rule is only what it shows until
+   that first measurement: the reader's own fallback (72vh, table-css.ts .lv-wrap) rather than the
+   compact 352px, so the frame before the fit is close to the final one. Two hosts qualify: the card
+   fold the rail hands out (a .slide-inner whose ONLY figure is the ledger \u2014 :only-of-type keeps a
+   card that also carries a chart/diagram on the compact 352px block) and the legacy .o-table-shell
+   whole-slide fold, which the runtime still renders for older decks. .o-shell.open .viewport
+   (4 classes) still outranks both, so Expand is unaffected. */
+.o-table-shell .o-ledger .viewport,
+.slide-inner > figure.o-tablefig:only-of-type .o-ledger .viewport { max-height:min(var(--obh, var(--ofit, 72vh)), 90vh); }
 /* NB: no min-width:100% \u2014 with table-layout:fixed, forcing the table wider than its natural (sum-of-
    columns) width makes the fixed-layout algorithm redistribute the surplus across every column, which
    silently re-inflates a column dragged down to a sliver width (it no longer renders at the width the
@@ -11947,7 +12694,7 @@ figure.o-trackerfig { margin: 26px auto; width: min(var(--obw, 100%), 100%); }
 figure.o-trackerfig[data-opos] { margin-left: calc(var(--op, 0) * 10%); }
 figure.o-trackerfig figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
 .o-tracker-filterbar {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 8px;
   padding: 12px 14px; background: var(--paper); border: 1px solid var(--rule);
   border-radius: 12px; box-shadow: 0 2px 12px rgba(26,26,26,0.05);
 }
@@ -11957,17 +12704,101 @@ figure.o-trackerfig figcaption { margin-top: 12px; font-size: 13px; color: var(-
 .o-tracker-toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .o-tracker-clear { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 8px; padding: 7px 12px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
 .o-tracker-clear:hover { border-color: var(--accent); color: var(--accent); }
-.o-tracker-toolbar { display: flex; align-items: center; gap: 14px; margin: 8px 0 14px; flex-wrap: wrap; position: relative; }
+/* status chips \u2014 a view-only filter row under the search bar; empty selection = every status */
+.o-tracker-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 8px; }
+.o-tracker-chips:empty { display: none; }
+.o-tracker-chip { font: 600 12.5px var(--font-body); border: 1.5px solid var(--rule); border-radius: 999px; padding: 5px 13px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
+.o-tracker-chip:hover { border-color: var(--accent); color: var(--accent); }
+.o-tracker-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.o-tracker-toolbar { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; flex-wrap: wrap; position: relative; }
 .o-tracker-add { font: 600 13px var(--font-body); border: none; border-radius: 8px; padding: 8px 14px; background: #3D8B5A; color: #fff; cursor: pointer; }
 .o-tracker-add:hover { background: #2d6c45; }
 .o-tracker-editstatuses { font: 600 13px var(--font-body); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 14px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
 .o-tracker-editstatuses:hover { border-color: var(--accent); color: var(--accent); }
-/* status-options editor (\u2699 Statuses) */
-.o-tracker-statuses { display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 10px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); }
-.o-tracker-status-row { display: flex; gap: 6px; align-items: center; }
-.o-tracker-status-row input { flex: 1; font: 13px var(--font-body); border: 1px solid var(--rule); border-radius: 6px; padding: 5px 8px; }
-.o-tracker-status-row button, .o-tracker-statuses > button { font: 600 12px var(--font-body); border: 1px solid var(--rule); border-radius: 6px; padding: 5px 9px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
-.o-tracker-statuses > button:hover { border-color: var(--accent); color: var(--accent); }
+/* \u2699 Tracker \u2014 ONE settings card, hung under its own button. Reads as settings, not a form: one
+   line per column (grip, heading, type, show, remove), and the card never stretches past 560px. */
+.o-tracker-setwrap { position: relative; }
+.o-tracker-settings {
+  position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; width: min(560px, calc(100vw - 32px));
+  /* every select column keeps its options open, so a wide tracker makes a tall card. It is bounded
+     to roughly half the fold and scrolls INSIDE itself, and the footer is pinned to the bottom of
+     that scroll box \u2014 so "+ column" and Reset are reachable however many columns there are. */
+  max-height: min(52vh, 520px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; padding: 14px;
+  border: 1px solid var(--rule); border-radius: 8px; background: var(--paper);
+  box-shadow: 0 6px 20px rgba(26,26,26,0.10);
+}
+.o-tracker-set-h { font: 700 11px var(--font-body); letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: -4px; }
+.o-tracker-cols, .o-tracker-statuses { display: flex; flex-direction: column; gap: 4px; }
+/* ONE line per column: grip \xB7 heading \xB7 type \xB7 show \xB7 remove. The heading takes the slack so the
+   controls after it stay in the same place down the list. */
+.o-tracker-col-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) 92px 22px auto auto; gap: 8px; align-items: center; }
+.o-tracker-status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.o-tracker-col-row input[type="text"], .o-tracker-status-row input, .o-tracker-coltype {
+  height: 32px; box-sizing: border-box; font: 13px var(--font-body); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 0 8px; background: var(--paper);
+}
+.o-tracker-col-row input[type="text"]:focus, .o-tracker-status-row input:focus, .o-tracker-coltype:focus { border-color: var(--accent); outline: none; }
+/* the Type control: a button standing where a <select> did (see the type-menu note below), so it
+   fills the same 92px track its wrapper occupies and reads the same as a real dropdown */
+.o-tracker-typewrap { position: relative; display: block; }
+.o-tracker-coltype { width: 100%; text-align: left; cursor: pointer; position: relative; }
+.o-tracker-coltype::after { content: '\u25BE'; float: right; opacity: 0.5; margin-left: 4px; }
+/* THE TYPE MENU \u2014 a real DOM listbox standing where a native <select> list would have gone, so it
+   rides the canvas's own scale transform instead of detaching from it (the defect popover-attach
+   .spec.ts and font-menu.spec.ts pin for every other converted door). Absolute inside its own
+   trigger's wrapper, which is this list's positioning context. */
+.o-tracker-typemenu {
+  position: absolute; z-index: 7; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content;
+  display: flex; flex-direction: column; gap: 1px; padding: 4px;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--paper);
+  box-shadow: 0 6px 20px rgba(26,26,26,0.14);
+}
+.o-tracker-typeopt {
+  font: 13px var(--font-body); text-align: left; white-space: nowrap; border: none; border-radius: 4px;
+  padding: 6px 10px; background: none; color: var(--ink); cursor: pointer;
+}
+.o-tracker-typeopt:hover, .o-tracker-typeopt:focus { background: color-mix(in srgb, var(--accent) 12%, var(--paper)); outline: none; }
+.o-tracker-typeopt.on { color: var(--accent); font-weight: 700; }
+.o-tracker-colgrip { width: 16px; height: 26px; padding: 0; border: none; background: none; color: var(--ink-soft); opacity: 0.45; cursor: grab; font-size: 13px; line-height: 1; }
+.o-tracker-colgrip:hover { opacity: 1; color: var(--ink); }
+.o-tracker-colgrip:active { cursor: grabbing; }
+.o-tracker-col-row.o-tracker-dragging { opacity: 0.4; }
+.o-tracker-col-row.o-tracker-drop { box-shadow: inset 0 2px 0 0 var(--accent); }
+.o-tracker-coldel { width: 24px; height: 26px; padding: 0; border: none; border-radius: 5px; background: none; color: var(--ink-soft); cursor: pointer; font-size: 14px; opacity: 0.6; }
+.o-tracker-coldel:hover:not([disabled]) { opacity: 1; background: #fdecec; color: #B3402A; }
+.o-tracker-coldel[disabled] { opacity: 0.2; cursor: default; }
+.o-tracker-col-show { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); cursor: pointer; user-select: none; white-space: nowrap; }
+.o-tracker-col-show input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+/* a quiet fact about the column, in the slot its Show toggle would have used */
+.o-tracker-col-fixed { font-size: 11.5px; line-height: 1; color: var(--ink-soft); opacity: 0.7; white-space: nowrap; }
+/* the disclosure that collapses a Choice column's own option list once it is set up; every other
+   type leaves the slot an empty (non-interactive) placeholder so the grid columns still line up.
+   A real hit area (not just a legible glyph): 22x22, well past the 18px floor a pointer needs. */
+.o-tracker-col-disc { width: 22px; height: 22px; padding: 0; border: none; border-radius: 4px; background: none; color: var(--ink-soft); font-size: 12px; line-height: 1; opacity: 0.7; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.o-tracker-col-disc:hover, .o-tracker-col-disc:focus-visible { opacity: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); outline: none; }
+/* a select column opens its own option list on a second line, indented under its heading */
+.o-tracker-colopts { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px; padding: 8px 10px; border-left: 2px solid var(--rule); background: color-mix(in srgb, var(--rule) 14%, var(--paper)); border-radius: 0 6px 6px 0; }
+/* the collapsed summary \u2014 the WHOLE row reopens it (a bare div a reader cannot click was the bug),
+   ellipsised to one line rather than wrapping the card taller */
+.o-tracker-opt-summary {
+  display: block; width: 100%; font: 12px var(--font-body); color: var(--ink-soft); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: none; border-radius: 4px;
+  background: none; padding: 4px 6px; margin: -4px -6px; cursor: pointer;
+}
+.o-tracker-opt-summary:hover, .o-tracker-opt-summary:focus-visible { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); outline: none; }
+.o-tracker-opt-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.o-tracker-mark { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); cursor: pointer; user-select: none; }
+.o-tracker-mark input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.o-tracker-set-foot { display: flex; align-items: center; gap: 14px; position: sticky; bottom: -14px; margin-top: 2px; padding: 8px 0; background: var(--paper); border-top: 1px solid var(--rule); }
+.o-tracker-set-note { font-size: 11.5px; line-height: 1.4; color: var(--ink-soft); opacity: 0.8; }
+.o-tracker-status-row button, .o-tracker-addstatus, .o-tracker-addcol { font: 600 12px var(--font-body); border: 1px solid var(--rule); border-radius: 6px; padding: 5px 9px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
+.o-tracker-addstatus:hover, .o-tracker-addcol:hover, .o-tracker-status-row button:hover { border-color: var(--accent); color: var(--accent); }
+.o-tracker-reset { font: 600 12.5px var(--font-body); border: none; background: none; padding: 0; color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
+.o-tracker-reset:hover { color: var(--accent); }
+/* a narrow canvas cannot hold the card under its button without leaving the block, so the wrapper
+   stops being the anchor and the card falls back to the toolbar's left edge. */
+@media (max-width: 900px) { .o-tracker-setwrap { position: static; } }
 /* the table body IS the resizable block: it consumes --obw (width grip) and --obh (height grip),
    centred in the shell so the fold's own measure, title and toolbars stay put around it.
    overflow was hidden purely to clip the header row's accent fill to the 12px radius; auto clips
@@ -11978,18 +12809,44 @@ figure.o-trackerfig figcaption { margin-top: 12px; font-size: 13px; color: var(-
 .o-tracker-wrap { border: 1px solid var(--rule); border-radius: 12px; overflow: auto; width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; max-height: var(--obh, none); box-shadow: 0 2px 12px rgba(26,26,26,0.05); }
 table.o-tracker-table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--paper); }
 table.o-tracker-table th { background: var(--accent); color: #fff; text-align: left; padding: 11px 14px; font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em; }
+/* header-click sort \u2014 a VIEW affordance (F31: nothing about it is stored) */
+th.o-tracker-th { cursor: pointer; user-select: none; }
+th.o-tracker-th:hover { background: color-mix(in srgb, #000 12%, var(--accent)); }
+.o-tracker-sortmark { margin-left: 5px; font-size: 9px; opacity: 0.85; }
 table.o-tracker-table td { padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
 table.o-tracker-table tr:last-child td { border-bottom: none; }
 table.o-tracker-table tr.done td { background: #f3faf5; }
 table.o-tracker-table tr.done .o-tracker-cell[data-f="action"] { text-decoration: line-through; color: var(--ink-soft); }
 table.o-tracker-table tr.blocked td { background: #fdeeee; }
-table.o-tracker-table tr.blocked .o-tracker-status, table.o-tracker-table tr.blocked .o-tracker-status-text { border-color: #B3402A; color: #B3402A; font-weight: 700; }
+/* the red belongs to the MARKED status column only: another select on a blocked row is not blocked */
+table.o-tracker-table tr.blocked .o-tracker-statuscol { border-color: #B3402A; color: #B3402A; font-weight: 700; }
 .o-tracker-cell { min-height: 22px; padding: 6px 8px; border-radius: 5px; outline: none; line-height: 1.45; }
+/* typed cells. The glyph is a ::before on a non-empty person cell, so it can never be selected,
+   edited or committed back into the data. */
+.o-tracker-cell[data-t="person"]:not(:empty)::before { content: "\u25CD"; margin-right: 6px; opacity: 0.4; font-size: 0.9em; }
+.o-tracker-cell[data-t="date"] { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.o-tracker-num-td { text-align: right; }
+.o-tracker-num-td .o-tracker-cell { text-align: right; font-variant-numeric: tabular-nums; }
 .o-tracker.editing .o-tracker-cell:hover { background: color-mix(in srgb, var(--rule) 30%, var(--paper)); }
 .o-tracker.editing .o-tracker-cell:focus { background: color-mix(in srgb, var(--accent) 8%, var(--paper)); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.o-tracker-status { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 6px; padding: 6px; background: var(--paper); color: var(--ink); }
+/* the row's Choice cell: a button standing where a <select> did (see the cell-menu note in
+   tracker.ts) \u2014 its own wrapper is the positioning context its attached listbox hangs under */
+.o-tracker-cellwrap { position: relative; display: block; }
+.o-tracker-status { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 6px; padding: 6px; background: var(--paper); color: var(--ink); width: 100%; text-align: left; cursor: pointer; }
 .o-tracker-status:focus { border-color: var(--accent); outline: none; }
 .o-tracker-status-text { font-size: 13px; }
+.o-tracker-cellmenu {
+  position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content;
+  display: flex; flex-direction: column; gap: 1px; padding: 4px;
+  border: 1px solid var(--rule); border-radius: 6px; background: var(--paper);
+  box-shadow: 0 6px 20px rgba(26,26,26,0.14);
+}
+.o-tracker-cellopt {
+  font: 13px var(--font-body); text-align: left; white-space: nowrap; border: none; border-radius: 4px;
+  padding: 6px 10px; background: none; color: var(--ink); cursor: pointer;
+}
+.o-tracker-cellopt:hover, .o-tracker-cellopt:focus { background: color-mix(in srgb, var(--accent) 12%, var(--paper)); outline: none; }
+.o-tracker-cellopt.on { color: var(--accent); font-weight: 700; }
 .o-tracker-done-td { text-align: center; }
 .o-tracker-check { width: 28px; height: 28px; border-radius: 6px; border: 1.5px solid var(--rule); background: var(--paper); color: var(--ink-soft); cursor: pointer; font-size: 14px; font-weight: 800; transition: background 0.15s, color 0.15s, border-color 0.15s; }
 .o-tracker-check:hover { border-color: #3D8B5A; color: #3D8B5A; }

@@ -6,6 +6,7 @@
     This is a PURE MODEL OP — it imports ONLY the TableData types + the TABLE_FIELD_KIND classifier
     from ./table-data.js, nothing else, and MUST NEVER be imported by packages/runtime (the viewer
     renders the top-level sheet and never reads `tabs`; the IIFE gate greps for this file). */
+import { DEFAULT_SHEET_NAME } from './table-data.js';
 import { TABLE_FIELD_KIND } from './table-data.js';
 /** The 'sheet'-kind field names — the sheet's own content + display side-maps, i.e. everything that
     TRAVELS with a tab on a swap (all fields except the block-level id/tabName/tabs/tabPos). Derived
@@ -75,10 +76,11 @@ function materializeStrip(data) {
 }
 /** Write a reshuffled strip back onto the block IN PLACE (same object identity). `activeIndex` names the
     slot that becomes the active/top-level sheet: its fields land on the top level, the rest ride in `tabs`
-    in strip order. When ONLY the active slot remains, every strip descriptor (tabName/tabs/tabPos) is
-    dropped, so the block collapses to a byte-identical single-sheet ledger (the same orphan-drop the
-    commit-path normalize does). Mirrors swapActiveTab's rewrite: clear every 'sheet' field first so an
-    incoming sheet missing an optional field leaves no stale leftover. */
+    in strip order. When ONLY the active slot remains, `tabs`/`tabPos` go and the survivor's own NAME is
+    kept — unless it is the display default, which is reaped so an unrenamed ledger collapses to
+    byte-identical single-sheet bytes (the same rule the commit-path normalize follows). Mirrors
+    swapActiveTab's rewrite: clear every 'sheet' field first so an incoming sheet missing an optional
+    field leaves no stale leftover. */
 function applyStrip(data, strip, activeIndex) {
     const active = strip[activeIndex];
     const rest = strip.filter((_, i) => i !== activeIndex);
@@ -87,9 +89,14 @@ function applyStrip(data, strip, activeIndex) {
         delete top[k];
     Object.assign(data, active.sheet);
     if (rest.length === 0) {
-        delete data.tabName;
         delete data.tabs;
-        delete data.tabPos; // sole sheet → pristine single-sheet bytes
+        delete data.tabPos;
+        // the sole survivor keeps the name the author gave it; an unrenamed one (still the display default)
+        // drops it, so add-tab-then-delete-the-last-tab round-trips to pristine single-sheet bytes.
+        if (active.name && active.name !== DEFAULT_SHEET_NAME)
+            data.tabName = active.name;
+        else
+            delete data.tabName;
         return;
     }
     data.tabName = active.name;

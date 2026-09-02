@@ -6,7 +6,7 @@
     This is a PURE MODEL OP — it imports ONLY the TableData types + the TABLE_FIELD_KIND classifier
     from ./table-data.js, nothing else, and MUST NEVER be imported by packages/runtime (the viewer
     renders the top-level sheet and never reads `tabs`; the IIFE gate greps for this file). */
-import type { TableData } from './table-data.js';
+import { type TableData } from './table-data.js';
 /** Make strip slot `stripIndex` the active sheet, mutating `data` IN PLACE (same object identity — the
     studio holds a live reference to the block's data object). The full strip is `tabs` with the active
     sheet inserted at `tabPos` (default 0), length `tabs.length + 1`; strip order is preserved. The

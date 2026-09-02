@@ -6,10 +6,10 @@ export { validateManifest, validateCrossConsistency, validateAssets, validateKin
 export { validateVideoData, videoDataJson, parseVideoUrl, videoCapability, videoEmbedUrl, VIDEO_PROVIDERS, VIDEO_PROVIDER_SPECS, } from './video-data.js';
 export { validateChartData, chartDataJson, CHART_TYPES, CHART_PLOT_H_MIN, CHART_PLOT_H_MAX, TEXT_SCALE_MIN, TEXT_SCALE_MAX, HEXBIN_VALUES_MAX_BINS, HEATMAP_MAX_ROWS, TREEMAP_MAX_NODES, SANKEY_MAX_NODES, SANKEY_MAX_LINKS, WATERFALL_KINDS, } from './chart-data.js';
 export { validateSliderData, sliderDataJson, SLIDER_STYLES, } from './slider-data.js';
-export { validateTrackerData, trackerDataJson, TRACKER_STATUSES, trackerStatuses, } from './tracker-data.js';
+export { validateTrackerData, trackerDataJson, TRACKER_STATUSES, trackerStatuses, TRACKER_COLUMNS, TRACKER_COLUMN_LABELS, TRACKER_COLUMN_TYPES, TRACKER_TYPE_WIDTHS, TRACKER_LEGACY_WIDTHS, TRACKER_KEY_RE, TRACKER_WIDTH_MIN, TRACKER_WIDTH_MAX, TRACKER_MAX_COLUMNS, trackerColumnLabel, trackerVisibleColumns, trackerCustomColumns, trackerLegacyColumnSpecs, trackerColumnSpecs, trackerVisibleColumnSpecs, trackerStatusColumn, trackerDoneColumn, trackerColumnWidth, } from './tracker-data.js';
 export { validateNotesData, notesDataJson, } from './notes-data.js';
 export { validateGridData, gridDataJson, GRID_TONES, GRID_ALIGNS, GRID_MAX_COLS, GRID_MAX_ROWS, } from './grid-data.js';
-export { validateTableData, tableDataJson, activeBakeRect, TABLE_MAX_COLS, } from './table-data.js';
+export { validateTableData, tableDataJson, DEFAULT_SHEET_NAME, activeBakeRect, TABLE_MAX_COLS, } from './table-data.js';
 export { swapActiveTab, moveTab, deleteTab } from './table-tabs.js';
 export { formatCell, formatTone, typedFromBaked, } from './cell-format.js';
 export { A1_RE, a1, colA1, colIdx, a1ToRC, a1RangeToRect, isNumeric, isErrStr, trimNum, FILL_TOKEN, FILL_HEX, isFill, fmtAt, gridWidth, aggregateNumbers, mergeRects, mergeAt, rectsOverlap, rectToRange, expandRectToMerges, clipMergesToCrop, evaluateCondFmt, } from './table-core.js';
