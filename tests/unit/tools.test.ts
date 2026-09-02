@@ -8,6 +8,7 @@ import { ProposalStore, restorableProposals } from '../../src/core/proposal-stor
 import { createModeRegistry } from '../../src/core/mode-registry.js';
 import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
+import { COMPOSED_PLOT_HEIGHT } from '../../src/core/compose.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
@@ -18,13 +19,15 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 31 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 33 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
       'accept_proposal',
       'add_chunk',
       'add_custom_fold',
+      'add_fold',
+      'add_ledger',
       'create_deck',
       'define_block',
       'delete_block',
@@ -2471,5 +2474,246 @@ describe('S2 — typed block tools on /folio/', () => {
       expect(res.isError, name).toBe(true);
       expect(JSON.parse(res.content[0]!.text).error, name).toMatch(/unknown chunk "snope"/);
     }
+  });
+});
+
+describe('S3 — add_fold and add_ledger, the one-call fold', () => {
+  /* The cost of a deck is TURNS. A titled card holding a chart used to be add_chunk (a starter,
+     or hand-assembled figure markup with the JSON re-escaped) then read_chunk then write_chunk.
+     These build it from data in one call, through the same insertFold — same bake, same content
+     policy, same data gate, ONE op on the undo stack. */
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+  const innerOf = (h: ReturnType<typeof harness>, id: string) => h.deck.model().slides.get(id)!.inner;
+
+  it('builds ONE card with an eyebrow, a heading and the blocks in order', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Composed' });
+    const res = await h.json('add_fold', {
+      title: 'Where we landed',
+      eyebrow: 'Q3 review',
+      blocks: [
+        { text: '<p class="lede">One line of copy.</p>' },
+        { stats: [{ value: '48', label: 'Decks shipped' }] },
+        { chart: CHART, caption: 'Revenue by quarter' },
+      ],
+    });
+
+    expect(res).toMatchObject({ index: 1, label: 'Where we landed', blocks: [{ kind: 'chart', nth: 0 }] });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner.startsWith('<div class="slide-inner">')).toBe(true);
+    expect(inner).toContain('<p class="eyebrow anim" style="--i:0">Q3 review</p>');
+    expect(inner).toContain('<h2 class="anim" style="--i:1">Where we landed</h2>');
+    // order is the order asked for: copy, then stats, then the figure
+    expect(inner.indexOf('One line of copy')).toBeLessThan(inner.indexOf('Decks shipped'));
+    expect(inner.indexOf('Decks shipped')).toBeLessThan(inner.indexOf('data-odata="chart"'));
+    expect(h.deck.model().order).toHaveLength(2);
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('is ONE undo step, however many blocks are on it', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Composed' });
+    const before = h.deck.serialize();
+    await h.json('add_fold', {
+      title: 'Four blocks',
+      blocks: [{ text: '<p>a</p>' }, { bullets: ['one', 'two'] }, { quote: { text: 'Said once.', by: 'Someone' } }, { chart: CHART }],
+    });
+    expect(h.deck.model().order).toHaveLength(2);
+    await h.json('undo');
+    expect(h.deck.serialize(), 'one undo returns the exact previous bytes').toBe(before);
+  });
+
+  it('labels the fold from the title so the tabs never read FREEFORM', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Labels' });
+    const short = await h.json('add_fold', { title: 'Short title', blocks: [{ text: '<p>x</p>' }] });
+    expect(short.label).toBe('Short title');
+    expect(h.deck.model().slides.get(short.chunkId)!.label).toBe('Short title');
+
+    const long = await h.json('add_fold', { title: 'A heading long enough that a sidebar cannot show all of it', blocks: [{ text: '<p>x</p>' }] });
+    expect(long.label.length).toBeLessThanOrEqual(29);
+    expect(long.label.endsWith('…')).toBe(true);
+
+    const named = await h.json('add_fold', { title: 'Ignored', label: 'Chosen', blocks: [{ text: '<p>x</p>' }] });
+    expect(named.label).toBe('Chosen');
+  });
+
+  it('refuses a block that names no kind, or two, and says which entry', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Bad blocks' });
+    const before = h.deck.serialize();
+
+    const none = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { nonsense: 1 }] });
+    expect(none.isError).toBe(true);
+    expect(JSON.parse(none.content[0]!.text).error).toMatch(/blocks\[1\] names no block/);
+
+    const two = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, bullets: ['a'] }] });
+    expect(two.isError).toBe(true);
+    expect(JSON.parse(two.content[0]!.text).error).toMatch(/blocks\[0\] names 2 blocks/);
+
+    expect(h.deck.serialize(), 'nothing was added').toBe(before);
+  });
+
+  it('refuses data that breaks its kind schema, naming the block index and the violation', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Bad data' });
+    const before = h.deck.serialize();
+    const res = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { flow: { nodes: [], edges: [] } }] });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/blocks\[1\]\.flow breaks its own schema/);
+    expect(body.violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('sizes a chart to FIT unless the chart names its own plot height', async () => {
+    /* MEASURED, not chosen: the chart schema's own default (318) puts eyebrow + heading + one
+       captioned chart 22px past a 1280x720 screen. The e2e suite proves fits:true on the real
+       render; this holds the number that produces it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Plot' });
+    const auto = await h.json('add_fold', { title: 'Auto', blocks: [{ chart: CHART }] });
+    expect((await h.json('get_block', { chunkId: auto.chunkId, kind: 'chart' })).data.plotHeight).toBe(COMPOSED_PLOT_HEIGHT);
+    expect(COMPOSED_PLOT_HEIGHT).toBeLessThan(318);
+
+    const own = await h.json('add_fold', { title: 'Own', blocks: [{ chart: { ...CHART, plotHeight: 420 } }] });
+    expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(420);
+  });
+
+  it('animates a stat card only when the number is one the runtime can count', async () => {
+    /* The runtime's count-up is parseInt(attr) + String(Math.round(v*t)) written into the
+       element every frame, so data-count-to="2.1%" animates as "2" and "€48k" as "0"; both are
+       only right at finalize. A decorated value is written as literal text instead — correct at
+       every frame, and inline-editable, because the editor skips [data-count-to]. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Stats' });
+    const res = await h.json('add_fold', {
+      title: 'Numbers',
+      blocks: [{ stats: [{ value: '48', label: 'Decks' }, { value: '2.1%', label: 'Churn' }, { value: '€48k', label: 'MRR' }] }],
+    });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner).toContain('<div class="big" data-count-to="48">0</div>');
+    expect(inner).toContain('<div class="big">2.1%</div>');
+    expect(inner).toContain('<div class="big">€48k</div>');
+    expect(inner).not.toContain('data-count-to="2.1%"');
+    expect(inner).not.toContain('data-count-to="€48k"');
+    expect(inner).toContain('data-ocols="3"');
+  });
+
+  it('lays two columns out with the attribute the runtime CSS actually targets', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Cols' });
+    const res = await h.json('add_fold', {
+      title: 'Two tracks',
+      columns: 2,
+      blocks: [{ text: '<h3>Left</h3>' }, { text: '<h3>Right</h3>' }],
+    });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner).toContain('<div class="o-tcols anim" data-ocols="2">');
+    // .o-tcols > .o-text is the grid; a child that is not one is not laid out as a column
+    expect(inner.match(/<div class="o-text anim">/g)).toHaveLength(2);
+    expect((await h.call('add_fold', { title: 'T', columns: 3, blocks: [{ text: '<p>x</p>' }] })).isError).toBe(true);
+  });
+
+  it('escapes text that would otherwise become markup', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Escapes' });
+    const res = await h.json('add_fold', {
+      title: 'A < B & C',
+      eyebrow: '<script>x</script>',
+      blocks: [{ bullets: ['1 < 2'] }, { quote: { text: 'a & b', by: '<em>who</em>' } }],
+    });
+    const inner = innerOf(h, res.chunkId);
+    expect(inner).toContain('A &lt; B &amp; C');
+    expect(inner).toContain('&lt;script&gt;');
+    expect(inner).toContain('1 &lt; 2');
+    expect(inner).toContain('&lt;em&gt;who&lt;/em&gt;');
+    // and the deck stays inert: nothing smuggled through
+    expect(await h.json('add_fold', { title: 'x', blocks: [{ text: '<p>y</p>' }] })).toMatchObject({ activeContent: [] });
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('hands back the addresses set_block takes, for every data block on the card', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Addresses' });
+    const res = await h.json('add_fold', {
+      title: 'Two charts and a venn',
+      blocks: [{ chart: CHART }, { venn: { count: 2, sets: [{ label: 'A', color: '#4A8CC4' }, { label: 'B', color: '#D9A520' }] } }, { chart: { ...CHART, labels: ['Q3', 'Q4'] } }],
+    });
+    expect(res.blocks).toEqual([{ kind: 'chart', nth: 0 }, { kind: 'venn', nth: 0 }, { kind: 'chart', nth: 1 }]);
+
+    // the addresses are real: writing the second chart leaves the first and the venn alone
+    await h.json('set_block', { chunkId: res.chunkId, kind: 'chart', nth: 1, data: { ...CHART, labels: ['Z1', 'Z2'] } });
+    const after = await h.json('get_block', { chunkId: res.chunkId });
+    expect(after.blocks.map((b: any) => b.kind)).toEqual(['chart', 'venn', 'chart']);
+    expect((after.blocks[0].data as any).labels).toEqual(['Q1', 'Q2']);
+    expect((after.blocks[2].data as any).labels).toEqual(['Z1', 'Z2']);
+  });
+
+  it('warns about the diagram viewBox, which is the one overflow the composer cannot size away', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Diagram' });
+    const flow = await h.json('add_fold', {
+      title: 'How a fold ships',
+      blocks: [{ flow: { nodes: [{ id: 'a', label: 'Draft', shape: 'pill', tone: 'accent' }, { id: 'b', label: 'Ship', shape: 'pill', tone: 'green' }], edges: [{ from: 'a', to: 'b', label: '' }] } }],
+    });
+    expect(flow.layoutWarning).toMatch(/1200x660/);
+    expect(flow.layoutWarning).toMatch(/inspect_render/);
+    // and it is not attached to folds that do not have the problem
+    expect((await h.json('add_fold', { title: 'Chart', blocks: [{ chart: CHART }] })).layoutWarning).toBeUndefined();
+  });
+
+  it('add_ledger bakes the formulas the human never sees a formula for', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const res = await h.json('add_ledger', {
+      title: 'Q3 budget',
+      eyebrow: 'Ledger',
+      columns: [{ label: 'Line' }, { label: 'Plan', align: 'right' }, { label: 'Actual', align: 'right' }, { label: 'Delta', align: 'right' }],
+      rows: [['Engineering', '120000', '118400', ''], ['Design', '42000', '39800', ''], ['Total', '', '', '']],
+      formulas: { D1: '=B1-C1', D2: '=B2-C2', B3: '=SUM(B1:B2)', C3: '=SUM(C1:C2)', D3: '=SUM(D1:D2)' },
+      caption: 'Plan against actual, EUR',
+    });
+    expect(res).toMatchObject({ label: 'Q3 budget', blocks: [{ kind: 'table', nth: 0 }] });
+
+    const table = (await h.json('get_block', { chunkId: res.chunkId, kind: 'table' })).data;
+    expect(table.rows[0][3], 'the calc engine ran on the way in').toBe('1600');
+    expect(table.rows[2]).toEqual(['Total', '162000', '158200', '3800']);
+    expect(innerOf(h, res.chunkId)).toContain('<h2 class="anim" style="--i:1">Q3 budget</h2>');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('add_ledger refuses a column format given as a STRING — the shape that used to reach save_deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const before = h.deck.serialize();
+    const res = await h.call('add_ledger', {
+      title: 'Bad',
+      columns: [{ label: 'Item' }, { label: 'Cost', format: 'currency' }],
+      rows: [['Widget', '10']],
+    });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('table.column.format');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses a fold with a title but nothing on it, rather than adding a blank card', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Empty' });
+    for (const args of [{ title: 'T', blocks: [] }, { title: '   ', blocks: [{ text: '<p>x</p>' }] }, { title: 'T' }]) {
+      const res = await h.call('add_fold', args);
+      expect(res.isError, JSON.stringify(args)).toBe(true);
+    }
+    expect(h.deck.model().order).toHaveLength(1);
+  });
+
+  it('honours position, so a fold can be composed into the middle of a deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Order' });
+    await h.json('add_fold', { title: 'Last', blocks: [{ text: '<p>z</p>' }] });
+    const mid = await h.json('add_fold', { title: 'Middle', position: 1, blocks: [{ text: '<p>m</p>' }] });
+    expect(mid.index).toBe(1);
+    expect(h.deck.model().order.map((id) => h.deck.model().slides.get(id)!.label)).toEqual(['Cover', 'Middle', 'Last']);
   });
 });

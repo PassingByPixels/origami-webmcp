@@ -16,6 +16,8 @@ import type { ActivityEntry, ActivityLog } from '../core/activity.js';
    chip is a pure function of the tool name. */
 const CHIPS: Record<string, string> = {
   add_chunk: 'ADD',
+  add_fold: 'ADD',
+  add_ledger: 'ADD',
   add_custom_fold: 'ADD',
   write_chunk: 'EDIT',
   move_chunk: 'MOVE',
@@ -63,6 +65,8 @@ const UNDOABLE = new Set([
   'write_chunk',
   'add_chunk',
   'add_custom_fold',
+  'add_fold',
+  'add_ledger',
   'move_chunk',
   'set_chunk_meta',
   'set_deck_meta',

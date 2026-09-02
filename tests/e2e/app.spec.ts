@@ -47,10 +47,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('31');
+  await expect(page.getByTestId('tool-count')).toHaveText('33');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('31 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('33 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);
@@ -497,4 +497,67 @@ test('save_deck banks the Fold in browser storage, and the human can get it back
   expect(Buffer.byteLength(text, 'utf8')).toBe(saved.body.bytes);
   expect(text).toContain('data-odata="flow"');
   expect(text).toContain('id="origami-manifest"');
+});
+
+test('a fold composed by add_fold FITS a 1280x720 screen — measured, not asserted from a model', async ({ page }) => {
+  /* The composer's one visual promise: the reference card — an eyebrow, a heading and ONE
+     chart — has to be inside the screen it is read on. The chart schema's own plotHeight
+     default (318) puts it 22px past 720, which is exactly what a cold agent hit in trial; the
+     composer's default was measured against this test, not chosen.
+
+     The diagram case is here too, and it FAILS the same bar on purpose. A flow figure is drawn
+     on the runtime's fixed 1200x660 viewBox, so at 1280 wide it alone is ~640px and nothing the
+     composer does shrinks it. The number is printed rather than hidden, and add_fold hands the
+     same fact back in layoutWarning. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Composed fit', discard: true });
+
+  const chart = await invoke(page, 'add_fold', {
+    title: 'Revenue by quarter',
+    eyebrow: 'Q3 review',
+    blocks: [{ chart: { type: 'bar', labels: ['Q1', 'Q2', 'Q3', 'Q4'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19, 15, 24] }], yMax: null }, caption: 'Revenue by quarter, EUR m' }],
+  });
+  expect(chart.state).toContain('ok');
+
+  const ledger = await invoke(page, 'add_ledger', {
+    title: 'Q3 budget',
+    eyebrow: 'Ledger',
+    columns: [{ label: 'Line' }, { label: 'Plan', align: 'right' }, { label: 'Actual', align: 'right' }, { label: 'Delta', align: 'right' }],
+    rows: [['Engineering', '120000', '118400', ''], ['Design', '42000', '39800', ''], ['Marketing', '55000', '61200', ''], ['Ops', '28000', '27100', ''], ['Total', '', '', '']],
+    formulas: { D1: '=B1-C1', D2: '=B2-C2', D3: '=B3-C3', D4: '=B4-C4', B5: '=SUM(B1:B4)', C5: '=SUM(C1:C4)', D5: '=SUM(D1:D4)' },
+    caption: 'Plan against actual, EUR',
+  });
+  expect(ledger.state).toContain('ok');
+
+  const flow = await invoke(page, 'add_fold', {
+    title: 'How a fold ships',
+    eyebrow: 'Process',
+    blocks: [{ flow: { nodes: [{ id: 'draft', label: 'Draft', shape: 'pill', tone: 'accent' }, { id: 'review', label: 'Review', shape: 'diamond', tone: 'amber' }, { id: 'ship', label: 'Ship', shape: 'pill', tone: 'green' }], edges: [{ from: 'draft', to: 'review', label: '' }, { from: 'review', to: 'ship', label: 'yes' }] }, caption: 'Three steps' }],
+  });
+  expect(flow.body.layoutWarning, 'the diagram trap is handed back, not hidden').toMatch(/1200x660/);
+
+  const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
+  expect(res.body.measured).toBe(true);
+  const fold = (id: string) => res.body.folds.find((f: any) => f.id === id);
+
+  expect(fold(chart.body.chunkId).fits, `chart fold measured ${fold(chart.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(chart.body.chunkId).rendersAnything).toBe(true);
+  expect(fold(ledger.body.chunkId).fits, `ledger fold measured ${fold(ledger.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(ledger.body.chunkId).rendersAnything).toBe(true);
+
+  // the diagram fold is reported as it really is
+  const flowGeo = fold(flow.body.chunkId);
+  console.log(
+    `  add_fold @1280x720: chart fits=${fold(chart.body.chunkId).fits}, ledger fits=${fold(ledger.body.chunkId).fits}, ` +
+      `flow fits=${flowGeo.fits} (content ${flowGeo.contentHeight}px vs 720px — runtime viewBox, out of the composer's reach)`
+  );
+  expect(flowGeo.rendersAnything).toBe(true);
+
+  // every fold the composer built carries a real label, so the tabs read as words
+  const chunks = await invoke(page, 'list_chunks', {});
+  expect(chunks.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'Revenue by quarter', 'Q3 budget', 'How a fold ships']);
+
+  // and the whole thing is a saveable Fold
+  const saved = await invoke(page, 'save_deck', {});
+  expect(saved.body.validated).toBe(true);
 });

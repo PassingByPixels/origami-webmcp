@@ -8,6 +8,7 @@
 
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
 import { buildBlockTools, buildFolioBlockTools } from './block-tools.js';
+import { buildComposeTools } from './compose-tools.js';
 import type { DeckStore } from './deck-store.js';
 import { pageGuideTool } from './mode-guide.js';
 import type { ToolMode } from './modes.js';
@@ -22,9 +23,11 @@ export function createModeRegistry(deps: ToolDeps, mode: ToolMode): ToolRegistry
 
   if (!mode.tools) {
     for (const t of all) registry.register(t);
-    // /folio/ also gets the typed block writers, addressed by chunk. A mini page does not: it
-    // edits exactly one block, so its own writers need no address (see block-tools.ts).
+    // /folio/ also gets the typed block writers, addressed by chunk, and the one-call fold
+    // composer. A mini page gets neither: it edits exactly one block on one fold, so its own
+    // writers need no address and there is no second fold to compose.
     for (const t of buildFolioBlockTools(d)) registry.register(t);
+    for (const t of buildComposeTools(d)) registry.register(t);
     return registry;
   }
 

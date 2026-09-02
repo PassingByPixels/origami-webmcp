@@ -65,12 +65,16 @@ const VALIDATORS: Record<string, (data: unknown) => Violation[]> = {
     makes set_block safe to point at a whole block rather than at markup. */
 export const FOLIO_BLOCK_KINDS = ['chart', 'venn', 'flow', 'graph', 'gantt', 'draw', 'table'] as const;
 
+/** The one validator for a data kind, for callers outside this file (the fold composer). There
+    is no second opinion about what a chart is, so there is no second map either. */
+export const validatorFor = (kind: string): ((data: unknown) => Violation[]) | undefined => VALIDATORS[kind];
+
 const DATA_OPEN = (kind: string): string => `<script type="application/json" data-odata="${kind}">`;
 
 /** A figcaption is TEXT. Escaping is not politeness: an unescaped "<" in a caption could open a
     tag inside the figure, and one of those tags is <template>, which the content policy rejects
     — so an un-escaped caption would turn a caption into a refusal, or worse into markup. */
-const escText = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+export const escText = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Where a block lives right now: which fold, which kind, its data, and the exact span of the
     <figure> that carries it, so a rewrite is one splice and everything around it survives. */

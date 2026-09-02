@@ -59,7 +59,7 @@ type InsertBuild =
 
 /** Ported from server.ts buildInsert. Builds a slide.insert op from add_chunk/propose_add args
     (starters / supplied html / composite block render+bake) so add and propose-add share one path. */
-function buildInsert(
+export function buildInsert(
   m: DeckModel,
   args: { kind?: string; html?: string; block?: string; fields?: Record<string, unknown>; position?: number; label?: string; starter?: string }
 ): InsertBuild {
@@ -133,6 +133,31 @@ export function coerceAndValidate(m: DeckModel, chunkId: string, html: string): 
   const dataViolations = validateDataBlocks(baked, m.blocks);
   if (dataViolations.length > 0) refuse(DATA_BLOCK_REFUSAL, { violations: dataViolations });
   return baked;
+}
+
+/**
+ * THE add path — build one fold and land it as ONE op, so an add is one undo step.
+ *
+ * add_chunk, add_custom_fold and add_fold all come here. The capability grant is batched with
+ * the insert rather than applied after it: two ops would be two undo steps for one call, and an
+ * undo that reversed the grant but left the fold would leave the deck claiming a capability it
+ * no longer needs — or the other way round.
+ */
+export function insertFold(
+  deck: DeckStore,
+  args: { kind?: string; html?: string; block?: string; fields?: Record<string, unknown>; position?: number; label?: string; starter?: string }
+): { id: string; index: number; inner: string; grants: string[] } {
+  return deck.mutate((m) => {
+    const b = buildInsert(m, args);
+    if ('error' in b) refuse(b.error, b.extra);
+    const ins = b as Extract<InsertBuild, { id: string }>;
+    const op: Op =
+      ins.grants.length > 0
+        ? { t: 'batch', ops: [ins.insert, { t: 'deck.caps', capabilities: [...m.capabilities, ...ins.grants] }] }
+        : ins.insert;
+    deck.apply(m, op);
+    return { id: ins.id, index: m.order.indexOf(ins.id), inner: ins.inner, grants: ins.grants };
+  });
 }
 
 /**
@@ -433,22 +458,12 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             note: 'DRY RUN — the slide was built, baked and validated but NOT added; the deck is byte-identical and no chunk id exists yet. Call again without dryRun to add it.',
           });
         }
-        const out = deck.mutate((m) => {
-          const b = buildInsert(m, args);
-          if ('error' in b) refuse(b.error, b.extra);
-          const ins = b as Extract<InsertBuild, { id: string }>;
-          const op: Op =
-            ins.grants.length > 0
-              ? { t: 'batch', ops: [ins.insert, { t: 'deck.caps', capabilities: [...m.capabilities, ...ins.grants] }] }
-              : ins.insert;
-          deck.apply(m, op);
-          return { b: ins, index: m.order.indexOf(ins.id) };
-        });
+        const out = insertFold(deck, args);
         return ok({
-          chunkId: out.b.id,
+          chunkId: out.id,
           index: out.index,
-          capabilitiesGranted: out.b.grants,
-          activeContent: activeContentFlags(out.b.inner).map((v) => v.rule),
+          capabilitiesGranted: out.grants,
+          activeContent: activeContentFlags(out.inner).map((v) => v.rule),
           note: 'added to the open Fold and re-rendered — not yet on disk (the human saves).',
         });
       },
@@ -469,22 +484,12 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
         required: ['html'],
       },
       execute: async ({ html, label, position }) => {
-        const out = deck.mutate((m) => {
-          const b = buildInsert(m, { kind: 'free', html, position, label: label ?? 'Custom fold' });
-          if ('error' in b) refuse(b.error, b.extra);
-          const ins = b as Extract<InsertBuild, { id: string }>;
-          const op: Op =
-            ins.grants.length > 0
-              ? { t: 'batch', ops: [ins.insert, { t: 'deck.caps', capabilities: [...m.capabilities, ...ins.grants] }] }
-              : ins.insert;
-          deck.apply(m, op);
-          return { b: ins, index: m.order.indexOf(ins.id) };
-        });
-        const active = activeContentFlags(out.b.inner).map((v) => v.rule);
+        const out = insertFold(deck, { kind: 'free', html, position, label: label ?? 'Custom fold' });
+        const active = activeContentFlags(out.inner).map((v) => v.rule);
         return ok({
-          foldId: out.b.id,
+          foldId: out.id,
           index: out.index,
-          capabilitiesGranted: out.b.grants,
+          capabilitiesGranted: out.grants,
           activeContent: active,
           padlock: active.length > 0,
           note:
