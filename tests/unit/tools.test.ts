@@ -5,7 +5,8 @@ import { ACTIVITY_CAP, ActivityLog } from '../../src/core/activity.js';
 import { DeckStore } from '../../src/core/deck-store.js';
 import { GUIDE_TOPICS } from '../../src/core/guide.js';
 import { ProposalStore, restorableProposals } from '../../src/core/proposal-store.js';
-import { createRegistry } from '../../src/core/tools.js';
+import { createModeRegistry } from '../../src/core/mode-registry.js';
+import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
@@ -17,7 +18,7 @@ import { harness, innerWith, runtimeJs, sampleDeck } from './harness.js';
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 29 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 31 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -29,6 +30,7 @@ describe('tool surface', () => {
       'delete_block',
       'delete_chunk',
       'export_deck',
+      'get_block',
       'get_kind_schema',
       'inspect_render',
       'list_activity',
@@ -44,6 +46,7 @@ describe('tool surface', () => {
       'read_chunk',
       'reject_proposal',
       'save_deck',
+      'set_block',
       'set_chunk_meta',
       'set_deck_meta',
       'set_fold_type',
@@ -510,7 +513,7 @@ describe('save_deck', () => {
     const deck = new DeckStore();
     const proposals = new ProposalStore();
     let captured = '';
-    const registry = createRegistry({
+    const registry = createModeRegistry({
       deck,
       proposals,
       runtimeJs,
@@ -518,7 +521,7 @@ describe('save_deck', () => {
         captured = text;
         return { written: true, where: 'deck.origami.html', note: 'written to the file on disk.' };
       },
-    });
+    }, FOLIO_MODE);
     await registry.invoke('create_deck', { title: 'Somewhere' });
     await registry.invoke('add_chunk', { html: innerWith('Saved heading', 'Saved body') });
     const body = JSON.parse((await registry.invoke('save_deck', {})).content[0]!.text);
@@ -829,14 +832,14 @@ describe('inspect_render', () => {
 
   it('reports a failed measurement as unmeasured rather than as a clean deck', async () => {
     const deck = new DeckStore();
-    const registry = createRegistry({
+    const registry = createModeRegistry({
       deck,
       proposals: new ProposalStore(),
       runtimeJs,
       measure: async () => {
         throw new Error('the deck did not finish rendering within 15s, so nothing was measured');
       },
-    });
+    }, FOLIO_MODE);
     await registry.invoke('create_deck', { title: 'Timeout' });
     const body = JSON.parse((await registry.invoke('inspect_render', {})).content[0]!.text);
     expect(body.measured).toBe(false);
@@ -1505,6 +1508,7 @@ describe('tool annotations', () => {
      the tools actually do. */
   const READ_ONLY = [
     'export_deck',
+    'get_block',
     'get_kind_schema',
     'inspect_render',
     'list_activity',
@@ -1548,9 +1552,12 @@ describe('tool annotations', () => {
     const before = h.deck.serialize();
     const dirtyBefore = h.deck.peek()!.dirty;
 
+    // one bag of arguments serves every reader except get_block, whose `kind` is a DATA-block
+    // kind (chart | venn | …), not a slide kind — omitted here so it reports the whole fold
     const args: Record<string, unknown> = { kind: 'free', chunkId: extra.chunkId };
+    const argsFor = (name: string): Record<string, unknown> => (name === 'get_block' ? { chunkId: extra.chunkId } : args);
     for (const name of READ_ONLY) {
-      const res = await h.call(name, args);
+      const res = await h.call(name, argsFor(name));
       expect(res.isError, `${name}: ${res.content[0]!.text.slice(0, 160)}`).toBeFalsy();
       expect(h.deck.serialize(), `${name} changed the Fold`).toBe(before);
       expect(h.deck.peek()!.dirty, `${name} dirtied the Fold`).toBe(dirtyBefore);
@@ -1576,7 +1583,7 @@ describe('save_deck never claims a save that did not happen', () => {
 
   const deckWith = async (save: (text: string) => Promise<any>) => {
     const deck = new DeckStore();
-    const registry = createRegistry({ deck, proposals: new ProposalStore(), runtimeJs, save });
+    const registry = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, save }, FOLIO_MODE);
     await registry.invoke('create_deck', { title: 'Save shapes' });
     return async () => JSON.parse((await registry.invoke('save_deck', {})).content[0]!.text);
   };
@@ -2293,5 +2300,176 @@ describe('S1 — one data gate, at authoring time', () => {
     const issues = (await h.json('origami_guide', { topic: 'issues' })).knownIssues;
     expect(issues.emptyDataBlockPassesUntilSave).toBeUndefined();
     expect(JSON.stringify(issues)).not.toMatch(/passes the content policy, so add_chunk returns ok/);
+  });
+});
+
+describe('S2 — typed block tools on /folio/', () => {
+  /* The mini pages have had typed writers since the block-tools slice; /folio/ had none, so an
+     agent editing a chart on a deck had to read the whole fold template, hand-splice the figure,
+     re-escape the JSON and write the template back. These two tools do that in one call each,
+     through the same VALIDATORS, the same dataFigure and the same writeFoldInner. */
+
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+
+  it('reads every data block on a fold in ONE call, and one block when asked', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'roadmap' });
+
+    const all = await h.json('get_block', { chunkId: added.chunkId });
+    expect(all.count).toBe(1);
+    expect(all.blocks[0]).toMatchObject({ kind: 'gantt', nth: 0, caption: 'Roadmap' });
+    expect((all.blocks[0].data as any).totalWeeks).toBe(16);
+
+    const one = await h.json('get_block', { chunkId: added.chunkId, kind: 'gantt' });
+    expect(one.data).toEqual(all.blocks[0].data);
+    expect(one.schema).toEqual(KINDS.gantt!.schemaComment);
+  });
+
+  it('set_block replaces the JSON wholesale and the deck still validates', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'venn' });
+
+    const res = await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'venn',
+      data: { count: 2, sets: [{ label: 'Now', color: '#4A8CC4' }, { label: 'Next', color: '#D9A520' }] },
+      caption: 'Where we are',
+    });
+    expect(res).toMatchObject({ chunkId: added.chunkId, kind: 'venn', nth: 0, caption: 'Where we are' });
+
+    const read = await h.json('get_block', { chunkId: added.chunkId, kind: 'venn' });
+    expect((read.data as any).sets.map((s: any) => s.label)).toEqual(['Now', 'Next']);
+    expect(read.caption).toBe('Where we are');
+    // the old seed is gone, not merged
+    expect(h.deck.serialize()).not.toContain('"Us"');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('refuses data that breaks the kind schema, and leaves the fold byte-identical', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'flowchart' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('set_block', { chunkId: added.chunkId, kind: 'flow', data: { nodes: [], edges: [] } });
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).violations.map((v: any) => v.rule)).toContain('flow.nodes.count');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses a kind the fold does not carry, and names the kinds it does', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    const added = await h.json('add_chunk', { starter: 'venn' });
+    const res = await h.call('set_block', { chunkId: added.chunkId, kind: 'chart', data: CHART });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0]!.text);
+    expect(body.error).toMatch(/carries no chart block/);
+    expect(body.error).toMatch(/venn\[0\]/);
+    expect(body.blocks).toEqual([{ kind: 'venn', nth: 0 }]);
+  });
+
+  it('nth addresses the SECOND block of a kind, and never splices the first', async () => {
+    /* Two figures on one fold is what add_fold builds, and the figure finder used to walk
+       backwards to the nearest "<figure" with no check that it had not already closed — which
+       on the second block would have found the FIRST figure and deleted it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Two charts' });
+    const fig = (labels: string[]) =>
+      `<figure class="o-chartfig anim"><script type="application/json" data-odata="chart">${JSON.stringify({ ...CHART, labels }).replace(/</g, '\\u003c')}</script><div class="o-chart" data-chart-mount></div><figcaption>${labels[0]}</figcaption></figure>`;
+    const added = await h.json('add_chunk', {
+      kind: 'free',
+      html: `<div class="slide-inner"><h2>Two</h2>${fig(['A1', 'A2'])}${fig(['B1', 'B2'])}</div>`,
+    });
+
+    const idx = await h.json('get_block', { chunkId: added.chunkId });
+    expect(idx.blocks.map((b: any) => `${b.kind}${b.nth}`)).toEqual(['chart0', 'chart1']);
+    expect(idx.blocks[1].caption).toBe('B1');
+
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'chart', nth: 1, data: { ...CHART, labels: ['Z1', 'Z2'] } });
+    const after = await h.json('get_block', { chunkId: added.chunkId });
+    expect(after.count, 'the first figure must survive').toBe(2);
+    expect((after.blocks[0].data as any).labels).toEqual(['A1', 'A2']);
+    expect((after.blocks[1].data as any).labels).toEqual(['Z1', 'Z2']);
+  });
+
+  it('never swallows a sibling figure when the block it edits has no figure of its own', async () => {
+    /* A REAL data-loss bug in the figure finder, found while adding nth. It walked back to the
+       nearest "<figure" before the block and forward to the next "</figure>", with no check that
+       the opening tag it found had not already closed. On a fold shaped
+       <figure>…</figure> <div><script data-odata="chart"></div> <figure>…</figure>
+       — which is a hand-authored Fold, or one the Studio wrote — that span covers BOTH figures,
+       and set_block/set_chart would have replaced the pair with one new figure. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Siblings' });
+    const venn = { count: 2, sets: [{ label: 'Us', color: '#4A8CC4' }, { label: 'Them', color: '#D9A520' }] };
+    const esc = (d: unknown) => JSON.stringify(d).replace(/</g, '\u003c');
+    const html =
+      '<div class="slide-inner"><h2>Mixed</h2>' +
+      `<figure class="o-vennfig anim"><script type="application/json" data-odata="venn">${esc(venn)}</script><div class="o-venn" data-venn-mount></div><figcaption>First</figcaption></figure>` +
+      `<div class="o-chart-shell"><script type="application/json" data-odata="chart">${esc(CHART)}</script><div class="o-chart" data-chart-mount></div></div>` +
+      `<figure class="o-ganttfig anim"><script type="application/json" data-odata="gantt">${esc({ totalWeeks: 4, startDate: null, lenses: [{ name: 'Plan', color: '#4a8cc4' }], swimlanes: [{ name: 'A', owner: 'O' }], cards: [{ id: 'C1', title: 'Do it', swimlane: 'A', start: 'W1', durationWeeks: 1, lens: 'Plan', type: 'Process', effort: 'EASY', what: '', needs: '', caveat: '', deliverable: '', sources: '', completed: false }], milestones: [] })}</script><div class="o-gantt" data-gantt-mount></div><figcaption>Last</figcaption></figure>` +
+      '</div>';
+    const added = await h.json('add_chunk', { kind: 'free', html });
+    expect((await h.json('get_block', { chunkId: added.chunkId })).count).toBe(3);
+
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'chart', data: { ...CHART, labels: ['Z1', 'Z2'] } });
+
+    const after = await h.json('get_block', { chunkId: added.chunkId });
+    expect(after.blocks.map((b: any) => b.kind), 'both figures must survive').toEqual(['venn', 'chart', 'gantt']);
+    expect((after.blocks[1].data as any).labels).toEqual(['Z1', 'Z2']);
+    expect(h.deck.model().slides.get(added.chunkId)!.inner).toContain('First');
+    expect(h.deck.model().slides.get(added.chunkId)!.inner).toContain('Last');
+  });
+
+  it('bakes a table written through set_block, and rewrites a block that has no figure', async () => {
+    /* add_chunk({kind:"table"}) mints the Studio's .o-table-shell, which is NOT a <figure>. The
+       writer has to rewrite the JSON in place there rather than refuse, and the calc engine has
+       to run on the way in exactly as it does for write_chunk. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Ledger' });
+    const added = await h.json('add_chunk', { kind: 'table', label: 'Budget' });
+    expect(h.deck.model().slides.get(added.chunkId)!.inner).not.toContain('<figure');
+
+    const res = await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'table',
+      data: {
+        columns: [{ label: 'Item' }, { label: 'Cost' }],
+        rows: [['Rent', '1200'], ['Food', '300'], ['Total', '']],
+        formulas: { B3: '=SUM(B1:B2)' },
+      },
+    });
+    expect(res.captionApplied).toBe(false);
+    const read = await h.json('get_block', { chunkId: added.chunkId, kind: 'table' });
+    expect((read.data as any).rows[2][1], 'the formula baked').toBe('1500');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('one set_block is one undo step, and undo returns the exact previous bytes', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Undo' });
+    const added = await h.json('add_chunk', { starter: 'venn' });
+    const before = h.deck.serialize();
+    await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'venn',
+      data: { count: 2, sets: [{ label: 'X', color: '#4A8CC4' }, { label: 'Y', color: '#D9A520' }] },
+    });
+    expect(h.deck.serialize()).not.toBe(before);
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('refuses an unknown chunk rather than guessing which fold was meant', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Blocks' });
+    for (const name of ['get_block', 'set_block']) {
+      const res = await h.call(name, { chunkId: 'snope', kind: 'chart', data: CHART });
+      expect(res.isError, name).toBe(true);
+      expect(JSON.parse(res.content[0]!.text).error, name).toMatch(/unknown chunk "snope"/);
+    }
   });
 });

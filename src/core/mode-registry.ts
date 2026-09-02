@@ -7,7 +7,7 @@
    would report the wrong count in its own status line and nobody would know why. */
 
 import { assembleBlankDeck, loadRuntimeJs } from './blank-deck.js';
-import { buildBlockTools } from './block-tools.js';
+import { buildBlockTools, buildFolioBlockTools } from './block-tools.js';
 import type { DeckStore } from './deck-store.js';
 import { pageGuideTool } from './mode-guide.js';
 import type { ToolMode } from './modes.js';
@@ -22,6 +22,9 @@ export function createModeRegistry(deps: ToolDeps, mode: ToolMode): ToolRegistry
 
   if (!mode.tools) {
     for (const t of all) registry.register(t);
+    // /folio/ also gets the typed block writers, addressed by chunk. A mini page does not: it
+    // edits exactly one block, so its own writers need no address (see block-tools.ts).
+    for (const t of buildFolioBlockTools(d)) registry.register(t);
     return registry;
   }
 

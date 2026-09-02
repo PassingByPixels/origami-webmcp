@@ -144,6 +144,8 @@ function fullGuide(): Record<string, unknown> {
       write_chunk: 'Apply an edited chunk to the open Fold — takes effect immediately.',
       add_chunk: 'Add a new slide (free/table starters; supply html for other kinds; or block+fields for a composite).',
       add_custom_fold: 'Add a whole CUSTOM FOLD (page) from html — an editable page or a raw report.',
+      get_block: "Read one data block's JSON on one fold, by chunkId + kind (+ nth) — or every block on that fold in one call. Read before you replace.",
+      set_block: "Replace one data block's WHOLE JSON on one fold, by chunkId + kind (+ nth). Validated by that kind's own schema; tables bake. It never creates a block.",
       delete_chunk: 'Hide (recoverable) or delete a slide.',
       define_block: 'Register (or update) a composite block def (a reusable typed, inert, human-editable component).',
       list_block_defs: 'List the composite block defs registered in this deck.',

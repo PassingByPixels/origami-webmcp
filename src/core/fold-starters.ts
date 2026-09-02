@@ -19,11 +19,15 @@
 /* Exported so the mini tools' block writers build the SAME figure the Studio's rail does —
    there is one figure builder in this app, not one per page. */
 export function dataFigure(kind: string, figClass: string, mountClass: string, seed: unknown, caption: string): string {
-  const json = JSON.stringify(seed, null, 2).replace(/</g, '\\u003c');
   return `<figure class="${figClass} anim"><script type="application/json" data-odata="${kind}">
-${json}
+${blockJson(seed)}
 </script><div class="${mountClass}" data-${kind}-mount></div><figcaption>${caption}</figcaption></figure>`;
 }
+
+/** A data block's JSON exactly as dataFigure writes it: pretty-printed at 2 spaces with every
+    "<" escaped (the carrier invariant). Exported so a tool that rewrites a block which is NOT
+    wrapped in a figure — the table starter's .o-table-shell is one — writes the same bytes. */
+export const blockJson = (seed: unknown): string => JSON.stringify(seed, null, 2).replace(/</g, '\\u003c');
 
 /* ---------- seeds, verbatim from palette.ts ---------- */
 

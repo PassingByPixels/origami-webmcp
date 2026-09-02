@@ -31,7 +31,7 @@ import { GUIDE_TOPICS, origamiGuide, type GuideTopic } from './guide.js';
 import { analyseRender, unmeasurable, type MeasureFn } from './inspect.js';
 import type { ProposalStore } from './proposal-store.js';
 import { fail, ok, refuse } from './result.js';
-import { ToolRegistry, type ToolDef } from './registry.js';
+import { type ToolDef } from './registry.js';
 import { FOLD_STARTERS, findStarter, starterCatalog } from './fold-starters.js';
 import { FREE_STARTER_INNER, TABLE_STARTER_INNER } from './starters.js';
 import { videoCapsNeeded } from './video-caps.js';
@@ -1158,12 +1158,4 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       },
     },
   ];
-}
-
-/** Build the registry with every tool registered. The registry's activity log is handed to
-    the tools, so list_activity reads the very list `invoke` writes — one log, not two. */
-export function createRegistry(deps: ToolDeps): ToolRegistry {
-  const registry = new ToolRegistry(deps.activity);
-  for (const t of buildTools({ ...deps, activity: registry.activity })) registry.register(t);
-  return registry;
 }
