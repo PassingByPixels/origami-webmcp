@@ -11064,6 +11064,18 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+/* MEASURED, Chromium 151 (2026-09-03): SVG <text> under the card canvas's transform was PAINTED
+   at a stale scale \u2014 a treemap at card scale 1.41 drew "Marketing 180" inside the Sales cell and
+   "Legal" off the svg entirely; at 0.91 every label sat 10% right of its cell centre \u2014 while
+   getBoundingClientRect reported the right box and the rects were right both times. Blink lays
+   SVG text out with a "screen scaling factor" read off the CTM, and that factor is not
+   recomputed when an HTML ancestor's transform changes after first layout, which is exactly
+   what fitting the card does. Any later style invalidation on the svg repainted it correctly,
+   which is how it was diagnosed, and text-rendering: auto in the stylesheet did NOT fix it
+   (same stale factor). geometricPrecision pins the factor to 1: the glyphs are laid out in user
+   units and scaled with the geometry, so there is no factor to go stale. Verified by pixel in
+   e2e/svg-text-scale.spec.ts at scale 1.41 and 0.91. HTML text keeps optimizeLegibility. */
+svg { text-rendering: geometricPrecision; }
 .slide {
   min-height: 100vh;
   width: 100%;
