@@ -8,6 +8,7 @@ export { fontFacesCss, resolveAssetRefs, applyBrandLogoVar, applyFavicon } from 
 export { buildEditedCopy, downloadCopy, isInlineEditable, liteEditNodes, sanitizeInline } from './lite-edit.js';
 export { assembleDeck, setHeadFavicon, type AssembleInput } from './assemble.js';
 export { BASE_CSS, RUNTIME_CSS, LEDGER_EDITOR_CSS } from './css.js';
+export { freezeCardUnits, fitCardSlide, cardScale, canvasScale, CARD_W, CARD_H } from './card-canvas.js';
 export { KINDS_CSS } from './blocks/kinds-css.js';
 export { THEME_CSS, THEMES, type ThemePreset } from './themes.js';
 export { renderGantt, renderGanttError, parseGanttSlideData, normalizeGanttData, packLane, ganttWeekIndex, ganttLensColor, mountGantts, finalizeGantts, GANTT_LANE_PADDING, GANTT_CARD_HEIGHT, GANTT_CARD_VSPACING, GANTT_LABEL_WIDTH, GANTT_PX_PER_WEEK, GANTT_PX_MIN, GANTT_PX_MAX, GANTT_CARD_INSET, GANTT_CARD_GAP, GANTT_CARD_MIN_PX, type GanttRenderOpts, } from './gantt.js';
