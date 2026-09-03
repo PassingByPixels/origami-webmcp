@@ -86,6 +86,224 @@ function usable(intervals, minRun) {
   return intervals.filter((iv) => iv[1] - iv[0] >= minRun);
 }
 
+// src/card-canvas.ts
+var CARD_W = 1280;
+var CARD_H = 720;
+var VW = CARD_W / 100;
+var VH = CARD_H / 100;
+var UNITS = /(-?\d*\.?\d+)(vw|vh|vmin|vmax)\b/g;
+var STYLE_ID = "origami-card-geom";
+function toLogical(css) {
+  return css.replace(UNITS, (_m, n, unit) => {
+    const v = parseFloat(n);
+    const px = unit === "vw" ? v * VW : unit === "vh" ? v * VH : unit === "vmin" ? v * Math.min(VW, VH) : v * Math.max(VW, VH);
+    return `${Math.round(px * 1e3) / 1e3}px`;
+  });
+}
+var HOSTS = [".o-cardgeom"];
+var FOLD = ".slide:where(:has(> .slide-inner:not(.o-doc)))";
+var ROOTED = /^\.slide(?![\w-])/;
+var OUTSIDE = /^(html|body|:root|@|\.o-(top|bottom|print|stage|overlay|banner)\b)/;
+var IN_FOLD = `:where(${HOSTS[0]} > ${FOLD} *)`;
+var IS_FOLD = `:where(${HOSTS[0]} > *):where(:has(> .slide-inner:not(.o-doc)))`;
+function targetCompound(sel) {
+  let depth = 0;
+  let quote = null;
+  let cut = 0;
+  for (let i = 0; i < sel.length; i++) {
+    const c = sel[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    else if (depth === 0 && (c === " " || c === ">" || c === "+" || c === "~")) cut = i + 1;
+  }
+  return { head: sel.slice(0, cut), tail: sel.slice(cut) };
+}
+function scopeSelector(sel) {
+  const parts = [];
+  for (const raw of sel.split(",")) {
+    const part = raw.trim();
+    if (!part) continue;
+    const { head, tail } = targetCompound(part);
+    if (!tail || OUTSIDE.test(tail)) continue;
+    const scope = ROOTED.test(tail) ? IS_FOLD : IN_FOLD;
+    const pe = tail.indexOf("::");
+    parts.push(head + (pe >= 0 ? tail.slice(0, pe) + scope + tail.slice(pe) : tail + scope));
+  }
+  return parts.length ? parts.join(", ") : null;
+}
+function mediaHolds(cond) {
+  let known = false;
+  for (const m of cond.matchAll(/\((min|max)-(width|height)\s*:\s*(-?\d*\.?\d+)px\)/g)) {
+    known = true;
+    const v = parseFloat(m[3]);
+    const own = m[2] === "width" ? CARD_W : CARD_H;
+    if (m[1] === "min" ? own < v : own > v) return false;
+  }
+  return known ? true : null;
+}
+function collect(rules, out) {
+  for (const rule of Array.from(rules)) {
+    if (rule instanceof CSSMediaRule) {
+      const holds = mediaHolds(rule.conditionText);
+      if (holds === false) continue;
+      if (holds === null) {
+        const inner = [];
+        collect(rule.cssRules, inner);
+        if (inner.length) out.push(`@media ${rule.conditionText} { ${inner.join(" ")} }`);
+        continue;
+      }
+      collect(rule.cssRules, out);
+      continue;
+    }
+    if (rule instanceof CSSSupportsRule) {
+      const inner = [];
+      collect(rule.cssRules, inner);
+      if (inner.length) out.push(`@supports ${rule.conditionText} { ${inner.join(" ")} }`);
+      continue;
+    }
+    if (!(rule instanceof CSSStyleRule)) continue;
+    const kept = [];
+    for (const prop of Array.from(rule.style)) {
+      const v = rule.style.getPropertyValue(prop);
+      UNITS.lastIndex = 0;
+      if (!UNITS.test(v)) continue;
+      const bang = rule.style.getPropertyPriority(prop) ? " !important" : "";
+      kept.push(`${prop}: ${toLogical(v)}${bang}`);
+    }
+    UNITS.lastIndex = 0;
+    if (!kept.length) continue;
+    const sel = scopeSelector(rule.selectorText);
+    if (sel) out.push(`${sel} { ${kept.join("; ")}; }`);
+  }
+}
+var CARD_CANVAS_CSS = `
+/* \u2500\u2500 THE CARD LOGICAL CANVAS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   A card fold lays out at a FIXED 1280x720 and is scaled to whatever room the surface has, so its
+   column, its line breaks and every percent-anchored layer inside it are a function of the model
+   alone. The units INSIDE the fold are frozen by a generated sheet (card-canvas.ts); these are the
+   few rules that make the box itself, and they cannot be generated because they are new geometry
+   rather than a rewrite of an existing rule.
+
+   .o-cardfit is set by the viewer and the Studio canvas on the box that holds the fold, and only
+   when the fold really is a card \u2014 a document fold and every scroll deck keep the fluid layout they
+   have always had, which is the whole point of a Scroll.
+
+   THE BAND IS RESERVED OUTSIDE THE CANVAS, not inside it. The masthead is position:fixed and its
+   measured height is --mast-h; taking it as the stage's own padding letterboxes the card into the
+   room BELOW the bar, so clearance holds at every window size without the fold's internal geometry
+   knowing the bar exists. Putting the reserve back inside (the old max(constant, --mast-h) on
+   .slide-inner) would make a taller masthead re-lay-out the card, which is the very coupling this
+   canvas removes.
+
+   TRANSFORM, NOT ZOOM, AND IT WAS MEASURED. zoom scales the LAYOUT box, so the fold is laid out
+   afresh at each drawn size and every line box rounds to a different device pixel: measured, the
+   content column came out 535 / 522 / 524 / 532 logical px tall across the four test windows, which
+   is up to 6 px of movement for a layer anchored at 45% of it. A transform lays the fold out ONCE at
+   1280x720 and scales only the paint, so the column is the same height at every window and the
+   drift is not small, it is zero. The cost is that the layout box stays 1280x720 behind the scaled
+   paint, which is why the letterbox clips.
+   --oscale defaults to 1, so a surface that never publishes one (the print clones, a unit-test DOM)
+   draws the card at its logical size, unscaled.
+
+   TWO CLASSES, NOT ONE. .o-cardgeom is the FREEZE \u2014 the logical units, and nothing else. .o-cardfit
+   adds the letterbox on top of it. They are separate because the print clones need the freeze and
+   must not get the letterbox: .o-cardfit carries display:flex, and .o-print's display:none is the
+   only thing keeping the clones off the screen. A scroll deck takes neither, so a scroll section's
+   own padding survives into its print clone.
+
+   THE CANVAS RULES REPEAT THEIR CLASS, deliberately. The frozen sheet re-emits whole declaration
+   blocks, so BASE_CSS's own .slide rule comes back carrying width:100% and min-height:100vh at the
+   same weight as these and later in the cascade \u2014 measured, it stretched the fold to 1363px at
+   1920x1080. Repeating .o-cardfit is the same move the float margin rule makes, and for the same
+   reason: win the tie without !important, so an author's own CSS can still beat it. */
+.o-cardfit { display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+/* the un-scaled layout box is still 1280x720 behind the paint, so the letterbox has to clip it;
+   clip and not hidden \u2014 a scroll container here would let the page scroll to the dead area */
+.o-stage.o-cardfit { height: 100vh; padding-top: var(--mast-h, 0px); overflow: clip; }
+.o-cardfit.o-cardfit > .slide:has(> .slide-inner:not(.o-doc)) {
+  flex: none; width: 1280px; height: 720px; min-height: 0;
+  transform: scale(var(--oscale, 1)); transform-origin: center center;
+  /* flex-START, with the column's own margin:auto doing the centring. justify-content:center
+     overflows a too-tall column BOTH ways and the first line goes off the top of the scrollport \u2014
+     measured, the column's layout top sat 869.5px above the fold. An auto margin absorbs only
+     POSITIVE free space, so it centres a short fold and yields to flex-start on a tall one. */
+  justify-content: flex-start;
+  /* A card taller than its own canvas scrolls INSIDE the canvas \u2014 the "starts at the top, scrolls,
+     stays reachable" guarantee, kept but moved: the fold is a fixed rectangle now, so the overflow
+     belongs to it rather than to the page. margin:auto on the column is what centres a short fold
+     while leaving a tall one's first line reachable; justify-content:center alone would push the
+     top of an overflowing column out of the scrollport. */
+  overflow-x: clip; overflow-y: auto;
+}
+.o-cardfit.o-cardfit > .slide:has(> .slide-inner:not(.o-doc)) > .slide-inner { margin: auto; }
+/* \u2026AND THE FOLD IS TOLD THE BAR IS NOT ITS PROBLEM. The reserve above is the stage's own padding, so
+   the in-fold reserve \u2014 BASE_CSS's .o-stage .slide-inner padding-top, max(constant, --mast-h) \u2014
+   must not add a second one: measured, a 189px masthead put 189px of padding inside a card whose
+   print clone had 86.4px, which is the bar reserved twice and a fold that re-lays-out whenever the
+   bar's height changes. Zeroing the VARIABLE inside the fold is what says that, and it says it in the
+   one place that reaches an old deck: the deck carries its own copy of that rule, so a change to
+   BASE_CSS could never reach the decks already saved. The clamp survives untouched \u2014 the freeze
+   rewrites it to the card's own px \u2014 and every other reader of --mast-h is outside a card fold (the
+   stage itself, and the scroll/document clearances). */
+.o-cardgeom > .slide:has(> .slide-inner:not(.o-doc)) { --mast-h: 0px; }
+`;
+function freezeCardUnits(doc = document) {
+  const out = [];
+  for (const sheet of Array.from(doc.styleSheets)) {
+    if (sheet.ownerNode?.id === STYLE_ID) continue;
+    let rules;
+    try {
+      rules = sheet.cssRules;
+    } catch {
+      continue;
+    }
+    collect(rules, out);
+  }
+  let style = doc.getElementById(STYLE_ID);
+  if (!style) {
+    style = doc.createElement("style");
+    style.id = STYLE_ID;
+  }
+  doc.head.appendChild(style);
+  style.textContent = CARD_CANVAS_CSS + "\n" + out.join("\n");
+}
+function canvasScale(el6) {
+  const v = parseFloat(getComputedStyle(el6).getPropertyValue("--oscale"));
+  return Number.isFinite(v) && v > 0.01 ? v : 1;
+}
+function cardScale(box) {
+  const cs = getComputedStyle(box);
+  const w = box.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0");
+  const h = box.clientHeight - parseFloat(cs.paddingTop || "0") - parseFloat(cs.paddingBottom || "0");
+  if (!(w > 0) || !(h > 0)) return 1;
+  return Math.min(w / CARD_W, h / CARD_H);
+}
+function fitCardSlide(box, slide) {
+  const isCard = !!slide && !!slide.querySelector(":scope > .slide-inner:not(.o-doc)");
+  box.classList.toggle("o-cardgeom", isCard);
+  box.classList.toggle("o-cardfit", isCard);
+  if (!isCard || !slide) return () => {
+  };
+  let last = -1;
+  const publish = () => {
+    const s2 = cardScale(box);
+    if (Math.abs(s2 - last) < 1e-4) return;
+    last = s2;
+    slide.style.setProperty("--oscale", String(s2));
+  };
+  publish();
+  if (typeof ResizeObserver === "undefined") return () => {
+  };
+  const ro = new ResizeObserver(publish);
+  ro.observe(box);
+  return () => ro.disconnect();
+}
+
 // src/wrap-runs.ts
 var CJK = /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-퟿豈-﫿︰-﹏＀-｠]/;
 var MAX_BLOCKED_RUN = 400;
@@ -158,7 +376,7 @@ function runnable(leaf) {
 function runsMounted(leaf) {
   return leaf.hasAttribute("data-orun");
 }
-function pseudoAdvance(leaf, cs) {
+function pseudoAdvance(leaf, cs, s2) {
   if (getComputedStyle(leaf, "::before").content === "none" && getComputedStyle(leaf, "::after").content === "none") {
     return { pre: 0, post: 0 };
   }
@@ -169,10 +387,10 @@ function pseudoAdvance(leaf, cs) {
   const align = leaf.style.textAlign;
   leaf.style.textAlign = "left";
   const lr0 = leaf.getBoundingClientRect();
-  const pre = tip.getBoundingClientRect().left - (lr0.left + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0));
+  const pre = (tip.getBoundingClientRect().left - lr0.left) / s2 - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.paddingLeft) || 0);
   leaf.style.textAlign = "right";
   const lr1 = leaf.getBoundingClientRect();
-  const post = lr1.right - (parseFloat(cs.borderRightWidth) || 0) - (parseFloat(cs.paddingRight) || 0) - tip.getBoundingClientRect().right;
+  const post = (lr1.right - tip.getBoundingClientRect().right) / s2 - (parseFloat(cs.borderRightWidth) || 0) - (parseFloat(cs.paddingRight) || 0);
   if (align) leaf.style.textAlign = align;
   else leaf.style.removeProperty("text-align");
   tip.remove();
@@ -195,7 +413,7 @@ function buildProbe(leaf, clone) {
   leaf.appendChild(probe);
   return probe;
 }
-function textMeasure(probe) {
+function textMeasure(probe, s2) {
   const nodes = [];
   const walk = document.createTreeWalker(probe, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n !== null; n = walk.nextNode()) nodes.push(n);
@@ -232,7 +450,7 @@ function textMeasure(probe) {
     const key = a * 1e6 + b;
     const hit = cache.get(key);
     if (hit !== void 0) return hit;
-    const w = rangeOver(a, b).getBoundingClientRect().width;
+    const w = rangeOver(a, b).getBoundingClientRect().width / s2;
     cache.set(key, w);
     return w;
   };
@@ -329,13 +547,14 @@ function mountRuns(leaf, exclusions, minRun) {
   const clone = leaf.cloneNode(true);
   const stash = document.createDocumentFragment();
   while (leaf.firstChild) stash.appendChild(leaf.firstChild);
-  const gen = pseudoAdvance(leaf, cs);
+  const s2 = canvasScale(leaf);
+  const gen = pseudoAdvance(leaf, cs, s2);
   if (gen.post > 0.5) {
     leaf.appendChild(stash);
     return null;
   }
   const probe = buildProbe(leaf, clone);
-  const { text, rangeOver, widthOf } = textMeasure(probe);
+  const { text, rangeOver, widthOf } = textMeasure(probe, s2);
   const toks = tokenize(text);
   const { lines, genX } = layoutLines({ toks, exclusions, measure, lh, minRun: Math.min(minRun, measure), pre: gen.pre, widthOf });
   if (gen.pre > 0 && !genLanded(lines, genX, gen.pre)) {
@@ -12017,6 +12236,7 @@ function createViewer(manifest, hooks, assets = {}) {
   style.id = "origami-runtime-css";
   style.textContent = RUNTIME_CSS;
   document.head.appendChild(style);
+  freezeCardUnits();
   const fontCss = fontFacesCss(assets);
   if (fontCss) {
     const fonts = document.createElement("style");
@@ -12228,11 +12448,15 @@ function createViewer(manifest, hooks, assets = {}) {
     );
     renderSubpips(i);
   }
+  let releaseFit = () => {
+  };
   function mount() {
     const id = visibleOrder[idx];
     stage.innerHTML = "";
     const slide = cloneSlide(id);
     stage.appendChild(slide);
+    releaseFit();
+    releaseFit = fitCardSlide(stage, slide);
     wireEditing(slide);
     mountKind(manifest.slides[id]?.kind ?? "", slide);
     mountCountUps(slide);
@@ -12245,6 +12469,10 @@ function createViewer(manifest, hooks, assets = {}) {
     markActive(idx);
   }
   function mountContinuous() {
+    releaseFit();
+    releaseFit = () => {
+    };
+    stage.classList.remove("o-cardfit");
     stage.innerHTML = "";
     for (const id of visibleOrder) {
       const slide = cloneSlide(id);
@@ -12301,6 +12529,7 @@ function createViewer(manifest, hooks, assets = {}) {
   }
   function refreshPrint() {
     printHost.innerHTML = "";
+    printHost.classList.toggle("o-cardgeom", !isScroll);
     for (const id of visibleOrder) {
       const slide = cloneSlide(id, true);
       slide.classList.add("is-shown");
@@ -12429,7 +12658,9 @@ function createViewer(manifest, hooks, assets = {}) {
     if (bandRaf) return;
     bandRaf = requestAnimationFrame(() => {
       bandRaf = 0;
-      stage.querySelectorAll(".slide .slide-inner:not(.o-doc)").forEach(reserveCardBands);
+      stage.querySelectorAll(".slide .slide-inner:not(.o-doc)").forEach((inner) => {
+        if (!inner.closest(".o-cardgeom")) reserveCardBands(inner);
+      });
     });
   });
   window.addEventListener("beforeprint", () => {
@@ -13964,6 +14195,8 @@ ${runtimeJs}
 }
 export {
   BASE_CSS,
+  CARD_H,
+  CARD_W,
   CHART_FONT_STACK,
   CHART_H,
   CHART_PALETTE,
@@ -13994,6 +14227,8 @@ export {
   assembleDeck,
   bandSlot,
   buildEditedCopy,
+  canvasScale,
+  cardScale,
   createViewer,
   docBlockFull,
   docFinalize,
@@ -14013,8 +14248,10 @@ export {
   finalizeTables,
   finalizeTrackers,
   finalizeVenns,
+  fitCardSlide,
   fontFacesCss,
   freeIntervals,
+  freezeCardUnits,
   ganttLensColor,
   ganttWeekIndex,
   graphLayout,

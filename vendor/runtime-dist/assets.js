@@ -1,3 +1,13 @@
+// src/card-canvas.ts
+var CARD_W = 1280;
+var CARD_H = 720;
+var VW = CARD_W / 100;
+var VH = CARD_H / 100;
+var HOSTS = [".o-cardgeom"];
+var FOLD = ".slide:where(:has(> .slide-inner:not(.o-doc)))";
+var IN_FOLD = `:where(${HOSTS[0]} > ${FOLD} *)`;
+var IS_FOLD = `:where(${HOSTS[0]} > *):where(:has(> .slide-inner:not(.o-doc)))`;
+
 // src/document.ts
 var ALPHA_ROWS = 64;
 var ALPHA_THRESHOLD = 16;
