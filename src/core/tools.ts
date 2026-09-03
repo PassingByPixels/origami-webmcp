@@ -261,13 +261,13 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'origami_guide',
       annotations: { readOnlyHint: true },
-      description: "START HERE. The Origami contract: what a Fold is, the read-edit-write chunk protocol, every kind schema, the inert/active rules, the capability model and the tool catalog. Pass topic:\"quickstart\" FIRST if you are building a deck — under 3 KB, the five calls that do it, with a complete add_fold example. topic: quickstart | contract | kinds | recipes | starters | issues | tools. Pass kind for one kind's schema.",
+      description: "START HERE. The Origami contract: what a Fold is, the read-edit-write chunk protocol, every kind schema, the inert/active rules, the capability model and the tool catalog. Pass topic:\"quickstart\" FIRST if you are building a deck — under 3 KB, the five calls that do it, with a complete add_fold example. topic: quickstart | contract | kinds | recipes | starters | issues | tools | blocks. Pass kind for one kind's schema.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
         properties: {
           kind: { type: 'string', description: 'Optional: one kind to detail (else the whole contract)' },
-          topic: { type: 'string', enum: GUIDE_TOPICS, description: 'Optional: one section only — contract | kinds | recipes | starters | issues | tools' },
+          topic: { type: 'string', enum: GUIDE_TOPICS, description: 'Optional: one section only — contract | kinds | recipes | starters | issues | tools | blocks' },
         },
       },
       execute: async ({ kind, topic }) => {
@@ -865,7 +865,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       name: 'undo',
       // NOT in the stdio server: it has no session, so it has no stack to unwind. This is a
       // web-only tool built on @origami/format's History, which the page keeps per open Fold.
-      description: "Reverse the LAST change to the open Fold and re-render it. One tool call is one undo step, so a run_batch of six is six steps. It covers every writer (origami_guide({topic:\"tools\"}) lists them). It does NOT cross create_deck or a Fold the human opened — both reset the stack — does not touch bytes already on disk, and does not cover a staged proposal (reject_proposal) or a saved theme (delete_theme). 50 deep, no redo.",
+      description: "Reverse the LAST change to the open Fold and re-render it. One tool call is one undo step, so a run_batch of six is six steps. It covers every writer (origami_guide({topic:\"tools\"}) lists them). It does NOT cross create_deck or a Fold the human opened — both reset the stack — does not touch bytes already on disk, and does not cover a staged proposal (reject_proposal) or a saved theme (delete_theme). 50 steps deep, no redo. revert_to_saved drops a whole run_batch in one call.",
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const undone = deck.undo();
@@ -877,6 +877,29 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           remainingUndoSteps: deck.undoDepth(),
           chunks: deck.model().order.length,
           note: 'reversed in the open Fold and re-rendered — the file on disk is unchanged until save_deck runs again. There is no redo.',
+        });
+      },
+    },
+
+    {
+      name: 'revert_to_saved',
+      annotations: { destructiveHint: true },
+      // NOT in the stdio server, for the same reason undo is not: it has no session and no
+      // History to jump. This is the "safe pivot" a run_batch that went sideways needs — undo
+      // is one call per step (a 19-call batch is 19 undos), this is one call, period.
+      description:
+        "Drop EVERY unsaved change on the open Fold in ONE call — NOT undo (one step at a time). Jumps to the last save_deck, or to how the Fold was created/opened if never saved, clearing the undo stack in the same move — the safe pivot after a bad run_batch. Cannot itself be undone. Touches no disk. Refuses when nothing is open or nothing is unsaved.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      execute: async () => {
+        const result = deck.revertToSaved();
+        if (result === null) {
+          return fail('nothing to revert — no change since the Fold was created, opened or last saved');
+        }
+        return ok({
+          revertedTo: result.revertedTo,
+          droppedUndoSteps: result.droppedUndoSteps,
+          chunks: deck.model().order.length,
+          note: 'reverted in the open Fold and re-rendered — nothing on disk or in browser storage was touched, and the undo stack was cleared by the revert, so this cannot itself be undone.',
         });
       },
     },
