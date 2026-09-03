@@ -10,10 +10,10 @@ import { ProposalStore, restorableProposals } from '../../src/core/proposal-stor
 import { createModeRegistry } from '../../src/core/mode-registry.js';
 import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
-import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, chartPlotHeight } from '../../src/core/compose.js';
+import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, SIZE_RANGE, chartPlotHeight, graphFitHeight } from '../../src/core/compose.js';
 import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
 import { BATCH_MAX } from '../../src/core/batch-tool.js';
-import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
+import { FOLD_STARTERS, GRAPH_FIT_HEIGHT, MIN_GRAPH_HEIGHT } from '../../src/core/fold-starters.js';
 import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
 import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harness.js';
@@ -2513,6 +2513,10 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
      policy, same data gate, ONE op on the undo stack. */
 
   const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+  const GRAPH = { nodes: [{ id: 'a', label: 'A', x: 20, y: 30, tone: '' }, { id: 'b', label: 'B', x: 70, y: 60, tone: '' }], edges: [{ from: 'a', to: 'b', label: '' }] };
+  const FLOW = { nodes: [{ id: 'n1', label: 'Build', shape: 'box', tone: '' }, { id: 'n2', label: 'Ship', shape: 'box', tone: '' }], edges: [{ from: 'n1', to: 'n2', label: '' }] };
+  const VENN = { count: 2, sets: [{ label: 'A', color: '#4A8CC4' }, { label: 'B', color: '#D9A520' }] };
+  const DRAW = { elements: [{ id: 'e1', type: 'rect', x: 20, y: 20, width: 200, height: 100, stroke: '#1A1A1A', fill: '', seed: 7 }] };
   const innerOf = (h: ReturnType<typeof harness>, id: string) => h.deck.model().slides.get(id)!.inner;
 
   it('builds ONE card with an eyebrow, a heading and the blocks in order', async () => {
@@ -2608,6 +2612,141 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
 
     const own = await h.json('add_fold', { title: 'Own', blocks: [{ chart: { ...CHART, plotHeight: 420 } }] });
     expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(420);
+  });
+
+  it('sizes a graph to FIT, and lets a sized block name its own width and height', async () => {
+    /* MEASURED, not chosen (tools/agent-bridge.mjs at 1280x720, 2026-09-03): a default node
+       graph on a bare card renders 875px against 720px of screen. --obh GRAPH_FIT_HEIGHT brings
+       the same card to 676px; the e2e suite proves fits:true on the real render, this holds the
+       markup that produces it. A block that names its own size is obeyed. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Sized' });
+
+    const auto = await h.json('add_fold', { title: 'Auto', blocks: [{ graph: GRAPH, caption: 'Map' }] });
+    expect(innerOf(h, auto.chunkId)).toContain(`<figure class="o-graphfig anim" style="--obh:${GRAPH_FIT_HEIGHT}px">`);
+
+    const own = await h.json('add_fold', { title: 'Own', blocks: [{ graph: GRAPH, width: 700, height: 500 }] });
+    expect(innerOf(h, own.chunkId)).toContain('<figure class="o-graphfig anim" style="--obw:700px;--obh:500px">');
+
+    // width alone emits only --obw; the height stays the runtime's own
+    const wide = await h.json('add_fold', { title: 'Wide', blocks: [{ flow: FLOW, width: 600 }] });
+    expect(innerOf(h, wide.chunkId)).toContain('<figure class="o-flowfig anim" style="--obw:600px">');
+
+    /* On a GRAPH, narrowing must not cost the fit: a width with no height still gets the
+       measured default height, which is the whole point of narrowing to make room for copy. */
+    const narrow = await h.json('add_fold', { title: 'Narrow', blocks: [{ graph: GRAPH, width: 600 }] });
+    expect(innerOf(h, narrow.chunkId)).toContain(`<figure class="o-graphfig anim" style="--obw:600px;--obh:${GRAPH_FIT_HEIGHT}px">`);
+
+    // and every fold built here is still a valid Fold
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('emits NO style attribute when a block names no size — the figure bytes are unchanged', async () => {
+    /* The guarantee that lets the size ride on the ONE figure builder: a block with neither
+       width nor height must produce exactly the markup the composer produced before sizes
+       existed, or every fixture and every saved Fold shifts under it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Bare' });
+    const bare = await h.json('add_fold', { title: 'Bare', blocks: [{ flow: FLOW, caption: 'Steps' }, { chart: CHART }, { venn: VENN }] });
+    const inner = innerOf(h, bare.chunkId);
+    expect(inner).toContain('<figure class="o-flowfig anim"><script type="application/json" data-odata="flow">');
+    expect(inner).toContain('<figure class="o-chartfig anim"><script type="application/json" data-odata="chart">');
+    expect(inner).toContain('<figure class="o-vennfig anim"><script type="application/json" data-odata="venn">');
+    expect(inner, 'no block asked for a size, so no figure carries one').not.toContain('--obw');
+    expect(inner, 'graph is the only kind with a default height, and there is no graph here').not.toContain('--obh');
+  });
+
+  it('takes prose on the card off the graph, the way it does off a chart', async () => {
+    /* MEASURED on the same run: one lede paragraph costs a graph card 106-107px (875 -> 981
+       with no --obh, 716 -> 823 at --obh 360) — the same PROSE_COST a chart pays. So the card
+       decides the graph's height, not the block. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Prose' });
+    const withProse = await h.json('add_fold', {
+      title: 'With copy',
+      blocks: [{ text: '<p class="lede">A line of copy above the map.</p>' }, { graph: GRAPH }],
+    });
+    const shrunk = graphFitHeight([{ text: 'x' }, { graph: GRAPH }]);
+    expect(shrunk).toBeLessThan(GRAPH_FIT_HEIGHT);
+    expect(shrunk).toBeGreaterThanOrEqual(MIN_GRAPH_HEIGHT);
+    expect(innerOf(h, withProse.chunkId)).toContain(`style="--obh:${shrunk}px"`);
+    // and it never falls below the floor, however much prose is on the card
+    expect(graphFitHeight([{ text: 'a' }, { bullets: ['b'] }, { quote: { text: 'c' } }, { graph: GRAPH }])).toBe(MIN_GRAPH_HEIGHT);
+  });
+
+  it('refuses a size on a block whose CSS would ignore it, and adds NOTHING', async () => {
+    /* MEASURED in the real preview (2026-09-03): with --obw:600px;--obh:300px on the figure the
+       rendered block narrows for venn/flow/graph/gantt/table (166px against 318px bare) and does
+       NOT MOVE for chart (182 both) or draw (318 both). A key that changes nothing is refused,
+       not dropped — an agent that cannot see the deck has no other way to find out. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Refusals' });
+    const before = h.deck.serialize();
+
+    const chart = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, width: 600 }] });
+    expect(chart.isError).toBe(true);
+    expect(JSON.parse(chart.content[0]!.text).error).toMatch(/blocks\[0\] names width on a chart block, which the runtime would ignore .*plotHeight/);
+
+    const draw = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { draw: DRAW, height: 300 }] });
+    expect(draw.isError).toBe(true);
+    expect(JSON.parse(draw.content[0]!.text).error).toMatch(/blocks\[1\] names height on a draw block.*wpct/);
+
+    const prose = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>', width: 600 }] });
+    expect(prose.isError).toBe(true);
+    expect(JSON.parse(prose.content[0]!.text).error).toMatch(/blocks\[0\] names width on a text block/);
+
+    expect(h.deck.serialize(), 'every refusal left the Fold exactly as it was').toBe(before);
+  });
+
+  it('refuses a size that is not a whole number of px inside its range', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Range' });
+    const before = h.deck.serialize();
+    const bad = async (block: Record<string, unknown>) => {
+      const r = await h.call('add_fold', { title: 'T', blocks: [block] });
+      expect(r.isError).toBe(true);
+      return JSON.parse(r.content[0]!.text).error as string;
+    };
+
+    expect(await bad({ graph: GRAPH, width: SIZE_RANGE.width[0] - 1 })).toMatch(/blocks\[0\]\.width must be a whole number of CSS px between 160 and 2600/);
+    expect(await bad({ graph: GRAPH, height: SIZE_RANGE.height[1] + 1 })).toMatch(/blocks\[0\]\.height must be a whole number of CSS px between 120 and 2160/);
+    expect(await bad({ graph: GRAPH, width: 600.5 })).toMatch(/got 600\.5/);
+    expect(await bad({ graph: GRAPH, width: '600' })).toMatch(/got "600"/);
+    expect(await bad({ graph: GRAPH, height: null })).toMatch(/got null/);
+
+    expect(h.deck.serialize(), 'nothing was added').toBe(before);
+  });
+
+  it('set_block keeps the block size when it rebuilds the figure', async () => {
+    /* set_block REPLACES the whole figure so the mount and the caption stay in step with the
+       data. Without carrying the figure's style, the first data edit would silently undo the
+       size the author asked add_fold for — and the runtime would go back to overflowing. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Rebuild' });
+    const added = await h.json('add_fold', { title: 'Map', blocks: [{ graph: GRAPH, width: 640, height: 420, caption: 'Map' }] });
+    expect(innerOf(h, added.chunkId)).toContain('style="--obw:640px;--obh:420px"');
+
+    const NEXT = { nodes: [{ id: 'x', label: 'X', x: 30, y: 30, tone: '' }, { id: 'y', label: 'Y', x: 70, y: 70, tone: '' }], edges: [{ from: 'x', to: 'y', label: 'to' }] };
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'graph', data: NEXT });
+
+    const after = innerOf(h, added.chunkId);
+    expect(after, 'the size survived the data rewrite').toContain('<figure class="o-graphfig anim" style="--obw:640px;--obh:420px">');
+    expect(after).toContain('"label": "X"');
+    expect((await h.json('get_block', { chunkId: added.chunkId, kind: 'graph' })).data).toMatchObject({ edges: [{ label: 'to' }] });
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('starts the node-graph starter at a height that fits, and leaves every other starter alone', async () => {
+    /* The starter is the other way an agent gets a graph, and it overflowed for the same
+       reason. Its seed, classes and caption stay palette.ts verbatim; only the size is added. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Starters' });
+    const graph = await h.json('add_chunk', { starter: 'node-graph' });
+    expect(innerOf(h, graph.chunkId)).toContain(`<figure class="o-graphfig anim" style="--obh:${GRAPH_FIT_HEIGHT}px">`);
+
+    const flow = await h.json('add_chunk', { starter: 'flowchart' });
+    expect(innerOf(h, flow.chunkId), 'flow measured 660px on its own — it needs no size').toContain('<figure class="o-flowfig anim"><script');
+    expect(innerOf(h, flow.chunkId)).not.toContain('--ob');
   });
 
   it('animates a stat card whenever the value holds a digit, decorated or not', async () => {

@@ -86,6 +86,10 @@ export interface BlockSite {
   caption: string;
   /** The whole <figure>…</figure>, verbatim. */
   figure: string;
+  /** The figure's own `style` attribute value, or "" when it has none — the block-size grips'
+      carrier (--obw / --obh). Captured because applyBlock and set_block REBUILD the figure, and
+      a size the author set would otherwise be dropped by the next data edit. */
+  style: string;
   /** The fold's whole inner, and the figure's offsets inside it. */
   inner: string;
   start: number;
@@ -129,7 +133,9 @@ function figureAround(inner: string, kind: string, nth = 0): Omit<BlockSite, 'ch
   const end = figEnd + '</figure>'.length;
   const figure = inner.slice(figStart, end);
   const cap = /<figcaption[^>]*>([\s\S]*?)<\/figcaption>/.exec(figure);
-  return { kind, data: s.data, caption: cap ? cap[1]! : '', figure, start: figStart, end };
+  // only the OPENING tag's style, never one on a child — the grips write on the figure itself
+  const sty = /^<figure[^>]*?\sstyle="([^"]*)"/.exec(figure);
+  return { kind, data: s.data, caption: cap ? cap[1]! : '', style: sty ? sty[1]! : '', figure, start: figStart, end };
 }
 
 /** The first fold carrying a block of one of this page's kinds. */
@@ -160,8 +166,8 @@ function requireSite(deck: DeckStore, mode: ToolMode): BlockSite {
 
 /** Build the figure this kind's schema specifies. o-<kind>fig / o-<kind> / data-<kind>-mount is
     the shape every one of the four schemaComments states; dataFigure emits exactly that. */
-export const blockFigure = (kind: string, data: unknown, caption: string): string =>
-  dataFigure(kind, `o-${kind}fig`, `o-${kind}`, data, escText(caption));
+export const blockFigure = (kind: string, data: unknown, caption: string, style = ''): string =>
+  dataFigure(kind, `o-${kind}fig`, `o-${kind}`, data, escText(caption), style);
 
 /**
  * Validate, rebuild, write. The ONE mutating path every tool in this file uses.
@@ -174,7 +180,8 @@ function applyBlock(deck: DeckStore, site: BlockSite, kind: string, data: unknow
   if (violations.length > 0) {
     refuse(`the ${kind} data breaks its own schema — NOTHING was applied and the Fold is unchanged`, { violations });
   }
-  const next = site.inner.slice(0, site.start) + blockFigure(kind, data, caption) + site.inner.slice(site.end);
+  // site.style rides along: editing a block's DATA must not resize the block
+  const next = site.inner.slice(0, site.start) + blockFigure(kind, data, caption, site.style) + site.inner.slice(site.end);
   writeFoldInner(deck, site.chunkId, next);
 }
 
@@ -592,7 +599,7 @@ function folioTools(deck: DeckStore): ToolDef[] {
            hand-rolled wrapper (the table starter's .o-table-shell) has no figure to rebuild, so
            only the JSON is replaced — the wrapper the human is looking at is left exactly as it is. */
         const next = site
-          ? inner.slice(0, site.start) + blockFigure(kind, data, caption ?? site.caption) + inner.slice(site.end)
+          ? inner.slice(0, site.start) + blockFigure(kind, data, caption ?? site.caption, site.style) + inner.slice(site.end)
           : inner.slice(0, script.start) + `${DATA_OPEN(kind)}\n${blockJson(data)}\n</script>` + inner.slice(script.end);
         writeFoldInner(deck, chunkId, next);
         return ok({
