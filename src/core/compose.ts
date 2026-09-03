@@ -113,8 +113,13 @@ export const SIZE_RANGE = { width: [160, 2600], height: [120, 2160] } as const;
  */
 const SIZED_KINDS = ['venn', 'flow', 'graph', 'gantt', 'table'] as const;
 
+/** Kinds whose figure reads --obw but not --obh. `chart` joined on the Folio 610e732 runtime
+    (figure.o-chartfig { width: min(var(--obw,100%),100%) } — before that a chart read neither, the
+    182 vs 182 above); its height is still the plot box inside its own JSON. */
+const WIDTH_ONLY_KINDS = ['chart'] as const;
+
 const OWN_SIZE_CONTROL: Record<string, string> = {
-  chart: 'a chart is sized by `plotHeight` inside its own JSON (the composer already fits that to the card); it has NO width control at all, because the chart CSS in the runtime reads neither --obw nor --obh',
+  chart: 'a chart\'s HEIGHT is `plotHeight` inside its own JSON (the composer already fits that to the card) — `width` is accepted, `height` is not',
   draw: 'a drawing is sized by `wpct` (10-100, a percent of the measure) inside its own JSON, and its height follows the canvas aspect',
 };
 
@@ -129,9 +134,11 @@ const OWN_SIZE_CONTROL: Record<string, string> = {
  */
 function blockSize(b: Record<string, unknown>, i: number, kind: string, defaultHeight: number): { style: string } | { error: string } {
   const named = (['width', 'height'] as const).filter((k) => b[k] !== undefined);
-  if (named.length > 0 && !(SIZED_KINDS as readonly string[]).includes(kind)) {
+  const widthOnly = (WIDTH_ONLY_KINDS as readonly string[]).includes(kind);
+  const ignored = widthOnly ? named.filter((k) => k === 'height') : (SIZED_KINDS as readonly string[]).includes(kind) ? [] : named;
+  if (ignored.length > 0) {
     const why = OWN_SIZE_CONTROL[kind] ?? `only a data block (${SIZED_KINDS.join(', ')}) carries a size`;
-    return { error: `blocks[${i}] names ${named.join(' and ')} on a ${kind} block, which the runtime would ignore — ${why}. NOTHING was added and the Fold is unchanged` };
+    return { error: `blocks[${i}] names ${ignored.join(' and ')} on a ${kind} block, which the runtime would ignore — ${why}. NOTHING was added and the Fold is unchanged` };
   }
   const px: string[] = [];
   for (const k of ['width', 'height'] as const) {

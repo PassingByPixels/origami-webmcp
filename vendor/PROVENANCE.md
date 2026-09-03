@@ -1,10 +1,12 @@
 # Vendored artifacts - provenance
 
 Source repo: the Origami Folio monorepo (private)
-Source state: Folio master @ d6500ba (2026-09-03 pm: svg { text-rendering: geometricPrecision } -
-              SVG chart/diagram labels were painted at a stale scale under the card transform;
-              on top of 41061b8 card geometry + the 2026-09-02 optimize + UAT arcs). Vendor = the
-              dists of that commit. Only runtime-dist/index.js (the stylesheet) and css.d.ts moved.
+Source state: Folio master @ 610e732 (2026-09-03 pm, two runtime CSS fixes on top of 41061b8
+              card geometry + the 2026-09-02 optimize + UAT arcs: svg { text-rendering:
+              geometricPrecision } - chart/diagram labels were painted at a stale scale under the
+              card transform - and figure.o-chartfig reads --obw, so a chart can be narrowed like
+              every other data figure). Vendor = the dists of that commit. Only runtime-dist/index.js
+              (the stylesheet) and the css .d.ts files moved.
 Previous:     master @ 41061b8 (2026-09-02 copy)
 Copied: 2026-09-03
 

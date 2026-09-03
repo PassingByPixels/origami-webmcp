@@ -802,10 +802,27 @@ test('a block that names a width renders NARROWER than the same block without on
   // it is the SIZE that narrows it, not a smaller diagram: the ratio tracks 600 of the measure
   expect(narrow.svg / wide.svg).toBeLessThan(0.75);
 
-  // chart and draw read neither variable, so a size on them is refused rather than written
+  // a chart reads --obw too (Folio 610e732: figure.o-chartfig), so "width" narrows it on screen
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'R', color: '#4A8CC4', values: [1, 2] }], yMax: null };
+  const charts = await invoke(page, 'add_fold', {
+    title: 'Chart narrow beside wide',
+    blocks: [{ chart: CHART, caption: 'narrow', width: 600 }, { chart: CHART, caption: 'wide' }],
+  });
+  expect(charts.state).toContain('ok');
+  await frame.locator('.o-tab', { hasText: 'Chart narrow beside wide' }).first().click();
+  await expect(frame.locator('figure.o-chartfig svg').first()).toBeVisible();
+  const chartWidths = await frame.locator('figure.o-chartfig').evaluateAll((figs) =>
+    figs.map((f) => ({ cap: f.querySelector('figcaption')?.textContent ?? '', w: Math.round(f.getBoundingClientRect().width) }))
+  );
+  const cNarrow = chartWidths.find((w) => w.cap === 'narrow')!;
+  const cWide = chartWidths.find((w) => w.cap === 'wide')!;
+  console.log(`  --obw:600px chart figure renders ${cNarrow.w}px against ${cWide.w}px bare (preview px)`);
+  expect(cNarrow.w / cWide.w).toBeLessThan(0.75);
+
+  // a chart's height is its plot box, and a drawing has wpct: a size the runtime ignores is refused
   const chartSized = await invoke(page, 'add_fold', {
     title: 'Refused',
-    blocks: [{ chart: { type: 'bar', labels: ['Q1'], series: [{ name: 'R', color: '#4A8CC4', values: [1] }], yMax: null }, width: 600 }],
+    blocks: [{ chart: CHART, height: 300 }],
   });
   expect(chartSized.state).toContain('error');
   expect(chartSized.body.error).toContain('the runtime would ignore');

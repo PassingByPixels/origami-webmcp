@@ -13425,7 +13425,11 @@ table.o-table-table tbody tr:last-child td { border-bottom: none; }
 
 // src/blocks/chart-css.ts
 var chartCss = `/* @kind:chart */
-figure.o-chartfig { margin: 26px 0; }
+/* --obw is the block-width grip's carrier (see css.ts): every other data figure reads it, and a
+   chart did not, so an author (or add_fold) had no way to make a chart narrower than the column
+   to leave room beside it. At the default (unset) this is width:100% with zero auto margin \u2014
+   byte-for-byte the old layout. */
+figure.o-chartfig { margin: 26px auto; width: min(var(--obw, 100%), 100%); }
 .o-chart svg { display: block; width: 100%; height: auto; max-width: 100%; margin: 0 auto; }
 .o-chart-grid { stroke: var(--rule); stroke-width: 1; }
 .o-chart-tick { font: 11px var(--font-body); font-family: var(--chart-font, var(--font-body)); font-size: calc(11px * var(--chart-tsz, 1)); fill: var(--chart-ink, var(--ink-soft)); }

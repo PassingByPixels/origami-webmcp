@@ -2871,9 +2871,15 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
     await h.json('create_deck', { title: 'Refusals' });
     const before = h.deck.serialize();
 
-    const chart = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, width: 600 }] });
-    expect(chart.isError).toBe(true);
-    expect(JSON.parse(chart.content[0]!.text).error).toMatch(/blocks\[0\] names width on a chart block, which the runtime would ignore .*plotHeight/);
+    // a chart's HEIGHT is its plot box (plotHeight), so height is refused — but since the Folio
+    // 610e732 runtime figure.o-chartfig reads --obw, width lands
+    const chartH = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, height: 300 }] });
+    expect(chartH.isError).toBe(true);
+    expect(JSON.parse(chartH.content[0]!.text).error).toMatch(/blocks\[0\] names height on a chart block, which the runtime would ignore .*plotHeight/);
+    const chartW = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, width: 600 }] });
+    expect(chartW.isError).toBeUndefined();
+    expect(h.deck.serialize()).toContain('<figure class="o-chartfig anim" style="--obw:600px">');
+    h.deck.undo();
 
     const draw = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { draw: DRAW, height: 300 }] });
     expect(draw.isError).toBe(true);
