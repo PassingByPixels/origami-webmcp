@@ -6,7 +6,7 @@
    /folio/ only, exactly as it does the typed block writers. */
 
 import { activeContentFlags } from '../../vendor/format-dist/index.js';
-import { COMPOSE_DATA_KINDS, COMPOSE_KINDS, COMPOSED_PLOT_HEIGHT, composeFold, labelFromTitle } from './compose.js';
+import { COMPOSE_DATA_KINDS, COMPOSE_KINDS, COMPOSED_PLOT_HEIGHT, SIZE_RANGE, composeFold, labelFromTitle } from './compose.js';
 import type { JsonSchemaProp, ToolDef } from './registry.js';
 import { fail, ok } from './result.js';
 import { insertFold, type ToolDeps } from './tools.js';
@@ -67,7 +67,7 @@ export function buildComposeTools(deps: ToolDeps): ToolDef[] {
   return [
     {
       name: 'add_fold',
-      description: "BUILD A WHOLE FOLD IN ONE CALL — this CHANGES THE DECK the human is looking at and re-renders it. Give the card as DATA: an eyebrow, a heading, then `blocks` in order. Each entry names EXACTLY ONE of chart | venn | flow | graph | gantt | draw | table (that kind's own JSON plus an optional caption — get_kind_schema for the shape) or text (an HTML string: p, p.lede, h3, ul/li), bullets (strings), stats (up to 4 {value,label}), quote ({text,by}). Every data block is validated before anything is added and a bad one is refused naming the block index and the violation; tables are baked; flow/graph node `tone` and edge `label` get \"\" when absent (their legal blank, no meaning changes). columns:2 lays the blocks in two tracks. A chart with no plotHeight is SIZED TO FIT the card. One call is ONE fold and ONE undo step. Returns the chunkId and the (kind, nth) address of every data block, which is what set_block takes.",
+      description: "BUILD A WHOLE FOLD IN ONE CALL — this CHANGES THE DECK the human is looking at and re-renders it. Give the card as DATA: an eyebrow, a heading, then `blocks` in order. Each entry names EXACTLY ONE of chart | venn | flow | graph | gantt | draw | table (that kind's own JSON plus an optional caption — get_kind_schema for the shape) or text (an HTML string: p, p.lede, h3, ul/li), bullets (strings), stats (up to 4 {value,label}), quote ({text,by}). Every data block is validated before anything is added and a bad one is refused naming the block index and the violation; tables are baked; flow/graph node `tone` and edge `label` get \"\" when absent (their legal blank, no meaning changes). columns:2 lays the blocks in two tracks. A chart or graph that names no size is SIZED TO FIT the card. One call is ONE fold and ONE undo step. Returns the chunkId and the (kind, nth) address of every data block, which is what set_block takes.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -76,7 +76,7 @@ export function buildComposeTools(deps: ToolDeps): ToolDef[] {
           columns: { type: 'integer', minimum: 1, description: '1 (default) or 2 — lay the blocks out in two tracks' },
           blocks: {
             type: 'array',
-            description: `The card's content, in order. Each entry names exactly ONE of: ${KIND_LIST} — e.g. { "chart": { "type": "bar", "labels": ["Q1","Q2"], "series": [{ "name": "Revenue", "color": "#4A8CC4", "values": [12,19] }], "yMax": null }, "caption": "Revenue by quarter" }, or { "stats": [{ "value": "48", "label": "Decks shipped" }] }, or { "text": "<p class=\\"lede\\">A line of copy.</p>" }`,
+            description: `The card's content, in order. Each entry names exactly ONE of: ${KIND_LIST} — e.g. { "chart": { "type": "bar", "labels": ["Q1","Q2"], "series": [{ "name": "Revenue", "color": "#4A8CC4", "values": [12,19] }], "yMax": null }, "caption": "Revenue by quarter" }, or { "stats": [{ "value": "48", "label": "Decks shipped" }] }, or { "text": "<p class=\\"lede\\">A line of copy.</p>" }. SIZE: a venn | flow | graph | gantt | table entry may add "width" and/or "height", whole CSS px (width ${SIZE_RANGE.width[0]}-${SIZE_RANGE.width[1]}, height ${SIZE_RANGE.height[0]}-${SIZE_RANGE.height[1]}) — leave them out and the card picks a height that fits 1280x720 (a default graph overflows it). A chart takes "width" only (its height is plotHeight in its own JSON, fitted for you); a draw block takes neither (wpct in its JSON). A size the runtime would ignore is REFUSED, not written`,
             items: { type: 'object' },
           },
         },

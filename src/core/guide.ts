@@ -1,4 +1,4 @@
-import { FORMAT_BLOCKS, FORMAT_VERSION, KINDS } from '../../vendor/format-dist/index.js';
+import { CHART_PLOT_H_MAX, CHART_PLOT_H_MIN, CHART_TYPES, FORMAT_BLOCKS, FORMAT_VERSION, KINDS } from '../../vendor/format-dist/index.js';
 import { starterCatalog } from './fold-starters.js';
 import { recipeCatalog } from './recipes.js';
 
@@ -52,7 +52,7 @@ const KINDS_HOW_TO = {
 
 /** The sections `origami_guide({topic})` can return. Every byte of the full guide is
     reachable through exactly one of them, so the default answer can point instead of paste. */
-export const GUIDE_TOPICS = ['quickstart', 'contract', 'kinds', 'recipes', 'starters', 'issues', 'tools'] as const;
+export const GUIDE_TOPICS = ['quickstart', 'contract', 'kinds', 'recipes', 'starters', 'issues', 'tools', 'blocks'] as const;
 export type GuideTopic = (typeof GUIDE_TOPICS)[number];
 
 /** The keys that make up the `contract` topic: the protocol prose an agent needs before it
@@ -85,14 +85,14 @@ const CONTRACT_KEYS = [
 const QUICKSTART = {
   topic: 'quickstart',
   theFastPath: [
-    '1. create_deck({ title, subtitle?, eyebrow? }) - its FIRST fold is already a cover with that title. No placeholder to overwrite: do not add your own cover.',
+    '1. create_deck({ title, subtitle?, eyebrow? }) - its FIRST fold is already a cover with that title. No placeholder: do not add your own cover.',
     '2. add_fold({ title, eyebrow, blocks }) - ONE call a fold. add_ledger({ title, columns, rows, formulas, currency }) for a ledger. Wrap several in run_batch({calls:[...]}) and the deck is ONE turn.',
     '3. apply_theme({ name }) - a whole palette; list_themes names them. set_deck_meta({themeName}) renames the label only.',
     '4. inspect_render() - lays the deck out for real and names what OVERFLOWS, renders BLANK or is CLIPPED. You cannot see it.',
     '5. save_deck() - always end here, and READ it: it says whether bytes reached disk or the human must press Save.',
   ],
   blocks:
-    'Each entry names EXACTLY ONE of: chart, venn, flow, graph, gantt, draw, table (that kind\u2019s own JSON + optional caption), or text (HTML: p, p.lede, h3, ul/li), bullets, stats (up to 4 { value, label }), quote ({ text, by }). Data is validated BEFORE anything lands - refused here, never at save.',
+    'Each entry names EXACTLY ONE of: chart, venn, flow, graph, gantt, draw, table (that kind\u2019s own JSON + optional caption), or text (HTML: p, p.lede, h3, ul/li), bullets, stats (up to 4 { value, label }), quote ({ text, by }). Data is validated BEFORE anything lands - refused here, never at save. Full model: origami_guide({topic:"blocks"}).',
   /* The example is a compact JSON STRING, not a nested object. Tool results are serialized
      with JSON.stringify(..., null, 2), so a nested example is charged two spaces of
      indentation per level - it cost 2 KB of this 3 KB answer as an object and 700 bytes as
@@ -107,8 +107,8 @@ const QUICKSTART = {
   fiveThingsThatCatchAgents: [
     'A column `format` is an OBJECT - { "kind": "currency" } - not a string. add_ledger({currency:"€"}) sets the prefix; default "$".',
     'flow/graph: node `tone` and edge `label` are REQUIRED ("" is the blank). add_fold/set_block fill them; write_chunk does not.',
-    'A bare flow/graph fold can clip under a masthead subtitle/chips bar. Use a free card; check inspect_render.',
-    'Themes read 17 token names only (list_themes has them). "primary"/"background" are REFUSED, not stored.',
+    'A bare flow/graph fold can clip under a masthead bar. Use a free card; check inspect_render.',
+    'Themes read 17 named tokens only (list_themes). "primary"/"background" are REFUSED.',
     'add_fold names the fold from its title, so tabs read as words; `label` overrides.',
   ],
   thisIsNotEverything:
@@ -210,8 +210,9 @@ function fullGuide(): Record<string, unknown> {
       get_kind_schema: 'The markup contract for one kind (same as origami_guide(kind)).',
       set_header: 'Deck masthead: subtitle + metadata chips.',
       set_fold_type: 'Set the reading experience (deck | scroll | ledger).',
-      inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here. It measures the REAL render, never a model: a fold it could not put on screen comes back measured:false with the reason instead of a number, and a host with no browser layout says so for the whole deck — so an absent warning is not a clean bill of health unless measured is true. Layout is viewport-dependent, which is why the viewport is a parameter and is named in every result: a fold that fits at 1280x720 can still break on a shorter screen.',
-      undo: 'Reverse the last change to the open Fold — one tool call is one step, so a run_batch of six is six steps. THE WRITERS IT COVERS: write_chunk, add_chunk, add_fold, add_ledger, add_custom_fold, set_block, move_chunk, set_chunk_meta, set_deck_meta, apply_theme, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any accepted proposal. It does NOT cross create_deck or a Fold the human opened (both reset the stack), does not change bytes already on disk (save again to push a reversal through), and does not cover a staged proposal (use reject_proposal) or a saved theme (use delete_theme). 50 steps deep, no redo.',
+      inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here. It measures the REAL render, never a model: a fold it could not put on screen comes back measured:false with the reason instead of a number, and a host with no browser layout says so for the whole deck — so read `outcome` first: clean (every fold measured, no defect) | defects | unknown (a hidden page, a fold the 15s budget did not reach, a subset) — never ship on unknown, and `clean` is true only for a clean WHOLE deck. `foldIds` / `maxFolds` measure a subset directly (no hiding needed); a budget-hit answer keeps the folds it reached and lists the rest as `remeasure`. Layout is viewport-dependent, which is why the viewport is a parameter and is named in every result: a fold that fits at 1280x720 can still break on a shorter screen.',
+      undo: 'Reverse the last change to the open Fold — one tool call is one step, so a run_batch of six is six steps. THE WRITERS IT COVERS: write_chunk, add_chunk, add_fold, add_ledger, add_custom_fold, set_block, move_chunk, set_chunk_meta, set_deck_meta, apply_theme, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any accepted proposal. It does NOT cross create_deck or a Fold the human opened (both reset the stack), does not change bytes already on disk (save again to push a reversal through), and does not cover a staged proposal (use reject_proposal) or a saved theme (use delete_theme). 50 steps deep, no redo. A big run_batch is many undos — revert_to_saved drops all of it in one.',
+      revert_to_saved: 'Drop EVERY unsaved change on the open Fold in ONE call, not undo — jumps straight to the last save_deck (or to how the Fold was created/opened, if never saved) and clears the undo stack in the same move. Cannot itself be undone; touches nothing on disk. Refuses when nothing is open or when there is nothing unsaved to drop.',
       move_chunk: 'Reorder the folds: move one chunk to a 0-based position. Order only — no content is touched.',
       set_chunk_meta: 'Set one chunk\'s label / notes / hidden flag. hidden:false is the ONLY way to un-hide a fold that delete_chunk hid.',
       set_deck_meta: 'Deck title, theme LABEL and raw CSS custom-property tokens. themeName alone renames without restyling — apply_theme is what changes colours.',
@@ -255,6 +256,225 @@ const firstSentence = (text: string): string => {
 const toolIndex = (tools: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(tools).map(([name, text]) => [name, firstSentence(text)]));
 
+/* ---------------------------------------------------------------------------------------
+   topic:"blocks" — the whole block model in ONE answer, added from a 2026-09-03 feedback
+   report: it took several get_kind_schema calls plus a rejected venn-as-chart.type trial to
+   learn that venn/flow/graph/gantt/draw are their OWN block kinds, and more trial and error to
+   learn a sankey's shape rules. Every `example` below is asserted (tests/unit/guide-blocks.test.ts)
+   to pass its kind's own validator after fillDiagramDefaults, so this topic cannot drift from
+   what add_fold actually accepts — and every `rules` line paraphrases a real refusal message in
+   vendor/format-dist/{chart,venn,diagram,gantt,draw,grid}-data.js, named beside it below.
+   --------------------------------------------------------------------------------------- */
+
+/** chart | sankey | treemap | sunburst all carry a plotHeight — stated once, reused four times. */
+const CHART_SIZING =
+  `add_fold sizes an unset plotHeight to FIT the card; otherwise the schema default (318), bracketed [${CHART_PLOT_H_MIN}, ${CHART_PLOT_H_MAX}]. inspect_render is the ARBITER — read its warnings, don't guess a pixel number.`;
+
+interface BlockKindEntry {
+  /** The data-odata kind — what validatorFor(kind) and fillDiagramDefaults(kind, …) key on.
+      sankey/treemap/sunburst are all kind "chart" with a different `type` (and, for sunburst, a
+      flag); they are not kinds of their own. */
+  kind: 'chart' | 'venn' | 'flow' | 'graph' | 'gantt' | 'draw' | 'table';
+  use: string;
+  needs: string;
+  rules: string[];
+  example: Record<string, unknown>;
+  sizing?: string;
+}
+
+function blockKinds(): Record<string, BlockKindEntry> {
+  return {
+    chart: {
+      kind: 'chart',
+      use: 'A number-driven picture: bar, line, pie and 9 more shapes, named by `type`.',
+      needs: '`type`, `labels` (1/category — timeseries/scatter are free-axis instead), `series` (1-6: name, #hex color, one `values` number per label).',
+      rules: [
+        `type must be one of ${CHART_TYPES.join('|')}`,
+        'series[].values needs exactly one number per label',
+        'values must be >= 0 — waterfall, boxplot and gauge are the only signed types',
+        'series[].color must be a #hex value',
+      ],
+      example: { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#38628F', values: [12, 19] }] },
+      sizing: CHART_SIZING,
+    },
+    venn: {
+      kind: 'venn',
+      use: '2-6 overlapping circles.',
+      needs: '`count` (2-6) and `sets`, exactly `count` entries of { label, color: #hex }.',
+      rules: ['sets.length must equal count', 'each set needs a string label and a #hex color'],
+      example: {
+        count: 2,
+        sets: [
+          { label: 'Us', color: '#4A8CC4' },
+          { label: 'Them', color: '#D9A520' },
+        ],
+      },
+    },
+    flow: {
+      kind: 'flow',
+      use: 'A directed process with a decision in it — auto-laid-out left to right.',
+      needs: '`nodes` (1-60: id, label, shape, tone) and `edges` (from/to node ids, label).',
+      rules: [
+        'every node needs tone, one of "", accent, green, amber, red, and shape one of box|pill|diamond',
+        'every edge needs from/to naming an existing node id, plus a label — "" is the legal blank for tone/label but the FIELD is required (add_fold/set_block fill it; write_chunk does not)',
+      ],
+      example: {
+        nodes: [
+          { id: 'a', label: 'Kick-off', shape: 'pill', tone: 'accent' },
+          { id: 'b', label: 'Ship it', shape: 'pill', tone: 'green' },
+        ],
+        edges: [{ from: 'a', to: 'b', label: '' }],
+      },
+    },
+    graph: {
+      kind: 'graph',
+      use: 'A free-form hub-and-spoke map — node positions are explicit percentages, nothing is auto-laid-out.',
+      needs: '`nodes` (1-60: id, label, tone, x, y) and `edges` (from/to node ids, label).',
+      rules: ['every node needs x and y, each 0-100 — percent of the canvas', 'tone and edge label are required-but-blank, same as flow'],
+      example: {
+        nodes: [
+          { id: 'a', label: 'The idea', tone: 'accent', x: 50, y: 30 },
+          { id: 'b', label: 'Workstream', tone: '', x: 20, y: 70 },
+        ],
+        edges: [{ from: 'a', to: 'b', label: '' }],
+      },
+    },
+    gantt: {
+      kind: 'gantt',
+      use: 'A project roadmap: swimlanes, lensed cards over weeks, milestones.',
+      needs: '`totalWeeks`, `startDate` (ISO or null), `lenses`, `swimlanes`, `cards`, `milestones` (may be empty).',
+      rules: [
+        "every card's swimlane and lens must name an entry already declared in swimlanes/lenses",
+        'card.type must be one of Technical|Process|Cultural, card.effort one of EASY|MED|DEFER',
+        'card.start is "W#", "M#" or a week number within totalWeeks',
+      ],
+      example: {
+        totalWeeks: 4,
+        startDate: null,
+        lenses: [{ name: 'Plan', color: '#4a8cc4' }],
+        swimlanes: [{ name: 'Team', owner: '' }],
+        cards: [
+          {
+            id: 'C1',
+            title: 'Kick-off',
+            swimlane: 'Team',
+            start: 'W1',
+            durationWeeks: 1,
+            lens: 'Plan',
+            type: 'Process',
+            effort: 'EASY',
+            what: '',
+            needs: '',
+            caveat: '',
+            deliverable: '',
+            sources: '',
+            completed: false,
+          },
+        ],
+        milestones: [],
+      },
+    },
+    draw: {
+      kind: 'draw',
+      use: 'A hand-drawn sketch on a fixed 800x450 canvas — boxes, arrows, text, freehand.',
+      needs: '`elements`: an array, each with a unique id, a type, and its own fields.',
+      rules: [
+        'every element needs a unique id (max 40 chars), a type from rect|diamond|ellipse|arrow|line|freedraw|text, and a #hex stroke',
+        'arrow/line/freedraw need points (>=2 [x,y] pairs); text needs a non-empty text string',
+      ],
+      example: { elements: [{ id: 'r1', type: 'rect', x: 10, y: 10, width: 100, height: 60, stroke: '#333333' }] },
+    },
+    table: {
+      kind: 'table',
+      use: 'A live spreadsheet block: a ledger. Prefer add_ledger for a whole titled fold from columns+rows+formulas.',
+      needs: '`columns` (at least one, { label }) and `rows` (arrays of STRING cells).',
+      rules: ['columns needs at least one entry with a label', 'every row cell must be a string — a number must be quoted, e.g. "12"'],
+      example: { columns: [{ label: 'Item' }], rows: [['First']] },
+    },
+    sankey: {
+      kind: 'chart',
+      use: 'A flow diagram: nodes in columns, ribbons sized by throughput. chart.type "sankey".',
+      needs: '`labels` (the nodes), one `series` (values ALL 0), `links` ({ from, to, value } indices into labels).',
+      rules: [
+        'links is required: 1-120 entries, from/to index into labels, value > 0, no self-loops',
+        'the flows must be ACYCLIC — a real topological sort rejects any cycle',
+        'every node must appear in at least one link',
+        "series values must ALL be 0 — a node's size comes from links, not from series",
+        'no xTitle/yTitle and no legend — a sankey has no axis and its palette repeats past 8 nodes',
+      ],
+      example: {
+        type: 'sankey',
+        labels: ['A', 'B', 'C'],
+        series: [{ name: 'Flow', color: '#4A8CC4', values: [0, 0, 0] }],
+        links: [
+          { from: 0, to: 1, value: 5 },
+          { from: 1, to: 2, value: 3 },
+        ],
+      },
+      sizing: CHART_SIZING,
+    },
+    treemap: {
+      kind: 'chart',
+      use: 'Nested rectangles, area = share. chart.type "treemap".',
+      needs: "`labels`, one `series` (values = each node's OWN share, 0 for a pure branch), `parents` (one index per label).",
+      rules: [
+        'parents is required: one index per label, -1 for a root, an integer in [-1, n) that is never its own index',
+        'parents must form a forest — no cycles',
+        'exactly one series — a second would be a second set of sizes for the same nodes',
+        'no xTitle/yTitle — cells are nested areas, not positions on a scale',
+      ],
+      example: {
+        type: 'treemap',
+        labels: ['Root', 'A', 'B'],
+        series: [{ name: 'Size', color: '#4A8CC4', values: [0, 40, 60] }],
+        parents: [-1, 0, 0],
+      },
+      sizing: CHART_SIZING,
+    },
+    sunburst: {
+      kind: 'chart',
+      use: 'The SAME tree as a treemap, drawn as a polar partition instead of nested rectangles. A FLAG, not a type — chart.type stays "treemap".',
+      needs: 'Everything treemap needs, plus `sunburst: true`.',
+      rules: ['sunburst is a boolean, valid on a treemap only', 'sunburst and convex cannot both be true — a sunburst has no rectangle for convex to round'],
+      example: {
+        type: 'treemap',
+        labels: ['Root', 'A', 'B'],
+        series: [{ name: 'Size', color: '#4A8CC4', values: [0, 40, 60] }],
+        parents: [-1, 0, 0],
+        sunburst: true,
+      },
+      sizing: CHART_SIZING,
+    },
+  };
+}
+
+/** The four prose kinds — markup, not JSON, so they carry no validator and no `rules`. */
+function proseKinds(): Record<string, { use: string; example: Record<string, unknown> }> {
+  return {
+    text: { use: 'HTML prose: p, p.lede, h3, ul/li.', example: { text: '<p class="lede">One sentence that sets up the block below it.</p>' } },
+    bullets: { use: 'A plain bullet list, one string per item.', example: { bullets: ['First point', 'Second point'] } },
+    stats: {
+      use: 'Up to 4 stat cards, { value, label } each.',
+      example: { stats: [{ value: '48', label: 'Decks shipped' }, { value: '2.1%', label: 'Churn' }] },
+    },
+    quote: { use: 'A pull quote, with an optional attribution.', example: { quote: { text: 'Ship it.', by: 'Someone' } } },
+  };
+}
+
+function blocksTopic(): Record<string, unknown> {
+  return {
+    model: [
+      'A fold is a titled card; add_fold builds one in ONE call from a title, an optional eyebrow, and an ordered list of blocks.',
+      "A data block is JSON — chart | venn | flow | graph | gantt | draw | table — validated against its OWN kind's schema before anything lands; nothing partially-valid is written.",
+      'venn, flow, graph, gantt and draw are each their OWN block kind, not a chart.type — chart is the only one of the seven with a `type` field (see kinds.chart.rules).',
+      'Prose blocks — text | bullets | stats | quote — carry markup, not JSON, and have no shape rules.',
+      'Inside run_batch, a refusal STOPS the batch right there: every call before it already landed, so a failed batch is fixed by re-running from the failure, not from scratch.',
+    ].join(' '),
+    kinds: blockKinds(),
+    prose: proseKinds(),
+  };
+}
+
 /**
  * The guide, whole or by topic.
  *
@@ -274,6 +494,7 @@ export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
   if (topic === 'tools') return { topic, tools: g.tools, notAvailableHere: g.notAvailableHere };
   if (topic === 'recipes') return { topic, recipes: g.recipes };
   if (topic === 'starters') return { topic, starters: g.starters };
+  if (topic === 'blocks') return { topic, ...blocksTopic() };
   if (topic === 'contract') {
     const out: Record<string, unknown> = { topic };
     for (const k of CONTRACT_KEYS) out[k] = g[k];
@@ -314,6 +535,7 @@ export function origamiGuide(topic?: GuideTopic): Record<string, unknown> {
     starters: 'The whole-fold starters add_chunk({starter}) can drop in.',
     issues: 'Defects and traps that were measured, with what was actually observed.',
     tools: 'The tool catalog, plus the tools that exist in the stdio server and NOT here.',
+    blocks: 'The whole block model in ONE answer: every data/prose block kind, what it needs, its hard rules, one proven-valid example each.',
   };
   return out;
 }

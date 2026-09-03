@@ -20,7 +20,7 @@ document.modelContext.registerTool({
 });
 ```
 
-**An agent can run the whole job unattended.** All 38 tools are on the WebMCP surface: an agent
+**An agent can run the whole job unattended.** All 39 tools are on the WebMCP surface: an agent
 creates the deck, authors every kind, stages proposals, resolves them, and calls `save_deck`
 without a human ever clicking anything. A whole titled fold is ONE call (`add_fold`), a whole
 build can be one turn (`run_batch`), and the palette is a named theme rather than raw CSS tokens. When a human *is* watching, staged proposals also render
@@ -152,7 +152,7 @@ or *not available (console only)* — it never claims a connection it does not h
    and relaunch. (Flag confirmed at
    [developer.chrome.com/docs/ai/webmcp](https://developer.chrome.com/docs/ai/webmcp).)
 3. Load `http://127.0.0.1:5173`. The status pill now reads
-   **“WebMCP: connected via document.modelContext — 38 tools”**.
+   **“WebMCP: connected via document.modelContext — 39 tools”**.
 4. To call the tools, install the **WebMCP – Model Context Tool Inspector** extension
    ([Chrome Web Store](https://chromewebstore.google.com/detail/gbpdfapgefenggkahomfgkhfehlcenpd),
    [source](https://github.com/beaufortfrancois/model-context-tool-inspector)). Its side panel lists
@@ -215,7 +215,7 @@ nothing is lost: the test console does everything.
 src/core/          the deck + tools; no DOM, so vitest exercises exactly what ships
   deck-store.ts      the ONE in-memory DeckModel; mutate() applies ops and notifies views
   proposal-store.ts  the review queue + accept/reject, shared by the cards and the tools
-  tools.ts           the 29 core tool defs: 21 ported from vendor/mcp-reference/server.ts, 8 web-only
+  tools.ts           the 30 core tool defs: 21 ported from vendor/mcp-reference/server.ts, 9 web-only
   data-blocks.ts     the data gate: every <script data-odata> block, by its own kind's validator
   block-tools.ts     the typed block writers — the mini pages' own, plus get_block/set_block
   compose.ts         add_fold's fold builder: blocks-as-data -> one .slide-inner
@@ -276,7 +276,7 @@ this page, no storage, and no way to read the file you opened.
 
 ## The tools
 
-Every name, description and schema is ported from `vendor/mcp-reference/server.ts`, bar the eight
+Every name, description and schema is ported from `vendor/mcp-reference/server.ts`, bar the nine
 web-only tools marked below. Two deviations apply to **all** of them:
 
 * **No `deck` path argument.** One Fold is open in the tab. There is no served folder and no path
@@ -286,7 +286,7 @@ web-only tools marked below. Two deviations apply to **all** of them:
 
 | Tool | Further deviation from the stdio server |
 |---|---|
-| `origami_guide` | Description verbatim. Payload adds `host`, `reviewProtocol`, `notAvailableHere` and **`recipes`**; `editProtocol` step 1 drops the path handle, step 4b covers `dryRun`, and step 5 explains `save_deck`'s two outcomes. Adds a **`topic`** argument (`contract` \| `kinds` \| `recipes` \| `starters` \| `issues` \| `tools`) that returns one section on its own. The default answer is the whole guide with three abridgements: `kinds` becomes an INDEX (name + placement per kind, no schemas) with `kindsHowTo` stating the free-card steer **once** instead of once per kind and naming the two routes to a schema, and the recipe cards' html and the starter catalog become one-line pointers. Nothing is dropped — each comes back in full from its own topic — and the default costs **15,310 bytes against 56,265** for everything inlined (measured by a unit test, which prints all eight figures on every run). |
+| `origami_guide` | Description verbatim. Payload adds `host`, `reviewProtocol`, `notAvailableHere` and **`recipes`**; `editProtocol` step 1 drops the path handle, step 4b covers `dryRun`, and step 5 explains `save_deck`'s two outcomes. Adds a **`topic`** argument (`contract` \| `kinds` \| `recipes` \| `starters` \| `issues` \| `tools` \| `blocks`) that returns one section on its own. `blocks` is the whole block-data model in one answer — every data/prose block kind, what it needs, its hard rules and one example each, proven valid against the same validators add_fold runs — added so an agent does not have to learn by trial (venn/flow/graph/gantt/draw are their own kinds, not a `chart.type`; a sankey's shape rules in particular took several refusals to learn by hand). The default answer is the whole guide with three abridgements: `kinds` becomes an INDEX (name + placement per kind, no schemas) with `kindsHowTo` stating the free-card steer **once** instead of once per kind and naming the two routes to a schema, and the recipe cards' html and the starter catalog become one-line pointers. Nothing is dropped — each comes back in full from its own topic — and the default costs a small fraction of everything inlined (measured by a unit test, which prints the figures on every run). |
 | `get_kind_schema` | None — verbatim. |
 | `create_deck` | Mints the deck **into the tab**, not onto disk: no served folder, no filename-collision loop. Adds a guard that refuses when the open Fold has unsaved changes, plus **`discard: true`** to override it (the stdio version creates a new file and can destroy nothing; this one replaces what is on screen, so an unattended agent has to say so out loud). `foldType` deck / scroll / ledger is unchanged. |
 | `list_chunks` | “Read fresh from the file every time” → “always reflects what the human is looking at”. |
@@ -303,8 +303,9 @@ web-only tools marked below. Two deviations apply to **all** of them:
 | `define_block` · `list_block_defs` · `delete_block` | Descriptions verbatim bar the write clause. |
 | `set_header` · `set_fold_type` | None beyond the two global ones. |
 | `list_starters` + `add_chunk(starter)` | **Not in the stdio server at all.** Its starters are two inner strings picked by `kind`, with no catalog. These are the Studio rail's whole-fold starters — roadmap, flowchart, node graph, drawing, venn, ledger — each a free card holding one seeded data block, ported verbatim from `packages/studio-core/src/lib/palette.ts`. `starter` also works on `propose_add`, and is refused alongside `html`/`block` rather than silently winning. |
-| `inspect_render` | **Not in the stdio server at all.** It has no browser, so it cannot lay a deck out; this is the one thing a page can tell an agent that a file-writing process cannot. It renders the serialized Fold in a hidden, off-screen `sandbox="allow-scripts"` iframe with a measuring script appended after the deck's LAST `</body>`, walks every fold, and posts the geometry back by `postMessage` (matched on a nonce — a sandboxed frame's `event.origin` is the string `"null"`). Reports overflow, masthead clip, blank folds and colliding SVG labels. A fold it cannot put on screen comes back `measured:false` with the reason; a host with no layout says so for the whole deck. |
+| `inspect_render` | **Not in the stdio server at all.** It has no browser, so it cannot lay a deck out; this is the one thing a page can tell an agent that a file-writing process cannot. It renders the serialized Fold in a hidden, off-screen `sandbox="allow-scripts"` iframe with a measuring script appended after the deck's LAST `</body>`, walks every fold, and posts the geometry back by `postMessage` (matched on a nonce — a sandboxed frame's `event.origin` is the string `"null"`). Reports overflow, masthead clip, blank folds and colliding SVG labels, under one `outcome`: `clean` (every requested fold measured, no defect), `defects`, or `unknown` (a hidden page, a fold the 15s budget did not reach, a subset) - `clean:true` is reserved for a clean WHOLE deck. `foldIds` / `maxFolds` measure a subset directly; a budget-hit answer keeps the folds it reached and lists the rest as `remeasure`. A fold it cannot put on screen comes back `measured:false` with the reason; a host with no layout says so for the whole deck. |
 | `undo` | **Not in the stdio server at all.** A stdio call has no session, so it has no stack to unwind; a page does. Built on `@origami/format`'s `History`: `DeckStore.apply` records each op's inverse, one entry per tool call. Scope is stated in the description — it cannot cross a `create_deck` or a newly opened Fold (both reset the stack), it never touches bytes already written to disk, 50 steps deep, no redo. |
+| `revert_to_saved` | **Not in the stdio server at all**, and not a variant of `undo`. `DeckStore` keeps the deck's serialized text as of the last `open()`/`markSaved()` as a `baseline`; this re-opens that text under the same name, which clears `History` (`open()`'s own job) in one move instead of unwinding it one step at a time. Returns how many undo steps were dropped and whether the Fold landed on the last save or on how it was created/opened. Refuses when nothing is open, and refuses (never a silent no-op) when the Fold has no unsaved change to drop. Touches nothing on disk or in OPFS. |
 | `save_deck` | **Re-purposed, not just re-worded.** In the stdio server every edit had already written through, so `save_deck` was a re-validate. Here it is the only route out of the tab, and it reports three separate outcomes rather than one boolean: a verified handle write (`saved`), the OPFS backstop (`opfs.written`), and a fired download (`downloadStarted`). See **What a page can really save** for the measurements that shaped it. It never opens a picker (nobody would be there to click it) and **never throws for want of a handle**, so an unattended agent can always finish. |
 | `propose_chunk` · `propose_add` · `propose_delete` | “STAGED for a human (or another agent) to review” → “STAGED as a review card in the human's page, which only THEY can accept or reject” **is gone as of round 2**; they now say the change is staged for a human *or* an agent to resolve. |
 | `list_proposals` | Adds “The human accepts or rejects them by clicking the cards in the page.” |

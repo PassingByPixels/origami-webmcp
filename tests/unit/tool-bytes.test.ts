@@ -13,8 +13,13 @@ import { harness } from './harness.js';
 
 const utf8 = (s: string): number => new TextEncoder().encode(s).length;
 
-/** The ceiling this slice was built to. Raise it only with a measurement that justifies it. */
-export const DESCRIPTION_BUDGET = 16_000;
+/** The ceiling this slice was built to. Raise it only with a measurement that justifies it.
+    RAISED 16_000 -> 16_500 on 2026-09-03 with one: the 39th tool (revert_to_saved, 434 bytes after
+    two trims), origami_guide's new `blocks` topic and inspect_render's outcome/subset contract
+    landed at 16,401 bytes against a surface that already sat at 15,983. The extra ~400 bytes are
+    ~100 tokens per turn; the features they describe replaced a 19-undo pivot, a hide/unhide
+    measuring loop (dozens of calls) and several get_kind_schema round trips in the feedback deck. */
+export const DESCRIPTION_BUDGET = 16_500;
 
 describe('per-turn bytes: what the host hands the model on EVERY turn', () => {
   it(`keeps the /folio/ tool descriptions under ${DESCRIPTION_BUDGET} bytes`, () => {

@@ -10,11 +10,11 @@ import { ProposalStore, restorableProposals } from '../../src/core/proposal-stor
 import { createModeRegistry } from '../../src/core/mode-registry.js';
 import { FOLIO_MODE } from '../../src/core/modes.js';
 import { RECIPES } from '../../src/core/recipes.js';
-import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, chartPlotHeight } from '../../src/core/compose.js';
+import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, SIZE_RANGE, chartPlotHeight, graphFitHeight } from '../../src/core/compose.js';
 import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
 import { BATCH_MAX } from '../../src/core/batch-tool.js';
-import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
-import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
+import { FOLD_STARTERS, GRAPH_FIT_HEIGHT, MIN_GRAPH_HEIGHT } from '../../src/core/fold-starters.js';
+import { analyseRender, summarise, type FoldGeometry, type MeasureFn } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
 import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harness.js';
 
@@ -23,7 +23,7 @@ import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harnes
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 38 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 39 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -55,6 +55,7 @@ describe('tool surface', () => {
       'propose_delete',
       'read_chunk',
       'reject_proposal',
+      'revert_to_saved',
       'run_batch',
       'save_deck',
       'save_theme',
@@ -856,7 +857,115 @@ describe('inspect_render', () => {
     const body = JSON.parse((await registry.invoke('inspect_render', {})).content[0]!.text);
     expect(body.measured).toBe(false);
     expect(body.why).toMatch(/the measurement failed: the deck did not finish rendering/);
-    expect(body.clean).toBeUndefined(); // a failure must never read as clean:true
+    expect(body.clean).toBe(false); // a failure must never read as clean:true
+    expect(body.outcome).toBe('unknown');
+  });
+
+  /* A registry with a scripted measure route, so the tool's own arithmetic (subsets, budgets,
+     the verdict) is tested against numbers this test controls. */
+  const scripted = async (n: number, measure: MeasureFn) => {
+    const deck = new DeckStore();
+    const registry = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, measure }, FOLIO_MODE);
+    await registry.invoke('create_deck', { title: 'Scripted' });
+    for (let i = 1; i < n; i++) await registry.invoke('add_chunk', { label: `Fold ${i}` });
+    const call = async (args: Record<string, unknown> = {}) => {
+      const r = await registry.invoke('inspect_render', args);
+      return { ...JSON.parse(r.content[0]!.text), isError: r.isError === true };
+    };
+    return { deck, call, ids: () => [...deck.model().order] };
+  };
+  const measuredAs = (ids: string[]): MeasureFn => async (_text, want) => ({ viewport: { width: 1280, height: 720 }, folds: want.filter((id) => ids.includes(id)).map((id) => geo(id)) });
+
+  it('never calls a 0x0 viewport clean — it is unknown, with the reason', async () => {
+    // the report that prompted this: every fold "rendered with zero height", viewport 0 x 0, clean: true
+    const { call, ids } = await scripted(2, async (_t, want) => ({
+      viewport: { width: 0, height: 0 },
+      folds: want.map((id) => ({ ...geo(id), measured: false, reason: 'the fold is in the deck but rendered with zero height, and no tab could bring it on screen' })),
+    }));
+    const body = await call();
+    expect(body.measured).toBe(false);
+    expect(body.outcome).toBe('unknown');
+    expect(body.clean).toBe(false);
+    expect(body.why).toMatch(/0x0 viewport/);
+    expect(body.folds.map((f: any) => f.id)).toEqual(ids());
+  });
+
+  it('is clean only when EVERY fold was measured and none has a defect', async () => {
+    const { call, ids } = await scripted(3, async (_t, want) => ({ viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) }));
+    const body = await call();
+    expect(body).toMatchObject({ measured: true, outcome: 'clean', clean: true, coverage: { total: 3, requested: 3, measured: 3 } });
+    expect(body.remeasure).toBeUndefined();
+    expect(body.folds.map((f: any) => f.id)).toEqual(ids());
+  });
+
+  it('measures a subset with foldIds, and says clean is about the subset, not the deck', async () => {
+    let asked: string[] = [];
+    const { call, ids } = await scripted(3, async (_t, want) => {
+      asked = want;
+      return { viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) };
+    });
+    const [a, b, c] = ids();
+    const body = await call({ foldIds: [c, b] });
+    expect(asked).toEqual([b, c]); // deck order is kept, whatever order was asked in
+    expect(body.outcome).toBe('clean'); // every REQUESTED fold measured clean
+    expect(body.clean).toBe(false); // but the deck was not fully measured
+    expect(body.coverage).toEqual({ total: 3, requested: 2, measured: 2 });
+    expect(body.folds[0]).toMatchObject({ id: a, skipped: true, measured: false });
+    expect(body.folds[1]).toMatchObject({ id: b, measured: true, fits: true });
+    expect(body.note).toMatch(/Only 2 of 3 folds were requested/);
+  });
+
+  it('refuses an unknown foldId and a bad maxFolds before measuring anything', async () => {
+    let calls = 0;
+    const { call } = await scripted(2, async (_t, want) => {
+      calls++;
+      return { viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) };
+    });
+    const bad = await call({ foldIds: ['nope'] });
+    expect(bad.isError).toBe(true);
+    expect(bad.error).toMatch(/no such chunk: nope/);
+    const zero = await call({ maxFolds: 0 });
+    expect(zero.isError).toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  it('maxFolds measures the first N in deck order', async () => {
+    let asked: string[] = [];
+    const { call, ids } = await scripted(4, async (_t, want) => {
+      asked = want;
+      return { viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) };
+    });
+    const body = await call({ maxFolds: 2 });
+    expect(asked).toEqual(ids().slice(0, 2));
+    expect(body.coverage).toEqual({ total: 4, requested: 2, measured: 2 });
+    expect(body.folds.filter((f: any) => f.skipped)).toHaveLength(2);
+  });
+
+  it('keeps what a budget-hit measurement reached, calls the verdict unknown, and names the rest', async () => {
+    const { call, ids } = await scripted(3, async (_t, want) => ({
+      viewport: { width: 1280, height: 720 },
+      folds: [geo(want[0]!), geo(want[1]!, { contentHeight: 2000 }), { ...geo(want[2]!), measured: false, reason: 'not reached: the 15s measuring budget ran out after 2 of 3 folds' }],
+      partial: { measuredCount: 2, requested: 3, budgetMs: 15_000 },
+    }));
+    const [, b, c] = ids();
+    const body = await call();
+    expect(body.measured).toBe(true); // something WAS measured
+    expect(body.outcome).toBe('unknown'); // but not everything, so no verdict on the deck
+    expect(body.clean).toBe(false);
+    expect(body.remeasure).toEqual([c]);
+    expect(body.partial).toEqual({ measuredCount: 2, requested: 3, budgetMs: 15_000 });
+    expect(body.note).toMatch(/budget ran out after 2 of 3 folds/);
+    // the overflow that WAS measured is still reported — partial is not silent
+    expect(body.warnings).toEqual([expect.objectContaining({ fold: b, issue: 'overflow' })]);
+    expect(body.folds[2]).toMatchObject({ id: c, measured: false, why: expect.stringMatching(/budget ran out/) });
+  });
+
+  it('summarise: defects beat clean, unknown beats both, and an empty request is unknown', () => {
+    const w = { fold: 'x', label: 'x', issue: 'overflow' as const, detail: '' };
+    expect(summarise([{ id: 'a', measured: true }], [])).toMatchObject({ outcome: 'clean', clean: true });
+    expect(summarise([{ id: 'a', measured: true }], [w])).toMatchObject({ outcome: 'defects', clean: false });
+    expect(summarise([{ id: 'a', measured: true }, { id: 'b', measured: false }], [w])).toMatchObject({ outcome: 'unknown', clean: false, remeasure: ['b'] });
+    expect(summarise([{ id: 'a', skipped: true, measured: false }], [])).toMatchObject({ outcome: 'unknown', clean: false, coverage: { total: 1, requested: 0, measured: 0 } });
   });
 
   it('flags a fold whose content is taller than the screen', async () => {
@@ -936,6 +1045,21 @@ describe('inspect_render', () => {
       ],
     });
     expect(apart.warnings).toEqual([]);
+
+    // a treemap cell's name stacked over its value, measured off a real render (2026-09-03):
+    // the two text boxes share a ~1px sliver across their width — touching, not colliding
+    const stacked = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [
+        geo(id, {
+          labels: [
+            { text: 'Engineering', x: 383, y: 570, w: 58, h: 13.5 },
+            { text: '420', x: 402, y: 582.5, w: 20, h: 13.5 },
+          ],
+        }),
+      ],
+    });
+    expect(stacked.warnings).toEqual([]);
   });
 
   it('never turns an unmeasured fold into a warning', async () => {
@@ -1143,6 +1267,70 @@ describe('undo reverses the last change to the open Fold', () => {
     await h.json('add_chunk', {});
     h.deck.open(await sampleDeck(), 'welcome.origami.html');
     expect((await h.call('undo')).isError).toBe(true);
+  });
+});
+
+describe('revert_to_saved drops every unsaved change in ONE call', () => {
+  /* The bar is the same as undo's: byte-equality against a real baseline, not "the heading is
+     gone". Unlike undo this does not unwind step by step — it jumps straight to the baseline
+     and clears the stack in the same move, which is the whole point after a run_batch that
+     went sideways (undo would be one call per step). */
+
+  it('a dirty Fold reverts to how it was created, restores order and title, and clears the stack', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Revert me' });
+    const beforeAnyEdit = h.deck.serialize();
+    expect(h.deck.peek()!.dirty).toBe(false);
+
+    await h.json('add_chunk', { html: innerWith('Regretted', 'Fold'), label: 'Regretted' });
+    await h.json('set_header', { subtitle: 'Also regretted' });
+    expect(h.deck.model().order).toHaveLength(2);
+    expect(h.deck.peek()!.dirty).toBe(true);
+    expect(h.deck.undoDepth()).toBe(2);
+
+    const res = await h.json('revert_to_saved');
+    expect(res).toMatchObject({ revertedTo: 'as created or opened', droppedUndoSteps: 2, chunks: 1 });
+    expect(h.deck.serialize()).toBe(beforeAnyEdit);
+    expect(h.deck.model().title).toBe('Revert me');
+    expect(h.deck.model().order[0]).toBe(created.chunks[0].id);
+    expect(h.deck.peek()!.dirty).toBe(false);
+    expect(h.deck.undoDepth()).toBe(0); // the stack was cleared, not unwound
+  });
+
+  it('a save moves the baseline — revert then lands on the save, not on create_deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Save then regret' });
+    await h.json('add_chunk', { html: innerWith('Keep me', 'Saved'), label: 'Keep me' });
+    h.deck.markSaved(); // the harness has no save route; markSaved is the documented fallback
+    const afterSave = h.deck.serialize();
+    expect(h.deck.peek()!.dirty).toBe(false);
+
+    await h.json('add_chunk', { html: innerWith('Lose me', 'Unsaved'), label: 'Lose me' });
+    expect(h.deck.model().order).toHaveLength(3);
+
+    const res = await h.json('revert_to_saved');
+    expect(res.revertedTo).toBe('last save');
+    // droppedUndoSteps counts the WHOLE stack, not just the post-save edits — markSaved()
+    // moves the baseline but does not touch History, so both add_chunk calls are still on it
+    expect(res.droppedUndoSteps).toBe(2);
+    expect(h.deck.serialize()).toBe(afterSave);
+    expect(h.deck.model().order).toHaveLength(2);
+  });
+
+  it('refuses with a named reason when there is nothing unsaved to drop', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Untouched' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('revert_to_saved');
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/nothing to revert/);
+    expect(h.deck.serialize()).toBe(before); // refusal touches nothing
+
+    // and with no Fold open at all it is the standard no-deck refusal, not a crash
+    const empty = harness();
+    const none = await empty.call('revert_to_saved');
+    expect(none.isError).toBe(true);
   });
 });
 
@@ -1532,7 +1720,7 @@ describe('tool annotations', () => {
     'origami_guide',
     'read_chunk',
   ];
-  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk', 'delete_theme'];
+  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk', 'delete_theme', 'revert_to_saved'];
 
   it('marks exactly the read-only tools readOnlyHint', () => {
     const h = harness();
@@ -2513,6 +2701,10 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
      policy, same data gate, ONE op on the undo stack. */
 
   const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'Revenue', color: '#4A8CC4', values: [12, 19] }], yMax: null };
+  const GRAPH = { nodes: [{ id: 'a', label: 'A', x: 20, y: 30, tone: '' }, { id: 'b', label: 'B', x: 70, y: 60, tone: '' }], edges: [{ from: 'a', to: 'b', label: '' }] };
+  const FLOW = { nodes: [{ id: 'n1', label: 'Build', shape: 'box', tone: '' }, { id: 'n2', label: 'Ship', shape: 'box', tone: '' }], edges: [{ from: 'n1', to: 'n2', label: '' }] };
+  const VENN = { count: 2, sets: [{ label: 'A', color: '#4A8CC4' }, { label: 'B', color: '#D9A520' }] };
+  const DRAW = { elements: [{ id: 'e1', type: 'rect', x: 20, y: 20, width: 200, height: 100, stroke: '#1A1A1A', fill: '', seed: 7 }] };
   const innerOf = (h: ReturnType<typeof harness>, id: string) => h.deck.model().slides.get(id)!.inner;
 
   it('builds ONE card with an eyebrow, a heading and the blocks in order', async () => {
@@ -2608,6 +2800,147 @@ describe('S3 — add_fold and add_ledger, the one-call fold', () => {
 
     const own = await h.json('add_fold', { title: 'Own', blocks: [{ chart: { ...CHART, plotHeight: 420 } }] });
     expect((await h.json('get_block', { chunkId: own.chunkId, kind: 'chart' })).data.plotHeight).toBe(420);
+  });
+
+  it('sizes a graph to FIT, and lets a sized block name its own width and height', async () => {
+    /* MEASURED, not chosen (tools/agent-bridge.mjs at 1280x720, 2026-09-03): a default node
+       graph on a bare card renders 875px against 720px of screen. --obh GRAPH_FIT_HEIGHT brings
+       the same card to 676px; the e2e suite proves fits:true on the real render, this holds the
+       markup that produces it. A block that names its own size is obeyed. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Sized' });
+
+    const auto = await h.json('add_fold', { title: 'Auto', blocks: [{ graph: GRAPH, caption: 'Map' }] });
+    expect(innerOf(h, auto.chunkId)).toContain(`<figure class="o-graphfig anim" style="--obh:${GRAPH_FIT_HEIGHT}px">`);
+
+    const own = await h.json('add_fold', { title: 'Own', blocks: [{ graph: GRAPH, width: 700, height: 500 }] });
+    expect(innerOf(h, own.chunkId)).toContain('<figure class="o-graphfig anim" style="--obw:700px;--obh:500px">');
+
+    // width alone emits only --obw; the height stays the runtime's own
+    const wide = await h.json('add_fold', { title: 'Wide', blocks: [{ flow: FLOW, width: 600 }] });
+    expect(innerOf(h, wide.chunkId)).toContain('<figure class="o-flowfig anim" style="--obw:600px">');
+
+    /* On a GRAPH, narrowing must not cost the fit: a width with no height still gets the
+       measured default height, which is the whole point of narrowing to make room for copy. */
+    const narrow = await h.json('add_fold', { title: 'Narrow', blocks: [{ graph: GRAPH, width: 600 }] });
+    expect(innerOf(h, narrow.chunkId)).toContain(`<figure class="o-graphfig anim" style="--obw:600px;--obh:${GRAPH_FIT_HEIGHT}px">`);
+
+    // and every fold built here is still a valid Fold
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('emits NO style attribute when a block names no size — the figure bytes are unchanged', async () => {
+    /* The guarantee that lets the size ride on the ONE figure builder: a block with neither
+       width nor height must produce exactly the markup the composer produced before sizes
+       existed, or every fixture and every saved Fold shifts under it. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Bare' });
+    const bare = await h.json('add_fold', { title: 'Bare', blocks: [{ flow: FLOW, caption: 'Steps' }, { chart: CHART }, { venn: VENN }] });
+    const inner = innerOf(h, bare.chunkId);
+    expect(inner).toContain('<figure class="o-flowfig anim"><script type="application/json" data-odata="flow">');
+    expect(inner).toContain('<figure class="o-chartfig anim"><script type="application/json" data-odata="chart">');
+    expect(inner).toContain('<figure class="o-vennfig anim"><script type="application/json" data-odata="venn">');
+    expect(inner, 'no block asked for a size, so no figure carries one').not.toContain('--obw');
+    expect(inner, 'graph is the only kind with a default height, and there is no graph here').not.toContain('--obh');
+  });
+
+  it('takes prose on the card off the graph, the way it does off a chart', async () => {
+    /* MEASURED on the same run: one lede paragraph costs a graph card 106-107px (875 -> 981
+       with no --obh, 716 -> 823 at --obh 360) — the same PROSE_COST a chart pays. So the card
+       decides the graph's height, not the block. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Prose' });
+    const withProse = await h.json('add_fold', {
+      title: 'With copy',
+      blocks: [{ text: '<p class="lede">A line of copy above the map.</p>' }, { graph: GRAPH }],
+    });
+    const shrunk = graphFitHeight([{ text: 'x' }, { graph: GRAPH }]);
+    expect(shrunk).toBeLessThan(GRAPH_FIT_HEIGHT);
+    expect(shrunk).toBeGreaterThanOrEqual(MIN_GRAPH_HEIGHT);
+    expect(innerOf(h, withProse.chunkId)).toContain(`style="--obh:${shrunk}px"`);
+    // and it never falls below the floor, however much prose is on the card
+    expect(graphFitHeight([{ text: 'a' }, { bullets: ['b'] }, { quote: { text: 'c' } }, { graph: GRAPH }])).toBe(MIN_GRAPH_HEIGHT);
+  });
+
+  it('refuses a size on a block whose CSS would ignore it, and adds NOTHING', async () => {
+    /* MEASURED in the real preview (2026-09-03): with --obw:600px;--obh:300px on the figure the
+       rendered block narrows for venn/flow/graph/gantt/table (166px against 318px bare) and does
+       NOT MOVE for chart (182 both) or draw (318 both). A key that changes nothing is refused,
+       not dropped — an agent that cannot see the deck has no other way to find out. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Refusals' });
+    const before = h.deck.serialize();
+
+    // a chart's HEIGHT is its plot box (plotHeight), so height is refused — but since the Folio
+    // 610e732 runtime figure.o-chartfig reads --obw, width lands
+    const chartH = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, height: 300 }] });
+    expect(chartH.isError).toBe(true);
+    expect(JSON.parse(chartH.content[0]!.text).error).toMatch(/blocks\[0\] names height on a chart block, which the runtime would ignore .*plotHeight/);
+    const chartW = await h.call('add_fold', { title: 'T', blocks: [{ chart: CHART, width: 600 }] });
+    expect(chartW.isError).toBeUndefined();
+    expect(h.deck.serialize()).toContain('<figure class="o-chartfig anim" style="--obw:600px">');
+    h.deck.undo();
+
+    const draw = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>' }, { draw: DRAW, height: 300 }] });
+    expect(draw.isError).toBe(true);
+    expect(JSON.parse(draw.content[0]!.text).error).toMatch(/blocks\[1\] names height on a draw block.*wpct/);
+
+    const prose = await h.call('add_fold', { title: 'T', blocks: [{ text: '<p>ok</p>', width: 600 }] });
+    expect(prose.isError).toBe(true);
+    expect(JSON.parse(prose.content[0]!.text).error).toMatch(/blocks\[0\] names width on a text block/);
+
+    expect(h.deck.serialize(), 'every refusal left the Fold exactly as it was').toBe(before);
+  });
+
+  it('refuses a size that is not a whole number of px inside its range', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Range' });
+    const before = h.deck.serialize();
+    const bad = async (block: Record<string, unknown>) => {
+      const r = await h.call('add_fold', { title: 'T', blocks: [block] });
+      expect(r.isError).toBe(true);
+      return JSON.parse(r.content[0]!.text).error as string;
+    };
+
+    expect(await bad({ graph: GRAPH, width: SIZE_RANGE.width[0] - 1 })).toMatch(/blocks\[0\]\.width must be a whole number of CSS px between 160 and 2600/);
+    expect(await bad({ graph: GRAPH, height: SIZE_RANGE.height[1] + 1 })).toMatch(/blocks\[0\]\.height must be a whole number of CSS px between 120 and 2160/);
+    expect(await bad({ graph: GRAPH, width: 600.5 })).toMatch(/got 600\.5/);
+    expect(await bad({ graph: GRAPH, width: '600' })).toMatch(/got "600"/);
+    expect(await bad({ graph: GRAPH, height: null })).toMatch(/got null/);
+
+    expect(h.deck.serialize(), 'nothing was added').toBe(before);
+  });
+
+  it('set_block keeps the block size when it rebuilds the figure', async () => {
+    /* set_block REPLACES the whole figure so the mount and the caption stay in step with the
+       data. Without carrying the figure's style, the first data edit would silently undo the
+       size the author asked add_fold for — and the runtime would go back to overflowing. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Rebuild' });
+    const added = await h.json('add_fold', { title: 'Map', blocks: [{ graph: GRAPH, width: 640, height: 420, caption: 'Map' }] });
+    expect(innerOf(h, added.chunkId)).toContain('style="--obw:640px;--obh:420px"');
+
+    const NEXT = { nodes: [{ id: 'x', label: 'X', x: 30, y: 30, tone: '' }, { id: 'y', label: 'Y', x: 70, y: 70, tone: '' }], edges: [{ from: 'x', to: 'y', label: 'to' }] };
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'graph', data: NEXT });
+
+    const after = innerOf(h, added.chunkId);
+    expect(after, 'the size survived the data rewrite').toContain('<figure class="o-graphfig anim" style="--obw:640px;--obh:420px">');
+    expect(after).toContain('"label": "X"');
+    expect((await h.json('get_block', { chunkId: added.chunkId, kind: 'graph' })).data).toMatchObject({ edges: [{ label: 'to' }] });
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('starts the node-graph starter at a height that fits, and leaves every other starter alone', async () => {
+    /* The starter is the other way an agent gets a graph, and it overflowed for the same
+       reason. Its seed, classes and caption stay palette.ts verbatim; only the size is added. */
+    const h = harness();
+    await h.json('create_deck', { title: 'Starters' });
+    const graph = await h.json('add_chunk', { starter: 'node-graph' });
+    expect(innerOf(h, graph.chunkId)).toContain(`<figure class="o-graphfig anim" style="--obh:${GRAPH_FIT_HEIGHT}px">`);
+
+    const flow = await h.json('add_chunk', { starter: 'flowchart' });
+    expect(innerOf(h, flow.chunkId), 'flow measured 660px on its own — it needs no size').toContain('<figure class="o-flowfig anim"><script');
+    expect(innerOf(h, flow.chunkId)).not.toContain('--ob');
   });
 
   it('animates a stat card whenever the value holds a digit, decorated or not', async () => {
@@ -3304,7 +3637,7 @@ describe('S6 — what BOTH trial agents still tripped on', () => {
     expect(d('save_deck')).toMatch(/saved:true means/);
     expect(d('save_deck')).toMatch(/NEVER reported as saved/);
     expect(d('export_deck')).toMatch(/writes NOTHING, saves NOTHING/);
-    expect(d('inspect_render')).toMatch(/NOT a clean bill of health unless measured is true/);
+    expect(d('inspect_render')).toMatch(/never ship on unknown/);
     expect(d('set_deck_meta')).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
     expect(d('save_theme')).toMatch(/REFUSED/);
     expect(d('move_chunk')).toMatch(/REFUSED rather than clamped/);

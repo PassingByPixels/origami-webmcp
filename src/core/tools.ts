@@ -29,7 +29,7 @@ import { DATA_BLOCK_REFUSAL, validateDataBlocks } from './data-blocks.js';
 import type { DeckStore } from './deck-store.js';
 import { newDeckId, newProposalId, newSlideId, sha256Hex } from './ids.js';
 import { GUIDE_TOPICS, origamiGuide, type GuideTopic } from './guide.js';
-import { analyseRender, unmeasurable, type MeasureFn } from './inspect.js';
+import { analyseRender, summarise, unmeasurable, type MeasureFn } from './inspect.js';
 import type { ProposalStore } from './proposal-store.js';
 import { fail, ok, refuse } from './result.js';
 import { type ToolDef } from './registry.js';
@@ -261,13 +261,13 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
     {
       name: 'origami_guide',
       annotations: { readOnlyHint: true },
-      description: "START HERE. The Origami contract: what a Fold is, the read-edit-write chunk protocol, every kind schema, the inert/active rules, the capability model and the tool catalog. Pass topic:\"quickstart\" FIRST if you are building a deck — under 3 KB, the five calls that do it, with a complete add_fold example. topic: quickstart | contract | kinds | recipes | starters | issues | tools. Pass kind for one kind's schema.",
+      description: "START HERE. The Origami contract: what a Fold is, the read-edit-write chunk protocol, every kind schema, the inert/active rules, the capability model and the tool catalog. Pass topic:\"quickstart\" FIRST if you are building a deck — under 3 KB, the five calls that do it, with a complete add_fold example. topic: quickstart | contract | kinds | recipes | starters | issues | tools | blocks. Pass kind for one kind's schema.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
         properties: {
           kind: { type: 'string', description: 'Optional: one kind to detail (else the whole contract)' },
-          topic: { type: 'string', enum: GUIDE_TOPICS, description: 'Optional: one section only — contract | kinds | recipes | starters | issues | tools' },
+          topic: { type: 'string', enum: GUIDE_TOPICS, description: 'Optional: one section only — contract | kinds | recipes | starters | issues | tools | blocks' },
         },
       },
       execute: async ({ kind, topic }) => {
@@ -826,7 +826,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       annotations: { readOnlyHint: true },
       // NOT in the stdio server: it has no browser, so it cannot lay a deck out. This is the
       // one thing a page can tell an agent that a file-writing process cannot.
-      description: "SEE THE DECK YOU CANNOT SEE. Lays the open Fold out in a real browser, off-screen, and reports each fold's geometry, then names four defects it can PROVE: content that OVERFLOWS the screen, content CLIPPED behind the masthead, an EMPTY fold, and SVG labels that COLLIDE. Call it after authoring and before save_deck. Layout depends on the SCREEN, so it measures at a stated viewport (1280x720 default) and names it. A fold it could not put on screen comes back measured:false with the reason — an absent warning is NOT a clean bill of health unless measured is true.",
+      description: "SEE THE DECK YOU CANNOT SEE. Lays the open Fold out in a real browser, off-screen, reports each fold's geometry and names four defects it can PROVE: OVERFLOW, masthead CLIP, EMPTY fold, SVG label COLLISION. Stated viewport, 1280x720 default. Read `outcome` first: clean | defects | unknown — unknown = something was NOT measured; never ship on unknown. `clean` is true only for a clean WHOLE deck. Too big for the 15s budget? It answers with the folds it reached plus `remeasure`: pass that back as `foldIds` (or use `maxFolds`) to measure a subset directly.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -836,27 +836,65 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
             description: 'Screen to measure against (default 1280x720). Width 320-3840, height 240-2160.',
             properties: { width: { type: 'integer', description: 'CSS px, 320-3840' }, height: { type: 'integer', description: 'CSS px, 240-2160' } },
           },
+          foldIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Measure ONLY these chunk ids (deck order is kept). An unknown id is refused. Folds not listed come back skipped:true and the deck-level `clean` stays false.',
+          },
+          maxFolds: { type: 'integer', minimum: 1, description: 'Measure at most this many folds, from the top of the deck (after foldIds, if both are given).' },
         },
       },
-      execute: async ({ viewport }) => {
+      execute: async ({ viewport, foldIds, maxFolds }) => {
         const model = deck.model();
+        // the subset is resolved BEFORE the host check, so a bad id is refused the same way everywhere
+        let ids = [...model.order];
+        if (foldIds !== undefined) {
+          if (!Array.isArray(foldIds) || foldIds.length === 0 || !foldIds.every((id) => typeof id === 'string')) {
+            return fail(`foldIds must be a non-empty array of chunk ids — got ${JSON.stringify(foldIds)}`);
+          }
+          const unknown = foldIds.filter((id) => !model.slides.has(id));
+          if (unknown.length > 0) return fail(`no such chunk: ${unknown.join(', ')} — list_chunks names the ids`, { unknown });
+          const wanted = new Set(foldIds as string[]);
+          ids = ids.filter((id) => wanted.has(id));
+        }
+        if (maxFolds !== undefined) {
+          if (!Number.isInteger(maxFolds) || maxFolds < 1) return fail(`maxFolds must be a positive integer — got ${JSON.stringify(maxFolds)}`);
+          ids = ids.slice(0, maxFolds);
+        }
         if (!deps.measure) {
           return ok(unmeasurable(model, 'this host has no browser layout to measure (no measurement route was injected — unit tests and non-DOM hosts)'));
         }
         let m;
         try {
-          m = await deps.measure(deck.serialize(), [...model.order], viewport);
+          m = await deps.measure(deck.serialize(), ids, viewport);
         } catch (e) {
           return ok(unmeasurable(model, `the measurement failed: ${(e as Error).message}`));
         }
-        const { folds, warnings } = analyseRender(model, m);
+        if (!m.viewport || !(m.viewport.width > 0) || !(m.viewport.height > 0)) {
+          // belt and braces: measure.ts already rejects this, but a third-party measure route may not
+          return ok(unmeasurable(model, `the measurement reported a ${m.viewport?.width ?? 0}x${m.viewport?.height ?? 0} viewport — no layout was done, so no fold was measured`));
+        }
+        const requested = new Set(ids);
+        const analysed = analyseRender(model, m);
+        const folds = (analysed.folds as Array<Record<string, unknown> & { id: string }>).map((f) =>
+          requested.has(f.id) ? f : { id: f.id, kind: f.kind, label: f.label, hidden: f.hidden, skipped: true, measured: false, why: 'not requested (foldIds / maxFolds)' }
+        );
+        const verdict = summarise(folds, analysed.warnings);
+        const budget = m.partial
+          ? ` The ${m.partial.budgetMs / 1000}s measuring budget ran out after ${m.partial.measuredCount} of ${m.partial.requested} folds — the rest are measured:false; pass \`remeasure\` back as foldIds to finish.`
+          : '';
+        const subset = verdict.coverage.requested < verdict.coverage.total ? ` Only ${verdict.coverage.requested} of ${verdict.coverage.total} folds were requested, so \`clean\` is about this subset, not the deck.` : '';
         return ok({
-          measured: true,
+          measured: verdict.coverage.measured > 0,
+          outcome: verdict.outcome,
+          clean: verdict.clean,
+          coverage: verdict.coverage,
+          ...(verdict.remeasure ? { remeasure: verdict.remeasure } : {}),
           viewport: m.viewport,
-          note: `measured in a real off-screen render at ${m.viewport.width}x${m.viewport.height} CSS px. Layout is viewport-dependent — a fold that fits here can still break on a shorter screen, so re-run with a smaller viewport before you call a deck safe.`,
+          note: `measured in a real off-screen render at ${m.viewport.width}x${m.viewport.height} CSS px.${budget}${subset} Layout is viewport-dependent — a fold that fits here can still break on a shorter screen, so re-run with a smaller viewport before you call a deck safe.`,
           folds,
-          warnings,
-          clean: warnings.length === 0,
+          warnings: analysed.warnings,
+          ...(m.partial ? { partial: m.partial } : {}),
         });
       },
     },
@@ -865,7 +903,7 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
       name: 'undo',
       // NOT in the stdio server: it has no session, so it has no stack to unwind. This is a
       // web-only tool built on @origami/format's History, which the page keeps per open Fold.
-      description: "Reverse the LAST change to the open Fold and re-render it. One tool call is one undo step, so a run_batch of six is six steps. It covers every writer (origami_guide({topic:\"tools\"}) lists them). It does NOT cross create_deck or a Fold the human opened — both reset the stack — does not touch bytes already on disk, and does not cover a staged proposal (reject_proposal) or a saved theme (delete_theme). 50 deep, no redo.",
+      description: "Reverse the LAST change to the open Fold and re-render it. One tool call is one undo step, so a run_batch of six is six steps. It covers every writer (origami_guide({topic:\"tools\"}) lists them). It does NOT cross create_deck or a Fold the human opened — both reset the stack — does not touch bytes already on disk, and does not cover a staged proposal (reject_proposal) or a saved theme (delete_theme). 50 steps deep, no redo. revert_to_saved drops a whole run_batch in one call.",
       inputSchema: { type: 'object', additionalProperties: false, properties: {} },
       execute: async () => {
         const undone = deck.undo();
@@ -877,6 +915,29 @@ export function buildTools(deps: ToolDeps): ToolDef[] {
           remainingUndoSteps: deck.undoDepth(),
           chunks: deck.model().order.length,
           note: 'reversed in the open Fold and re-rendered — the file on disk is unchanged until save_deck runs again. There is no redo.',
+        });
+      },
+    },
+
+    {
+      name: 'revert_to_saved',
+      annotations: { destructiveHint: true },
+      // NOT in the stdio server, for the same reason undo is not: it has no session and no
+      // History to jump. This is the "safe pivot" a run_batch that went sideways needs — undo
+      // is one call per step (a 19-call batch is 19 undos), this is one call, period.
+      description:
+        "Drop EVERY unsaved change on the open Fold in ONE call — NOT undo (one step at a time). Jumps to the last save_deck, or to how the Fold was created/opened if never saved, clearing the undo stack in the same move — the safe pivot after a bad run_batch. Cannot itself be undone. Touches no disk. Refuses when nothing is open or nothing is unsaved.",
+      inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+      execute: async () => {
+        const result = deck.revertToSaved();
+        if (result === null) {
+          return fail('nothing to revert — no change since the Fold was created, opened or last saved');
+        }
+        return ok({
+          revertedTo: result.revertedTo,
+          droppedUndoSteps: result.droppedUndoSteps,
+          chunks: deck.model().order.length,
+          note: 'reverted in the open Fold and re-rendered — nothing on disk or in browser storage was touched, and the undo stack was cleared by the revert, so this cannot itself be undone.',
         });
       },
     },

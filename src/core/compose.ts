@@ -34,6 +34,7 @@
         the rendered text. */
 
 import { escText, blockFigure, validatorFor } from './block-tools.js';
+import { GRAPH_FIT_HEIGHT, MIN_GRAPH_HEIGHT } from './fold-starters.js';
 import { fillDiagramDefaults } from './data-blocks.js';
 import type { Violation } from '../../vendor/format-dist/index.js';
 
@@ -83,10 +84,81 @@ const PROSE_COST = 107;
  * names its own plotHeight is obeyed and none of this applies.
  */
 export function chartPlotHeight(blocks: unknown[]): number {
-  const prose = blocks.filter(
+  return Math.max(MIN_PLOT_HEIGHT, COMPOSED_PLOT_HEIGHT - proseCount(blocks) * PROSE_COST);
+}
+
+/** How many blocks on this card are prose — the height a data block on it no longer has. */
+const proseCount = (blocks: unknown[]): number =>
+  blocks.filter(
     (b) => b !== null && typeof b === 'object' && !Array.isArray(b) && COMPOSE_PROSE_KINDS.some((k) => (b as Record<string, unknown>)[k] !== undefined)
   ).length;
-  return Math.max(MIN_PLOT_HEIGHT, COMPOSED_PLOT_HEIGHT - prose * PROSE_COST);
+
+/** The CSS px range `width` / `height` accept. The ceilings are the runtime's own: 2600px is the
+    widest .slide-inner it lays out, 2160 the tallest viewport inspect_render will measure. The
+    floors are the point below which the block stops being readable rather than merely small. */
+export const SIZE_RANGE = { width: [160, 2600], height: [120, 2160] } as const;
+
+/**
+ * The kinds whose CSS actually READS --obw / --obh, and the kinds' own controls for the two that
+ * do not. MEASURED, not read off a doc: every --obw/--obh rule in vendor/runtime-dist/index.js
+ * was greped, then each kind was rendered twice on one card — once with --obw:600px;--obh:300px
+ * on the figure, once bare — and the block's own box read in the real preview (2026-09-03):
+ *
+ *     venn 166 vs 318 · flow 166 vs 318 · graph 166 vs 318 · gantt 166 vs 319 · table 166 vs 318
+ *     chart 182 vs 182 · draw 318 vs 318      (preview px — the ratio is the finding)
+ *
+ * So a size on a chart or a drawing would render EXACTLY the same markup and change nothing.
+ * That is refused, not dropped: an agent that cannot see the deck has no other way to learn it.
+ * Each of those two has its own control inside the block's JSON instead, and the refusal says so.
+ */
+const SIZED_KINDS = ['venn', 'flow', 'graph', 'gantt', 'table'] as const;
+
+/** Kinds whose figure reads --obw but not --obh. `chart` joined on the Folio 610e732 runtime
+    (figure.o-chartfig { width: min(var(--obw,100%),100%) } — before that a chart read neither, the
+    182 vs 182 above); its height is still the plot box inside its own JSON. */
+const WIDTH_ONLY_KINDS = ['chart'] as const;
+
+const OWN_SIZE_CONTROL: Record<string, string> = {
+  chart: 'a chart\'s HEIGHT is `plotHeight` inside its own JSON (the composer already fits that to the card) — `width` is accepted, `height` is not',
+  draw: 'a drawing is sized by `wpct` (10-100, a percent of the measure) inside its own JSON, and its height follows the canvas aspect',
+};
+
+/**
+ * The `style` attribute one block's figure gets — the block-size grips' own carrier.
+ *
+ * `width` -> --obw, `height` -> --obh, in CSS px, and ONLY the one that was named: a figure with
+ * neither is byte-identical to the one this composer built before the grips existed.
+ *
+ * A size the runtime would not read is REFUSED rather than dropped — on a prose block, which has
+ * no data figure to carry it, and on chart/draw, whose CSS ignores it (see SIZED_KINDS).
+ */
+function blockSize(b: Record<string, unknown>, i: number, kind: string, defaultHeight: number): { style: string } | { error: string } {
+  const named = (['width', 'height'] as const).filter((k) => b[k] !== undefined);
+  const widthOnly = (WIDTH_ONLY_KINDS as readonly string[]).includes(kind);
+  const ignored = widthOnly ? named.filter((k) => k === 'height') : (SIZED_KINDS as readonly string[]).includes(kind) ? [] : named;
+  if (ignored.length > 0) {
+    const why = OWN_SIZE_CONTROL[kind] ?? `only a data block (${SIZED_KINDS.join(', ')}) carries a size`;
+    return { error: `blocks[${i}] names ${ignored.join(' and ')} on a ${kind} block, which the runtime would ignore — ${why}. NOTHING was added and the Fold is unchanged` };
+  }
+  const px: string[] = [];
+  for (const k of ['width', 'height'] as const) {
+    const v = b[k];
+    if (v === undefined) continue;
+    const [lo, hi] = SIZE_RANGE[k];
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < lo || v > hi) {
+      return { error: `blocks[${i}].${k} must be a whole number of CSS px between ${lo} and ${hi} — got ${JSON.stringify(v)}. NOTHING was added and the Fold is unchanged` };
+    }
+    px.push(`${k === 'width' ? '--obw' : '--obh'}:${v}px`);
+  }
+  if (b.height === undefined && defaultHeight > 0) px.push(`--obh:${defaultHeight}px`);
+  return { style: px.join(';') };
+}
+
+/** The default height a kind gets on THIS card when the block names none, 0 for "leave it to the
+    runtime". Only `graph` has one, and it pays PROSE_COST per prose block for the same reason a
+    chart does — see GRAPH_FIT_HEIGHT and chartPlotHeight. */
+export function graphFitHeight(blocks: unknown[]): number {
+  return Math.max(MIN_GRAPH_HEIGHT, GRAPH_FIT_HEIGHT - proseCount(blocks) * PROSE_COST);
 }
 
 /** Any value the runtime's count-up can find a number inside of — see the header comment. */
@@ -116,8 +188,9 @@ const statCard = (value: unknown, label: unknown): string => {
 };
 
 /** One block's markup, or the reason it cannot be built. `i` is only for the error message;
-    `plotHeight` is the height the CARD decided a chart on it can afford (see chartPlotHeight). */
-function blockHtml(b: Record<string, unknown>, i: number, plotHeight: number): { html: string; kind: string } | { error: string; extra?: Record<string, unknown> } {
+    `plotHeight` and `graphHeight` are the heights the CARD decided a chart and a graph on it can
+    afford (see chartPlotHeight, graphFitHeight). */
+function blockHtml(b: Record<string, unknown>, i: number, plotHeight: number, graphHeight: number): { html: string; kind: string } | { error: string; extra?: Record<string, unknown> } {
   const named = COMPOSE_KINDS.filter((k) => b[k] !== undefined);
   if (named.length === 0) {
     return { error: `blocks[${i}] names no block — each block is exactly one of ${COMPOSE_KINDS.join(', ')}`, extra: { availableBlocks: [...COMPOSE_KINDS] } };
@@ -127,6 +200,9 @@ function blockHtml(b: Record<string, unknown>, i: number, plotHeight: number): {
   }
   const kind = named[0]!;
   const value = b[kind];
+  // the block's own size, checked for EVERY kind so a prose block naming one is refused here
+  const box = blockSize(b, i, kind, kind === 'graph' ? graphHeight : 0);
+  if ('error' in box) return box;
 
   if ((COMPOSE_DATA_KINDS as readonly string[]).includes(kind)) {
     if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -145,7 +221,7 @@ function blockHtml(b: Record<string, unknown>, i: number, plotHeight: number): {
       return { error: `blocks[${i}].${kind} breaks its own schema — NOTHING was added and the Fold is unchanged`, extra: { violations } };
     }
     const caption = b.caption === undefined ? '' : String(b.caption);
-    return { kind, html: blockFigure(kind, data, caption) };
+    return { kind, html: blockFigure(kind, data, caption, box.style) };
   }
 
   if (kind === 'text') {
@@ -190,13 +266,14 @@ export function composeFold(args: ComposeArgs): ComposeResult {
   if (columns !== 1 && columns !== 2) return { error: `columns must be 1 or 2 — got ${JSON.stringify(args.columns)}` };
 
   const plotHeight = chartPlotHeight(args.blocks);
+  const graphHeight = graphFitHeight(args.blocks);
   const parts: string[] = [];
   const blocks: ComposedBlock[] = [];
   const seen: Record<string, number> = {};
   for (let i = 0; i < args.blocks.length; i++) {
     const raw = args.blocks[i];
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { error: `blocks[${i}] must be an object naming one block kind` };
-    const built = blockHtml(raw as Record<string, unknown>, i, plotHeight);
+    const built = blockHtml(raw as Record<string, unknown>, i, plotHeight, graphHeight);
     if ('error' in built) return built;
     parts.push(built.html);
     if ((COMPOSE_DATA_KINDS as readonly string[]).includes(built.kind)) {

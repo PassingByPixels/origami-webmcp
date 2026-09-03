@@ -11064,6 +11064,18 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+/* MEASURED, Chromium 151 (2026-09-03): SVG <text> under the card canvas's transform was PAINTED
+   at a stale scale \u2014 a treemap at card scale 1.41 drew "Marketing 180" inside the Sales cell and
+   "Legal" off the svg entirely; at 0.91 every label sat 10% right of its cell centre \u2014 while
+   getBoundingClientRect reported the right box and the rects were right both times. Blink lays
+   SVG text out with a "screen scaling factor" read off the CTM, and that factor is not
+   recomputed when an HTML ancestor's transform changes after first layout, which is exactly
+   what fitting the card does. Any later style invalidation on the svg repainted it correctly,
+   which is how it was diagnosed, and text-rendering: auto in the stylesheet did NOT fix it
+   (same stale factor). geometricPrecision pins the factor to 1: the glyphs are laid out in user
+   units and scaled with the geometry, so there is no factor to go stale. Verified by pixel in
+   e2e/svg-text-scale.spec.ts at scale 1.41 and 0.91. HTML text keeps optimizeLegibility. */
+svg { text-rendering: geometricPrecision; }
 .slide {
   min-height: 100vh;
   width: 100%;
@@ -13413,7 +13425,11 @@ table.o-table-table tbody tr:last-child td { border-bottom: none; }
 
 // src/blocks/chart-css.ts
 var chartCss = `/* @kind:chart */
-figure.o-chartfig { margin: 26px 0; }
+/* --obw is the block-width grip's carrier (see css.ts): every other data figure reads it, and a
+   chart did not, so an author (or add_fold) had no way to make a chart narrower than the column
+   to leave room beside it. At the default (unset) this is width:100% with zero auto margin \u2014
+   byte-for-byte the old layout. */
+figure.o-chartfig { margin: 26px auto; width: min(var(--obw, 100%), 100%); }
 .o-chart svg { display: block; width: 100%; height: auto; max-width: 100%; margin: 0 auto; }
 .o-chart-grid { stroke: var(--rule); stroke-width: 1; }
 .o-chart-tick { font: 11px var(--font-body); font-family: var(--chart-font, var(--font-body)); font-size: calc(11px * var(--chart-tsz, 1)); fill: var(--chart-ink, var(--ink-soft)); }

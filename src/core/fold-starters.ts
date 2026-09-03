@@ -15,11 +15,17 @@
    TABLE_STARTER) are copied field for field from the same file. */
 
 /** palette.ts dataFigure — verbatim. JSON is pretty-printed at 2 spaces and every "<" is
-    escaped as \u003c, which is the data block's carrier invariant. */
+    escaped as \u003c, which is the data block's carrier invariant.
+
+    `style` is the ONE addition, and it carries what the Studio's own block-size grips write on
+    this same figure: `--obw:<px>` / `--obh:<px>`. The runtime CSS reads them off the figure by
+    inheritance (.o-graph-svg, .o-flow-svg, .o-venn-svg, .o-gantt-wrap, figure.o-tablefig /
+    .o-table-wrap). An empty `style` emits NO attribute, so a figure with no size named is
+    byte-identical to the palette's. */
 /* Exported so the mini tools' block writers build the SAME figure the Studio's rail does —
    there is one figure builder in this app, not one per page. */
-export function dataFigure(kind: string, figClass: string, mountClass: string, seed: unknown, caption: string): string {
-  return `<figure class="${figClass} anim"><script type="application/json" data-odata="${kind}">
+export function dataFigure(kind: string, figClass: string, mountClass: string, seed: unknown, caption: string, style = ''): string {
+  return `<figure class="${figClass} anim"${style ? ` style="${style}"` : ''}><script type="application/json" data-odata="${kind}">
 ${blockJson(seed)}
 </script><div class="${mountClass}" data-${kind}-mount></div><figcaption>${caption}</figcaption></figure>`;
 }
@@ -143,11 +149,46 @@ const flowFoldInner = (): string => `
   </div>
 `;
 
+/**
+ * MEASURED, not chosen: the block height (CSS px) a composed GRAPH gets when it names none.
+ *
+ * A default, unedited node graph OVERFLOWS a 720px screen before an author has typed anything.
+ * Read at 1280x720 through the real render (tools/agent-bridge.mjs, 2026-09-03), a card of
+ * eyebrow + h2 + graph + figcaption and nothing else:
+ *
+ *     --obh   (none)  600  500  450  400  380  360  340  320  300  280 and below
+ *     card     875    956  856  806  756  736  716  696  676  656  654 (flat)
+ *
+ * The slope is exactly 1.0 px per unit down to ~290, where the CARD hits its own floor of 654px
+ * and a smaller graph buys no height at all. 320 leaves the card at 676px — 44px inside the
+ * screen, next to the 46px the chart default keeps — while the diagram stays large enough that
+ * inspect_render reports no label collisions (checked at 320, 220 and 200: none at any).
+ *
+ * A graph that names its own `height` is obeyed and none of this applies. Flow, whose CSS is the
+ * same shape (.o-flow-svg), needs NO default: the same run measured a composed flow card and the
+ * flowchart starter at 660px each, both already inside 720.
+ */
+export const GRAPH_FIT_HEIGHT = 320;
+
+/** The graph's floor, the counterpart of MIN_PLOT_HEIGHT. MEASURED on the same run: one lede
+    paragraph costs a graph card 106-107px (875 -> 981 with no --obh; 716 -> 823 at --obh 360),
+    the same PROSE_COST a chart pays, so prose on the card comes off the graph too. The floor
+    itself is a JUDGEMENT sitting on one measurement — inspect_render found no label collision at
+    200 — and it is where a diagram stops being worth drawing rather than a number the render
+    forces. A card that still will not fit at 200 is overfull, and saying so is inspect_render's
+    job, not the composer's. */
+export const MIN_GRAPH_HEIGHT = 200;
+
+/* The ONE starter that diverges from palette.ts, and only by its block SIZE. Measured at
+   1280x720 (tools/agent-bridge.mjs, 2026-09-03): this starter renders a 875px card against
+   720px of screen — an overflow the agent gets before it has edited anything. --obh
+   GRAPH_FIT_HEIGHT brings the same card to 676px. The seed, the classes and the caption are
+   still palette.ts verbatim. */
 const graphFoldInner = (): string => `
   <div class="slide-inner">
     <p class="eyebrow anim" style="--i:0">Map</p>
     <h2 class="anim" style="--i:1">Node graph</h2>
-    ${dataFigure('graph', 'o-graphfig', 'o-graph', GRAPH_STARTER, 'Node graph')}
+    ${dataFigure('graph', 'o-graphfig', 'o-graph', GRAPH_STARTER, 'Node graph', `--obh:${GRAPH_FIT_HEIGHT}px`)}
   </div>
 `;
 

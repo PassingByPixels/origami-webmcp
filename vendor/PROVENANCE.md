@@ -1,12 +1,14 @@
 # Vendored artifacts - provenance
 
 Source repo: the Origami Folio monorepo (private)
-Source state: Folio master @ 41061b8 (2026-09-03: card geometry — a card fold laid out through a
-              non-document .slide-inner is a fixed 1280x720 logical canvas scaled to fit, on every
-              surface; kind-shell/data folds and scrolls stay fluid; plus the 2026-09-02 optimize +
-              UAT arcs). Vendor = the dists of that commit.
-Previous:     master @ fc7cece (2026-08-30 copy)
-Copied: 2026-09-02
+Source state: Folio master @ 610e732 (2026-09-03 pm, two runtime CSS fixes on top of 41061b8
+              card geometry + the 2026-09-02 optimize + UAT arcs: svg { text-rendering:
+              geometricPrecision } - chart/diagram labels were painted at a stale scale under the
+              card transform - and figure.o-chartfig reads --obw, so a chart can be narrowed like
+              every other data figure). Vendor = the dists of that commit. Only runtime-dist/index.js
+              (the stylesheet) and the css .d.ts files moved.
+Previous:     master @ 41061b8 (2026-09-02 copy)
+Copied: 2026-09-03
 
 - format-dist/    = packages/format/dist   (built ESM + d.ts; zero deps, browser-safe)
 - runtime-dist/   = packages/runtime/dist  (viewer IIFE + assembleDeck ESM; fixtures pruned)

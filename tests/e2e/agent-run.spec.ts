@@ -59,7 +59,7 @@ async function tableData(page: Page): Promise<any> {
 test('an agent builds a scroll Fold with two data kinds and resolves its own proposal', async ({ page }) => {
   await installHost(page);
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 38 tools');
+  await expect(page.getByTestId('mcp-status')).toContainText('connected via document.modelContext — 39 tools');
 
   /* 1. onboard — the default guide indexes the kinds; the schema itself lives behind the
      topic call and get_kind_schema, and both routes must agree in the SHIPPED bundle */

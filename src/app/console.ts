@@ -20,7 +20,7 @@ export type ToolGroups = ReadonlyArray<readonly [string, readonly string[]]>;
 
 export const FOLIO_GROUPS: ToolGroups = [
   ['Learn', ['origami_guide', 'get_kind_schema', 'list_starters', 'list_block_defs', 'list_chunks', 'read_chunk', 'get_block', 'list_themes', 'inspect_render', 'list_proposals', 'list_activity']],
-  ['Author', ['create_deck', 'add_fold', 'add_ledger', 'add_chunk', 'add_custom_fold', 'write_chunk', 'set_block', 'move_chunk', 'set_chunk_meta', 'delete_chunk', 'define_block', 'delete_block', 'set_header', 'set_deck_meta', 'apply_theme', 'save_theme', 'delete_theme', 'set_fold_type', 'undo']],
+  ['Author', ['create_deck', 'add_fold', 'add_ledger', 'add_chunk', 'add_custom_fold', 'write_chunk', 'set_block', 'move_chunk', 'set_chunk_meta', 'delete_chunk', 'define_block', 'delete_block', 'set_header', 'set_deck_meta', 'apply_theme', 'save_theme', 'delete_theme', 'set_fold_type', 'undo', 'revert_to_saved']],
   ['Review', ['propose_chunk', 'propose_add', 'propose_delete', 'accept_proposal', 'reject_proposal']],
   ['File', ['run_batch', 'save_deck', 'export_deck']],
 ];

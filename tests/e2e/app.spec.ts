@@ -50,10 +50,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('38');
+  await expect(page.getByTestId('tool-count')).toHaveText('39');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('38 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('39 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);
@@ -351,6 +351,32 @@ test('inspect_render reports a clean deck as clean, and never touches the previe
 
   // measuring is READ-ONLY: same bytes in the preview, and the Fold is not marked dirty by it
   expect(await page.getByTestId('preview').getAttribute('srcdoc')).toBe(before);
+  expect(res.body.outcome).toBe('clean');
+  expect(res.body.coverage).toEqual({ total: 1, requested: 1, measured: 1 });
+});
+
+test('inspect_render measures a subset directly (foldIds / maxFolds) and never calls a subset clean for the deck', async ({ page }) => {
+  /* The 20-fold report: the whole deck did not fit the measuring budget, and the only way to
+     measure six folds was to HIDE the other fourteen. foldIds measures them directly. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Subset', discard: true });
+  const second = (await invoke(page, 'add_chunk', { label: 'Second' })).body.chunkId;
+  await invoke(page, 'add_chunk', { label: 'Third' });
+
+  const res = await invoke(page, 'inspect_render', { foldIds: [second] });
+  expect(res.body.measured).toBe(true);
+  expect(res.body.outcome).toBe('clean'); // the one fold asked for measured clean
+  expect(res.body.clean).toBe(false); // the DECK was not measured
+  expect(res.body.coverage).toEqual({ total: 3, requested: 1, measured: 1 });
+  expect(res.body.folds.filter((f: any) => f.skipped)).toHaveLength(2);
+  expect(res.body.folds.find((f: any) => f.id === second)).toMatchObject({ measured: true, fits: true });
+
+  const top = await invoke(page, 'inspect_render', { maxFolds: 2 });
+  expect(top.body.coverage).toEqual({ total: 3, requested: 2, measured: 2 });
+  expect(top.body.folds.map((f: any) => f.measured)).toEqual([true, true, false]);
+
+  const bad = await invoke(page, 'inspect_render', { foldIds: ['nope'] });
+  expect(bad.body.error).toMatch(/no such chunk: nope/);
 });
 
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {
@@ -375,6 +401,30 @@ test('create_deck mints a blank Fold in the tab and add_chunk extends it', async
 
   const toc = await invoke(page, 'list_chunks', {});
   expect(toc.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'Second']);
+});
+
+test('revert_to_saved drops an add_fold in one call — not undo, and the preview matches the post-create bytes', async ({ page }) => {
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Revert e2e', discard: true });
+  const afterCreate = await deckTextNow(page);
+
+  const added = await invoke(page, 'add_fold', {
+    title: 'Regretted fold',
+    blocks: [{ text: '<p>This should not survive a revert.</p>' }],
+  });
+  expect(added.state).toContain('ok');
+  await expect(preview(page)).toContainText('Regretted fold');
+  expect(await deckTextNow(page)).not.toBe(afterCreate);
+
+  const reverted = await invoke(page, 'revert_to_saved', {});
+  expect(reverted.state).toContain('ok');
+  expect(reverted.body.revertedTo).toBe('as created or opened');
+  expect(reverted.body.chunks).toBe(1);
+
+  const toc = await invoke(page, 'list_chunks', {});
+  expect(toc.body.chunks).toHaveLength(1); // the added fold is gone, back to just the cover
+  await expect(preview(page)).not.toContainText('Regretted fold');
+  expect(await deckTextNow(page)).toBe(afterCreate); // byte-identical to the post-create render
 });
 
 test('a staged proposal survives a real reload, and a conflict survives with it', async ({ page }) => {
@@ -647,3 +697,134 @@ test('a composed chart fold fits 1280x720 even when the card also carries prose'
   console.log(`  add_fold @1280x720: prose+chart fits=${fold(withProse.body.chunkId).fits}, chart alone fits=${fold(alone.body.chunkId).fits}, cover fits=${cover.fits}`);
   expect((await invoke(page, 'save_deck', {})).body.validated).toBe(true);
 });
+test('a composed node graph and the node-graph starter both FIT 1280x720', async ({ page }) => {
+  /* The defect this test holds shut: a default, unedited node graph rendered 875px against 720px
+     of screen — an overflow an agent got before it had typed anything, on both routes into a
+     graph (add_fold and the starter). MEASURED through the real render at 1280x720:
+
+       --obh   (none)  600  500  450  400  380  360  340  320  300  280 and below
+       card     875    956  856  806  756  736  716  696  676  656  654 (flat)
+
+     The slope is 1.0px per unit down to ~290, where the card hits its own 654px floor. The
+     composer's default (GRAPH_FIT_HEIGHT) puts the card at 676. A graph that names its own
+     height is OBEYED rather than clamped, and this proves that too: a block asking for 500 makes
+     a card TALLER than the default one, and is then reported as an overflow rather than being
+     quietly shrunk — a card that will not fit is overfull, which is inspect_render's to say.
+     (The delta is not asserted to the pixel: below roughly 290 the card stops shrinking at its
+     own floor, so the slope is 1.0 only above that knee.) */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Graph fit', discard: true });
+
+  const GRAPH = {
+    nodes: [
+      { id: 'api', label: 'API', x: 50, y: 20, tone: 'accent' },
+      { id: 'auth', label: 'Auth', x: 18, y: 48, tone: '' },
+      { id: 'db', label: 'Database', x: 50, y: 76, tone: '' },
+      { id: 'cache', label: 'Cache', x: 82, y: 48, tone: '' },
+      { id: 'queue', label: 'Queue', x: 18, y: 84, tone: '' },
+      { id: 'worker', label: 'Worker', x: 82, y: 84, tone: '' },
+    ],
+    edges: [
+      { from: 'api', to: 'auth', label: 'verify' },
+      { from: 'api', to: 'db', label: 'read' },
+      { from: 'api', to: 'cache', label: '' },
+      { from: 'db', to: 'queue', label: '' },
+      { from: 'queue', to: 'worker', label: 'jobs' },
+    ],
+  };
+
+  const composed = await invoke(page, 'add_fold', { title: 'Service map', eyebrow: 'Map', blocks: [{ graph: GRAPH, caption: 'Service map' }] });
+  expect(composed.state).toContain('ok');
+  const starter = await invoke(page, 'add_chunk', { starter: 'node-graph' });
+  expect(starter.state).toContain('ok');
+  const short = await invoke(page, 'add_fold', { title: 'Short on purpose', blocks: [{ graph: GRAPH, height: 340 }] });
+  const tall = await invoke(page, 'add_fold', { title: 'Tall on purpose', blocks: [{ graph: GRAPH, height: 500 }] });
+
+  const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
+  expect(res.body.measured).toBe(true);
+  const fold = (id: string) => res.body.folds.find((f: any) => f.id === id);
+
+  console.log(
+    `  graph @1280x720: composed ${fold(composed.body.chunkId).contentHeight}px, starter ${fold(starter.body.chunkId).contentHeight}px, ` +
+      `height:340 ${fold(short.body.chunkId).contentHeight}px, height:500 ${fold(tall.body.chunkId).contentHeight}px (720px on screen)`
+  );
+
+  expect(fold(composed.body.chunkId).fits, `composed graph measured ${fold(composed.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(composed.body.chunkId).rendersAnything).toBe(true);
+  expect(fold(starter.body.chunkId).fits, `node-graph starter measured ${fold(starter.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(starter.body.chunkId).rendersAnything).toBe(true);
+  // the block's own height is obeyed, not clamped to the composer's default
+  expect(fold(tall.body.chunkId).contentHeight).toBeGreaterThan(fold(short.body.chunkId).contentHeight);
+  expect(fold(tall.body.chunkId).contentHeight).toBeGreaterThan(fold(composed.body.chunkId).contentHeight);
+  expect(fold(short.body.chunkId).fits, `height:340 measured ${fold(short.body.chunkId).contentHeight}px`).toBe(true);
+  expect(fold(tall.body.chunkId).fits, 'height:500 is what the author asked for, so it overflows on purpose').toBe(false);
+
+  // and the ONLY overflow on the deck is that deliberate one
+  expect(res.body.warnings.filter((w: any) => w.issue === 'overflow').map((w: any) => w.fold)).toEqual([tall.body.chunkId]);
+  expect((await invoke(page, 'save_deck', {})).body.validated).toBe(true);
+});
+
+test('a block that names a width renders NARROWER than the same block without one', async ({ page }) => {
+  /* --obw is the runtime's own width grip, not something this app invented, so the proof has to
+     be the rendered box rather than the markup. Both blocks sit on ONE card, so they share the
+     measure and the theme and only the style attribute differs.
+
+     It also holds the other half of the finding: chart and draw read NEITHER variable, which is
+     why add_fold refuses a size on them instead of writing one that does nothing. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Width', discard: true });
+
+  const FLOW = {
+    nodes: [{ id: 'n1', label: 'Build', shape: 'box', tone: '' }, { id: 'n2', label: 'Ship', shape: 'box', tone: '' }],
+    edges: [{ from: 'n1', to: 'n2', label: '' }],
+  };
+  const pair = await invoke(page, 'add_fold', {
+    title: 'Narrow beside wide',
+    blocks: [{ flow: FLOW, caption: 'narrow', width: 600 }, { flow: FLOW, caption: 'wide' }],
+  });
+  expect(pair.state).toContain('ok');
+
+  const frame = page.frameLocator('[data-testid="preview"]');
+  await frame.locator('.o-tab', { hasText: 'Narrow beside wide' }).first().click();
+  await expect(frame.locator('figure.o-flowfig .o-flow-svg').first()).toBeVisible();
+
+  const widths = await frame.locator('figure.o-flowfig').evaluateAll((figs) =>
+    figs.map((f) => ({
+      cap: f.querySelector('figcaption')?.textContent ?? '',
+      svg: Math.round((f.querySelector('.o-flow-svg') as Element).getBoundingClientRect().width),
+    }))
+  );
+  const narrow = widths.find((w) => w.cap === 'narrow')!;
+  const wide = widths.find((w) => w.cap === 'wide')!;
+  console.log(`  --obw:600px flow renders ${narrow.svg}px against ${wide.svg}px bare (preview px)`);
+
+  expect(narrow.svg, 'the sized block is measurably narrower').toBeLessThan(wide.svg);
+  // it is the SIZE that narrows it, not a smaller diagram: the ratio tracks 600 of the measure
+  expect(narrow.svg / wide.svg).toBeLessThan(0.75);
+
+  // a chart reads --obw too (Folio 610e732: figure.o-chartfig), so "width" narrows it on screen
+  const CHART = { type: 'bar', labels: ['Q1', 'Q2'], series: [{ name: 'R', color: '#4A8CC4', values: [1, 2] }], yMax: null };
+  const charts = await invoke(page, 'add_fold', {
+    title: 'Chart narrow beside wide',
+    blocks: [{ chart: CHART, caption: 'narrow', width: 600 }, { chart: CHART, caption: 'wide' }],
+  });
+  expect(charts.state).toContain('ok');
+  await frame.locator('.o-tab', { hasText: 'Chart narrow beside wide' }).first().click();
+  await expect(frame.locator('figure.o-chartfig svg').first()).toBeVisible();
+  const chartWidths = await frame.locator('figure.o-chartfig').evaluateAll((figs) =>
+    figs.map((f) => ({ cap: f.querySelector('figcaption')?.textContent ?? '', w: Math.round(f.getBoundingClientRect().width) }))
+  );
+  const cNarrow = chartWidths.find((w) => w.cap === 'narrow')!;
+  const cWide = chartWidths.find((w) => w.cap === 'wide')!;
+  console.log(`  --obw:600px chart figure renders ${cNarrow.w}px against ${cWide.w}px bare (preview px)`);
+  expect(cNarrow.w / cWide.w).toBeLessThan(0.75);
+
+  // a chart's height is its plot box, and a drawing has wpct: a size the runtime ignores is refused
+  const chartSized = await invoke(page, 'add_fold', {
+    title: 'Refused',
+    blocks: [{ chart: CHART, height: 300 }],
+  });
+  expect(chartSized.state).toContain('error');
+  expect(chartSized.body.error).toContain('the runtime would ignore');
+});
+
