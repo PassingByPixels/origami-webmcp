@@ -1044,6 +1044,21 @@ describe('inspect_render', () => {
       ],
     });
     expect(apart.warnings).toEqual([]);
+
+    // a treemap cell's name stacked over its value, measured off a real render (2026-09-03):
+    // the two text boxes share a ~1px sliver across their width — touching, not colliding
+    const stacked = analyseRender(h.deck.model(), {
+      viewport: { width: 1280, height: 720 },
+      folds: [
+        geo(id, {
+          labels: [
+            { text: 'Engineering', x: 383, y: 570, w: 58, h: 13.5 },
+            { text: '420', x: 402, y: 582.5, w: 20, h: 13.5 },
+          ],
+        }),
+      ],
+    });
+    expect(stacked.warnings).toEqual([]);
   });
 
   it('never turns an unmeasured fold into a warning', async () => {

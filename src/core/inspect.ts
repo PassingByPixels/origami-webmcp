@@ -88,10 +88,16 @@ export interface InspectWarning {
 /** Sub-pixel noise: a browser returns fractional heights, and a 1px difference is not a defect. */
 const TOL = 2;
 
+/* Two labels collide when their boxes share real area. A HAIRLINE is not a collision: the
+   browser's box for a <text> carries the font's ascent/descent, so two lines a chart stacks on
+   purpose (a treemap cell's name over its value, 12 units apart at a 10-unit font) report a
+   1px-tall sliver across their full width — 20-30px² on a real render — and that read as six
+   "collisions" on a chart with nothing wrong. Under TOL in either direction is touching, not
+   overlapping. */
 const overlap = (a: FoldGeometry['labels'][number], b: FoldGeometry['labels'][number]): number => {
   const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
   const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
-  return w > 0 && h > 0 ? Math.round(w * h) : 0;
+  return w > TOL && h > TOL ? Math.round(w * h) : 0;
 };
 
 /**
