@@ -1,4 +1,4 @@
-import type { MeasureResult } from '../core/inspect.js';
+import type { FoldGeometry, MeasureResult } from '../core/inspect.js';
 
 /* The honest render measurement.
    ------------------------------------------------------------------------------------------
@@ -116,20 +116,35 @@ const MEASURER = (nonce: string, ids: string[], mountMs: number, settleMs: numbe
     return t.replace(/\\s+/g,' ').trim().length;
   }
   function reply(payload){parent.postMessage({nonce:NONCE,payload:payload},'*');}
+  /* One fold at a time, as soon as it is known: the parent keeps these, so a deck that runs
+     out of budget still answers with the folds that WERE reached instead of nothing. */
+  function progress(g){parent.postMessage({nonce:NONCE,progress:g},'*');}
   (async function(){
     try{
       await sleep(${mountMs});
+      /* A frame with no viewport has no layout to read. It happens when the page is hidden
+         (a background or minimised window) — every fold then comes back 0px tall and the old
+         answer called that a clean deck. Wait a little for the page to be shown, then refuse. */
+      var waited=0;
+      while((innerWidth===0||innerHeight===0)&&waited<1500){await sleep(100);waited+=100;}
+      if(innerWidth===0||innerHeight===0){
+        reply({error:'the measuring frame laid out at 0x0 — the page is hidden (a background or minimised window), so nothing was measured; bring the tab to the front and call again'});
+        return;
+      }
       var out=[];
       for(var i=0;i<IDS.length;i++){
-        var id=IDS[i], sec=stageSection(id);
+        var id=IDS[i], sec=stageSection(id), g;
         if(!sec||rect(sec).height===0){
           var tab=document.querySelector('.o-tabs .o-tab[data-tab="'+id+'"]');
           if(tab){tab.click(); await sleep(${settleMs}); sec=stageSection(id);}
         }
-        if(!sec){out.push({id:id,measured:false,reason:'this fold is not on the stage — it is hidden, so the deck never lays it out'});continue;}
-        if(rect(sec).height===0){out.push({id:id,measured:false,reason:'the fold is in the deck but rendered with zero height, and no tab could bring it on screen'});continue;}
-        if(rect(sec).top>2){sec.scrollIntoView(); await sleep(60);}   // scroll folds: read it where a reader would
-        var g=measureOne(sec); g.id=id; out.push(g);
+        if(!sec){g={id:id,measured:false,reason:'this fold is not on the stage — it is hidden, so the deck never lays it out'};}
+        else if(rect(sec).height===0){g={id:id,measured:false,reason:'the fold is in the deck but rendered with zero height, and no tab could bring it on screen'};}
+        else{
+          if(rect(sec).top>2){sec.scrollIntoView(); await sleep(60);}   // scroll folds: read it where a reader would
+          g=measureOne(sec); g.id=id;
+        }
+        out.push(g); progress(g);
       }
       reply({viewport:{width:innerWidth,height:innerHeight},folds:out});
     }catch(e){reply({error:String(e&&e.message||e)});}
@@ -167,15 +182,47 @@ export function measureRender(deckText: string, ids: string[], viewport?: { widt
       frame.remove();
       fn();
     };
+    /* Folds the frame has reported so far. On timeout these are the answer — partial, and
+       said to be — rather than throwing every measurement away because the last one was slow. */
+    const reached: FoldGeometry[] = [];
     const onMessage = (ev: MessageEvent): void => {
-      const data = ev.data as { nonce?: string; payload?: MeasureResult & { error?: string } };
+      const data = ev.data as { nonce?: string; progress?: FoldGeometry; payload?: MeasureResult & { error?: string } };
       if (!data || data.nonce !== nonce) return; // origin is "null" for a sandboxed frame — the nonce is the match
+      if (data.progress) {
+        reached.push(data.progress);
+        return;
+      }
       const payload = data.payload;
       if (!payload || payload.error) finish(() => reject(new Error(payload?.error ?? 'the measuring frame sent nothing')));
-      else finish(() => resolve(payload));
+      else if (!payload.viewport || payload.viewport.width <= 0 || payload.viewport.height <= 0) {
+        finish(() => reject(new Error(`the measuring frame reported a ${payload.viewport?.width ?? 0}x${payload.viewport?.height ?? 0} viewport — no layout was done, so nothing was measured`)));
+      } else finish(() => resolve(payload));
     };
     const timer = setTimeout(
-      () => finish(() => reject(new Error(`the deck did not finish rendering within ${TIMEOUT_MS / 1000}s, so nothing was measured`))),
+      () =>
+        finish(() => {
+          if (reached.length === 0) {
+            reject(new Error(`the deck did not finish rendering within ${TIMEOUT_MS / 1000}s, so nothing was measured`));
+            return;
+          }
+          const got = new Set(reached.map((g) => g.id));
+          const rest: FoldGeometry[] = ids
+            .filter((id) => !got.has(id))
+            .map((id) => ({
+              id,
+              measured: false,
+              reason: `not reached: the ${TIMEOUT_MS / 1000}s measuring budget ran out after ${reached.length} of ${ids.length} folds — re-run with foldIds for the rest`,
+              contentTop: 0,
+              contentHeight: 0,
+              mastheadBottom: 0,
+              blockCount: 0,
+              paintedLeaves: 0,
+              textLength: 0,
+              labels: [],
+            }));
+          // the frame was sized to `size` by this function, so that IS the viewport it laid out in
+          resolve({ viewport: size, folds: [...reached, ...rest], partial: { measuredCount: reached.length, requested: ids.length, budgetMs: TIMEOUT_MS } });
+        }),
       TIMEOUT_MS
     ) as unknown as number;
 

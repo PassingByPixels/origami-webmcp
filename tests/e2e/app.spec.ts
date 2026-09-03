@@ -351,6 +351,32 @@ test('inspect_render reports a clean deck as clean, and never touches the previe
 
   // measuring is READ-ONLY: same bytes in the preview, and the Fold is not marked dirty by it
   expect(await page.getByTestId('preview').getAttribute('srcdoc')).toBe(before);
+  expect(res.body.outcome).toBe('clean');
+  expect(res.body.coverage).toEqual({ total: 1, requested: 1, measured: 1 });
+});
+
+test('inspect_render measures a subset directly (foldIds / maxFolds) and never calls a subset clean for the deck', async ({ page }) => {
+  /* The 20-fold report: the whole deck did not fit the measuring budget, and the only way to
+     measure six folds was to HIDE the other fourteen. foldIds measures them directly. */
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Subset', discard: true });
+  const second = (await invoke(page, 'add_chunk', { label: 'Second' })).body.chunkId;
+  await invoke(page, 'add_chunk', { label: 'Third' });
+
+  const res = await invoke(page, 'inspect_render', { foldIds: [second] });
+  expect(res.body.measured).toBe(true);
+  expect(res.body.outcome).toBe('clean'); // the one fold asked for measured clean
+  expect(res.body.clean).toBe(false); // the DECK was not measured
+  expect(res.body.coverage).toEqual({ total: 3, requested: 1, measured: 1 });
+  expect(res.body.folds.filter((f: any) => f.skipped)).toHaveLength(2);
+  expect(res.body.folds.find((f: any) => f.id === second)).toMatchObject({ measured: true, fits: true });
+
+  const top = await invoke(page, 'inspect_render', { maxFolds: 2 });
+  expect(top.body.coverage).toEqual({ total: 3, requested: 2, measured: 2 });
+  expect(top.body.folds.map((f: any) => f.measured)).toEqual([true, true, false]);
+
+  const bad = await invoke(page, 'inspect_render', { foldIds: ['nope'] });
+  expect(bad.body.error).toMatch(/no such chunk: nope/);
 });
 
 test('create_deck mints a blank Fold in the tab and add_chunk extends it', async ({ page }) => {

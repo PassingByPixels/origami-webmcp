@@ -14,7 +14,7 @@ import { COMPOSED_PLOT_HEIGHT, MIN_PLOT_HEIGHT, chartPlotHeight } from '../../sr
 import { MemoryThemeStore, THEME_TOKENS, contrastRatio, unknownTokens } from '../../src/core/themes.js';
 import { BATCH_MAX } from '../../src/core/batch-tool.js';
 import { FOLD_STARTERS } from '../../src/core/fold-starters.js';
-import { analyseRender, type FoldGeometry } from '../../src/core/inspect.js';
+import { analyseRender, summarise, type FoldGeometry, type MeasureFn } from '../../src/core/inspect.js';
 import { injectMeasurer } from '../../src/app/measure.js';
 import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harness.js';
 
@@ -856,7 +856,115 @@ describe('inspect_render', () => {
     const body = JSON.parse((await registry.invoke('inspect_render', {})).content[0]!.text);
     expect(body.measured).toBe(false);
     expect(body.why).toMatch(/the measurement failed: the deck did not finish rendering/);
-    expect(body.clean).toBeUndefined(); // a failure must never read as clean:true
+    expect(body.clean).toBe(false); // a failure must never read as clean:true
+    expect(body.outcome).toBe('unknown');
+  });
+
+  /* A registry with a scripted measure route, so the tool's own arithmetic (subsets, budgets,
+     the verdict) is tested against numbers this test controls. */
+  const scripted = async (n: number, measure: MeasureFn) => {
+    const deck = new DeckStore();
+    const registry = createModeRegistry({ deck, proposals: new ProposalStore(), runtimeJs, measure }, FOLIO_MODE);
+    await registry.invoke('create_deck', { title: 'Scripted' });
+    for (let i = 1; i < n; i++) await registry.invoke('add_chunk', { label: `Fold ${i}` });
+    const call = async (args: Record<string, unknown> = {}) => {
+      const r = await registry.invoke('inspect_render', args);
+      return { ...JSON.parse(r.content[0]!.text), isError: r.isError === true };
+    };
+    return { deck, call, ids: () => [...deck.model().order] };
+  };
+  const measuredAs = (ids: string[]): MeasureFn => async (_text, want) => ({ viewport: { width: 1280, height: 720 }, folds: want.filter((id) => ids.includes(id)).map((id) => geo(id)) });
+
+  it('never calls a 0x0 viewport clean — it is unknown, with the reason', async () => {
+    // the report that prompted this: every fold "rendered with zero height", viewport 0 x 0, clean: true
+    const { call, ids } = await scripted(2, async (_t, want) => ({
+      viewport: { width: 0, height: 0 },
+      folds: want.map((id) => ({ ...geo(id), measured: false, reason: 'the fold is in the deck but rendered with zero height, and no tab could bring it on screen' })),
+    }));
+    const body = await call();
+    expect(body.measured).toBe(false);
+    expect(body.outcome).toBe('unknown');
+    expect(body.clean).toBe(false);
+    expect(body.why).toMatch(/0x0 viewport/);
+    expect(body.folds.map((f: any) => f.id)).toEqual(ids());
+  });
+
+  it('is clean only when EVERY fold was measured and none has a defect', async () => {
+    const { call, ids } = await scripted(3, async (_t, want) => ({ viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) }));
+    const body = await call();
+    expect(body).toMatchObject({ measured: true, outcome: 'clean', clean: true, coverage: { total: 3, requested: 3, measured: 3 } });
+    expect(body.remeasure).toBeUndefined();
+    expect(body.folds.map((f: any) => f.id)).toEqual(ids());
+  });
+
+  it('measures a subset with foldIds, and says clean is about the subset, not the deck', async () => {
+    let asked: string[] = [];
+    const { call, ids } = await scripted(3, async (_t, want) => {
+      asked = want;
+      return { viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) };
+    });
+    const [a, b, c] = ids();
+    const body = await call({ foldIds: [c, b] });
+    expect(asked).toEqual([b, c]); // deck order is kept, whatever order was asked in
+    expect(body.outcome).toBe('clean'); // every REQUESTED fold measured clean
+    expect(body.clean).toBe(false); // but the deck was not fully measured
+    expect(body.coverage).toEqual({ total: 3, requested: 2, measured: 2 });
+    expect(body.folds[0]).toMatchObject({ id: a, skipped: true, measured: false });
+    expect(body.folds[1]).toMatchObject({ id: b, measured: true, fits: true });
+    expect(body.note).toMatch(/Only 2 of 3 folds were requested/);
+  });
+
+  it('refuses an unknown foldId and a bad maxFolds before measuring anything', async () => {
+    let calls = 0;
+    const { call } = await scripted(2, async (_t, want) => {
+      calls++;
+      return { viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) };
+    });
+    const bad = await call({ foldIds: ['nope'] });
+    expect(bad.isError).toBe(true);
+    expect(bad.error).toMatch(/no such chunk: nope/);
+    const zero = await call({ maxFolds: 0 });
+    expect(zero.isError).toBe(true);
+    expect(calls).toBe(0);
+  });
+
+  it('maxFolds measures the first N in deck order', async () => {
+    let asked: string[] = [];
+    const { call, ids } = await scripted(4, async (_t, want) => {
+      asked = want;
+      return { viewport: { width: 1280, height: 720 }, folds: want.map((id) => geo(id)) };
+    });
+    const body = await call({ maxFolds: 2 });
+    expect(asked).toEqual(ids().slice(0, 2));
+    expect(body.coverage).toEqual({ total: 4, requested: 2, measured: 2 });
+    expect(body.folds.filter((f: any) => f.skipped)).toHaveLength(2);
+  });
+
+  it('keeps what a budget-hit measurement reached, calls the verdict unknown, and names the rest', async () => {
+    const { call, ids } = await scripted(3, async (_t, want) => ({
+      viewport: { width: 1280, height: 720 },
+      folds: [geo(want[0]!), geo(want[1]!, { contentHeight: 2000 }), { ...geo(want[2]!), measured: false, reason: 'not reached: the 15s measuring budget ran out after 2 of 3 folds' }],
+      partial: { measuredCount: 2, requested: 3, budgetMs: 15_000 },
+    }));
+    const [, b, c] = ids();
+    const body = await call();
+    expect(body.measured).toBe(true); // something WAS measured
+    expect(body.outcome).toBe('unknown'); // but not everything, so no verdict on the deck
+    expect(body.clean).toBe(false);
+    expect(body.remeasure).toEqual([c]);
+    expect(body.partial).toEqual({ measuredCount: 2, requested: 3, budgetMs: 15_000 });
+    expect(body.note).toMatch(/budget ran out after 2 of 3 folds/);
+    // the overflow that WAS measured is still reported — partial is not silent
+    expect(body.warnings).toEqual([expect.objectContaining({ fold: b, issue: 'overflow' })]);
+    expect(body.folds[2]).toMatchObject({ id: c, measured: false, why: expect.stringMatching(/budget ran out/) });
+  });
+
+  it('summarise: defects beat clean, unknown beats both, and an empty request is unknown', () => {
+    const w = { fold: 'x', label: 'x', issue: 'overflow' as const, detail: '' };
+    expect(summarise([{ id: 'a', measured: true }], [])).toMatchObject({ outcome: 'clean', clean: true });
+    expect(summarise([{ id: 'a', measured: true }], [w])).toMatchObject({ outcome: 'defects', clean: false });
+    expect(summarise([{ id: 'a', measured: true }, { id: 'b', measured: false }], [w])).toMatchObject({ outcome: 'unknown', clean: false, remeasure: ['b'] });
+    expect(summarise([{ id: 'a', skipped: true, measured: false }], [])).toMatchObject({ outcome: 'unknown', clean: false, coverage: { total: 1, requested: 0, measured: 0 } });
   });
 
   it('flags a fold whose content is taller than the screen', async () => {
@@ -3304,7 +3412,7 @@ describe('S6 — what BOTH trial agents still tripped on', () => {
     expect(d('save_deck')).toMatch(/saved:true means/);
     expect(d('save_deck')).toMatch(/NEVER reported as saved/);
     expect(d('export_deck')).toMatch(/writes NOTHING, saves NOTHING/);
-    expect(d('inspect_render')).toMatch(/NOT a clean bill of health unless measured is true/);
+    expect(d('inspect_render')).toMatch(/never ship on unknown/);
     expect(d('set_deck_meta')).toMatch(/ON ITS OWN IT CHANGES THE LABEL AND NOTHING ELSE/);
     expect(d('save_theme')).toMatch(/REFUSED/);
     expect(d('move_chunk')).toMatch(/REFUSED rather than clamped/);
