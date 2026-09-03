@@ -50,10 +50,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('38');
+  await expect(page.getByTestId('tool-count')).toHaveText('39');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('38 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('39 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);
@@ -401,6 +401,30 @@ test('create_deck mints a blank Fold in the tab and add_chunk extends it', async
 
   const toc = await invoke(page, 'list_chunks', {});
   expect(toc.body.chunks.map((c: any) => c.label)).toEqual(['Cover', 'Second']);
+});
+
+test('revert_to_saved drops an add_fold in one call — not undo, and the preview matches the post-create bytes', async ({ page }) => {
+  await page.goto('/folio/index.html');
+  await invoke(page, 'create_deck', { title: 'Revert e2e', discard: true });
+  const afterCreate = await deckTextNow(page);
+
+  const added = await invoke(page, 'add_fold', {
+    title: 'Regretted fold',
+    blocks: [{ text: '<p>This should not survive a revert.</p>' }],
+  });
+  expect(added.state).toContain('ok');
+  await expect(preview(page)).toContainText('Regretted fold');
+  expect(await deckTextNow(page)).not.toBe(afterCreate);
+
+  const reverted = await invoke(page, 'revert_to_saved', {});
+  expect(reverted.state).toContain('ok');
+  expect(reverted.body.revertedTo).toBe('as created or opened');
+  expect(reverted.body.chunks).toBe(1);
+
+  const toc = await invoke(page, 'list_chunks', {});
+  expect(toc.body.chunks).toHaveLength(1); // the added fold is gone, back to just the cover
+  await expect(preview(page)).not.toContainText('Regretted fold');
+  expect(await deckTextNow(page)).toBe(afterCreate); // byte-identical to the post-create render
 });
 
 test('a staged proposal survives a real reload, and a conflict survives with it', async ({ page }) => {

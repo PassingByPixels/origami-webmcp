@@ -6,6 +6,21 @@ export interface DeckState {
   name: string;
   /** True once a tool or the human has changed the model since the last save. */
   dirty: boolean;
+  /** The deck's serialized text as of the last open() or markSaved() — what revertToSaved()
+      reopens. Updated in the two places "the last durable point" can move; never by mutate(). */
+  baseline: string;
+  /** True once markSaved() has run since this open() — tells revertToSaved's caller whether it
+      landed back on a save or on how the Fold was created/opened (see revertToSaved). */
+  savedSinceOpen: boolean;
+}
+
+/** What revertToSaved() reports when it actually reverted something. */
+export interface RevertResult {
+  /** How many undo() steps were on the stack and are now gone (the stack is cleared, not
+      unwound one at a time — open() resets History exactly as it does for create_deck). */
+  droppedUndoSteps: number;
+  /** Which baseline the Fold landed back on. */
+  revertedTo: 'last save' | 'as created or opened';
 }
 
 export type DeckEvent = 'open' | 'change' | 'close' | 'saved';
@@ -25,7 +40,7 @@ export class DeckStore {
   /** Parse deck TEXT and make it the open deck. Throws FormatError on an unparseable file. */
   open(text: string, name: string): void {
     const model = buildModel(parseDeck(text));
-    this.state = { model, name, dirty: false };
+    this.state = { model, name, dirty: false, baseline: text, savedSinceOpen: false };
     // A different deck is a different history. An inverse op recorded against the old model
     // names slide ids this one may not have, so keeping the stack would be a way to corrupt
     // the new Fold, not a convenience.
@@ -118,8 +133,35 @@ export class DeckStore {
   }
 
   markSaved(): void {
-    if (this.state) this.state.dirty = false;
+    if (this.state) {
+      this.state.dirty = false;
+      // The bytes on disk (or in OPFS) now match the live model, so THIS is what
+      // revertToSaved() should land back on — captured from the model rather than the caller's
+      // text so it stays correct even if the write route stamped its own manifest.modified.
+      this.state.baseline = this.serialize();
+      this.state.savedSinceOpen = true;
+    }
     this.emit('saved');
+  }
+
+  /**
+   * Drop every unsaved change in ONE call: reopen the deck at its `baseline` (the last
+   * markSaved(), or the text open() was given if it was never saved). This is NOT undo — it
+   * does not unwind the stack one op at a time, it jumps straight to the baseline and clears
+   * the stack in the same move (open() resets History), which is exactly what a human who
+   * pressed New/Open would land on.
+   *
+   * Throws the standard no-deck-open message when nothing is open (model() below). Returns
+   * null, and touches nothing, when the deck is not dirty — there is nothing to revert.
+   */
+  revertToSaved(): RevertResult | null {
+    this.model(); // throws the standard refusal when nothing is open
+    const st = this.state!;
+    if (!st.dirty) return null;
+    const droppedUndoSteps = this.history.depth().undo;
+    const revertedTo: RevertResult['revertedTo'] = st.savedSinceOpen ? 'last save' : 'as created or opened';
+    this.open(st.baseline, st.name);
+    return { droppedUndoSteps, revertedTo };
   }
 
   subscribe(fn: (ev: DeckEvent) => void): () => void {

@@ -23,7 +23,7 @@ import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harnes
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 38 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 39 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -55,6 +55,7 @@ describe('tool surface', () => {
       'propose_delete',
       'read_chunk',
       'reject_proposal',
+      'revert_to_saved',
       'run_batch',
       'save_deck',
       'save_theme',
@@ -1269,6 +1270,70 @@ describe('undo reverses the last change to the open Fold', () => {
   });
 });
 
+describe('revert_to_saved drops every unsaved change in ONE call', () => {
+  /* The bar is the same as undo's: byte-equality against a real baseline, not "the heading is
+     gone". Unlike undo this does not unwind step by step — it jumps straight to the baseline
+     and clears the stack in the same move, which is the whole point after a run_batch that
+     went sideways (undo would be one call per step). */
+
+  it('a dirty Fold reverts to how it was created, restores order and title, and clears the stack', async () => {
+    const h = harness();
+    const created = await h.json('create_deck', { title: 'Revert me' });
+    const beforeAnyEdit = h.deck.serialize();
+    expect(h.deck.peek()!.dirty).toBe(false);
+
+    await h.json('add_chunk', { html: innerWith('Regretted', 'Fold'), label: 'Regretted' });
+    await h.json('set_header', { subtitle: 'Also regretted' });
+    expect(h.deck.model().order).toHaveLength(2);
+    expect(h.deck.peek()!.dirty).toBe(true);
+    expect(h.deck.undoDepth()).toBe(2);
+
+    const res = await h.json('revert_to_saved');
+    expect(res).toMatchObject({ revertedTo: 'as created or opened', droppedUndoSteps: 2, chunks: 1 });
+    expect(h.deck.serialize()).toBe(beforeAnyEdit);
+    expect(h.deck.model().title).toBe('Revert me');
+    expect(h.deck.model().order[0]).toBe(created.chunks[0].id);
+    expect(h.deck.peek()!.dirty).toBe(false);
+    expect(h.deck.undoDepth()).toBe(0); // the stack was cleared, not unwound
+  });
+
+  it('a save moves the baseline — revert then lands on the save, not on create_deck', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Save then regret' });
+    await h.json('add_chunk', { html: innerWith('Keep me', 'Saved'), label: 'Keep me' });
+    h.deck.markSaved(); // the harness has no save route; markSaved is the documented fallback
+    const afterSave = h.deck.serialize();
+    expect(h.deck.peek()!.dirty).toBe(false);
+
+    await h.json('add_chunk', { html: innerWith('Lose me', 'Unsaved'), label: 'Lose me' });
+    expect(h.deck.model().order).toHaveLength(3);
+
+    const res = await h.json('revert_to_saved');
+    expect(res.revertedTo).toBe('last save');
+    // droppedUndoSteps counts the WHOLE stack, not just the post-save edits — markSaved()
+    // moves the baseline but does not touch History, so both add_chunk calls are still on it
+    expect(res.droppedUndoSteps).toBe(2);
+    expect(h.deck.serialize()).toBe(afterSave);
+    expect(h.deck.model().order).toHaveLength(2);
+  });
+
+  it('refuses with a named reason when there is nothing unsaved to drop', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Untouched' });
+    const before = h.deck.serialize();
+
+    const res = await h.call('revert_to_saved');
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text).error).toMatch(/nothing to revert/);
+    expect(h.deck.serialize()).toBe(before); // refusal touches nothing
+
+    // and with no Fold open at all it is the standard no-deck refusal, not a crash
+    const empty = harness();
+    const none = await empty.call('revert_to_saved');
+    expect(none.isError).toBe(true);
+  });
+});
+
 describe('dryRun: the whole gate, none of the mutation', () => {
   /* The requirement is parity, not a second code path: a dry run must produce the SAME verdict
      and the SAME error body a real write would, while leaving the file byte-identical. Both are
@@ -1655,7 +1720,7 @@ describe('tool annotations', () => {
     'origami_guide',
     'read_chunk',
   ];
-  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk', 'delete_theme'];
+  const DESTRUCTIVE = ['create_deck', 'delete_block', 'delete_chunk', 'delete_theme', 'revert_to_saved'];
 
   it('marks exactly the read-only tools readOnlyHint', () => {
     const h = harness();
