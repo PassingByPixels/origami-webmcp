@@ -177,7 +177,7 @@ export function validateAssets(deck) {
     below iterates KIND_DATA_SPECS and pushes cross-kind violations in this order, so
     preserving it keeps validation output byte-identical. */
 const DATA_KIND_ORDER = [
-    'gantt', 'flow', 'graph', 'tracker', 'notes', 'grid', 'table', 'chart', 'video', 'block', 'slider', 'draw', 'venn',
+    'gantt', 'flow', 'graph', 'tracker', 'notes', 'grid', 'table', 'chart', 'video', 'block', 'slider', 'draw', 'venn', 'calendar', 'gallery', 'timeline',
 ];
 /** DERIVED VIEW of the block registry: each spec IS the facet's `data` object
     (same reference — so KIND_DATA_SPECS.gantt.validate === validateGanttData, etc.).

@@ -34,12 +34,14 @@
         the rendered text. */
 
 import { escText, blockFigure, validatorFor } from './block-tools.js';
-import { GRAPH_FIT_HEIGHT, MIN_GRAPH_HEIGHT } from './fold-starters.js';
+import { GRAPH_FIT_HEIGHT, MIN_GRAPH_HEIGHT, galleryFigure } from './fold-starters.js';
 import { fillDiagramDefaults } from './data-blocks.js';
 import type { Violation } from '../../vendor/format-dist/index.js';
 
-/** The data kinds a composed block may be, in the order add_fold documents them. */
-export const COMPOSE_DATA_KINDS = ['chart', 'venn', 'flow', 'graph', 'gantt', 'draw', 'table'] as const;
+/** The data kinds a composed block may be, in the order add_fold documents them. The 0.4.9
+    kinds ride the same path: video/calendar/timeline build through blockFigure like the
+    originals (their palette markup is dataFigure's shape), and gallery is special-cased below. */
+export const COMPOSE_DATA_KINDS = ['chart', 'venn', 'flow', 'graph', 'gantt', 'draw', 'table', 'video', 'calendar', 'gallery', 'timeline'] as const;
 
 /** The prose kinds, which carry markup rather than a data block. */
 export const COMPOSE_PROSE_KINDS = ['text', 'bullets', 'stats', 'quote'] as const;
@@ -219,6 +221,12 @@ function blockHtml(b: Record<string, unknown>, i: number, plotHeight: number, gr
     const violations: Violation[] = validatorFor(kind)!(data);
     if (violations.length > 0) {
       return { error: `blocks[${i}].${kind} breaks its own schema — NOTHING was added and the Fold is unchanged`, extra: { violations } };
+    }
+    // a gallery is its own figure: no mount class, no figcaption, compact JSON — and a caption
+    // arg has nothing to attach to, so it is refused rather than silently dropped
+    if (kind === 'gallery') {
+      if (b.caption !== undefined) return { error: `blocks[${i}].caption on a gallery block — a gallery carries no figcaption (its mounted board is its own caption); put captions in images[].caption instead` };
+      return { kind, html: galleryFigure(data, box.style) };
     }
     const caption = b.caption === undefined ? '' : String(b.caption);
     return { kind, html: blockFigure(kind, data, caption, box.style) };

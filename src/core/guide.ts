@@ -92,8 +92,7 @@ const QUICKSTART = {
     '5. save_deck() - always end here, and READ it: it says whether bytes reached disk or the human must press Save.',
   ],
   blocks:
-    'Each entry names EXACTLY ONE of: chart, venn, flow, graph, gantt, draw, table (that kind\u2019s own JSON + optional caption), or text (HTML: p, p.lede, h3, ul/li), bullets, stats (up to 4 { value, label }), quote ({ text, by }). Data is validated BEFORE anything lands - refused here, never at save. Full model: origami_guide({topic:"blocks"}).',
-  /* The example is a compact JSON STRING, not a nested object. Tool results are serialized
+    'Each block is EXACTLY ONE of: chart, venn, flow, graph, gantt, draw, table, video, calendar, gallery, timeline, or text (HTML: p, p.lede, h3, ul/li), bullets, stats (up to 4 { value, label }), quote ({ text, by }). Data is validated BEFORE anything lands; pictures come from load_image. Full model: origami_guide({topic:"blocks"}).',  /* The example is a compact JSON STRING, not a nested object. Tool results are serialized
      with JSON.stringify(..., null, 2), so a nested example is charged two spaces of
      indentation per level - it cost 2 KB of this 3 KB answer as an object and 700 bytes as
      a string. It is also what an agent copies: one line it can paste. */
@@ -196,22 +195,22 @@ function fullGuide(): Record<string, unknown> {
       list_chunks: 'Table of contents of the open Fold.',
       read_chunk: 'Read one chunk to edit (payload + schema + template).',
       write_chunk: 'Apply an edited chunk to the open Fold — takes effect immediately.',
-      add_fold: 'BUILD A WHOLE FOLD IN ONE CALL: a title, an eyebrow, and an ordered list of blocks (chart | venn | flow | graph | gantt | draw | table | text | bullets | stats | quote). One call, one fold, one undo step — this is the fast path.',
+      add_fold: 'BUILD A WHOLE FOLD IN ONE CALL: a title, an eyebrow, and an ordered list of blocks (chart | venn | flow | graph | gantt | draw | table | video | calendar | gallery | timeline | text | bullets | stats | quote). One call, one fold, one undo step — this is the fast path.',
       add_ledger: 'add_fold with one table block: a titled ledger card from columns + rows + formulas, baked by the calc engine on the way in.',
       add_chunk: 'Add a new slide (free/table starters; supply html for other kinds; or block+fields for a composite). Prefer add_fold when you are building a card from data.',
       add_custom_fold: 'Add a whole CUSTOM FOLD (page) from html — an editable page or a raw report. THE INLINE-EDITABLE VOCABULARY, for a page a human edits by clicking straight on it, all inside a <div class="slide-inner">: headings (<h2>/<h3>), paragraphs (<p>, <p class="lede">, <p class="eyebrow">), lists (<ul><li>…), and stat cards (<div class="card-grid"><div class="stat-card"><div class="big">42</div><div class="lbl">Label</div></div>…</div>). See origami_guide({topic:"recipes"}) for complete, validated examples of each.',
       get_block: "Read one data block's JSON on one fold, by chunkId + kind (+ nth) — or every block on that fold in one call. Read before you replace.",
-      set_block: "Replace one data block's WHOLE JSON on one fold, by chunkId + kind (+ nth). Validated by that kind's own schema; tables bake. It never creates a block.",
-      delete_chunk: 'Hide (recoverable) or delete a slide.',
+      set_block: "Replace one data block's WHOLE JSON on one fold, by chunkId + kind (+ nth). Validated by that kind's own schema; tables bake; a gallery's images name asset ids from load_image. It never creates a block.",
+      load_image: 'Put ONE picture into the deck asset table (data:image/* base64), so galleries and <img data-oasset> figures can show it. Deck-level, one undo step; reference the returned id in a gallery block or image figure.',      delete_chunk: 'Hide (recoverable) or delete a slide.',
       define_block: 'Register (or update) a composite block def (a reusable typed, inert, human-editable component).',
       list_block_defs: 'List the composite block defs registered in this deck.',
-      list_starters: 'The ready-made FOLDS (roadmap, flowchart, node graph, drawing, venn, ledger) that add_chunk({starter}) can drop in whole.',
+      list_starters: 'The ready-made FOLDS (roadmap, flowchart, node graph, drawing, venn, ledger, video, timeline, calendar, gallery) that add_chunk({starter}) can drop in whole.',
       delete_block: 'Delete a composite block def (its placed instances stay as plain content).',
       get_kind_schema: 'The markup contract for one kind (same as origami_guide(kind)).',
       set_header: 'Deck masthead: subtitle + metadata chips.',
       set_fold_type: 'Set the reading experience (deck | scroll | ledger).',
       inspect_render: 'Lay the open Fold out off-screen and report per-fold geometry + layout defects (overflow, masthead clip, empty fold, colliding diagram labels). The only way to SEE the deck from here. It measures the REAL render, never a model: a fold it could not put on screen comes back measured:false with the reason instead of a number, and a host with no browser layout says so for the whole deck — so read `outcome` first: clean (every fold measured, no defect) | defects | unknown (a hidden page, a fold the 15s budget did not reach, a subset) — never ship on unknown, and `clean` is true only for a clean WHOLE deck. `foldIds` / `maxFolds` measure a subset directly (no hiding needed); a budget-hit answer keeps the folds it reached and lists the rest as `remeasure`. Layout is viewport-dependent, which is why the viewport is a parameter and is named in every result: a fold that fits at 1280x720 can still break on a shorter screen.',
-      undo: 'Reverse the last change to the open Fold — one tool call is one step, so a run_batch of six is six steps. THE WRITERS IT COVERS: write_chunk, add_chunk, add_fold, add_ledger, add_custom_fold, set_block, move_chunk, set_chunk_meta, set_deck_meta, apply_theme, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any accepted proposal. It does NOT cross create_deck or a Fold the human opened (both reset the stack), does not change bytes already on disk (save again to push a reversal through), and does not cover a staged proposal (use reject_proposal) or a saved theme (use delete_theme). 50 steps deep, no redo. A big run_batch is many undos — revert_to_saved drops all of it in one.',
+      undo: 'Reverse the last change to the open Fold — one tool call is one step, so a run_batch of six is six steps. THE WRITERS IT COVERS: write_chunk, add_chunk, add_fold, add_ledger, add_custom_fold, set_block, load_image, move_chunk, set_chunk_meta, set_deck_meta, apply_theme, delete_chunk (hide AND delete), define_block, delete_block, set_header, set_fold_type, and any accepted proposal. It does NOT cross create_deck or a Fold the human opened (both reset the stack), does not change bytes already on disk (save again to push a reversal through), and does not cover a staged proposal (use reject_proposal) or a saved theme (use delete_theme). 50 steps deep, no redo. A big run_batch is many undos — revert_to_saved drops all of it in one.',
       revert_to_saved: 'Drop EVERY unsaved change on the open Fold in ONE call, not undo — jumps straight to the last save_deck (or to how the Fold was created/opened, if never saved) and clears the undo stack in the same move. Cannot itself be undone; touches nothing on disk. Refuses when nothing is open or when there is nothing unsaved to drop.',
       move_chunk: 'Reorder the folds: move one chunk to a 0-based position. Order only — no content is touched.',
       set_chunk_meta: 'Set one chunk\'s label / notes / hidden flag. hidden:false is the ONLY way to un-hide a fold that delete_chunk hid.',
@@ -274,7 +273,7 @@ interface BlockKindEntry {
   /** The data-odata kind — what validatorFor(kind) and fillDiagramDefaults(kind, …) key on.
       sankey/treemap/sunburst are all kind "chart" with a different `type` (and, for sunburst, a
       flag); they are not kinds of their own. */
-  kind: 'chart' | 'venn' | 'flow' | 'graph' | 'gantt' | 'draw' | 'table';
+  kind: 'chart' | 'venn' | 'flow' | 'graph' | 'gantt' | 'draw' | 'table' | 'video' | 'calendar' | 'gallery' | 'timeline';
   use: string;
   needs: string;
   rules: string[];
@@ -391,6 +390,46 @@ function blockKinds(): Record<string, BlockKindEntry> {
       rules: ['columns needs at least one entry with a label', 'every row cell must be a string — a number must be quoted, e.g. "12"'],
       example: { columns: [{ label: 'Item' }], rows: [['First']] },
     },
+    video: {
+      kind: 'video',
+      use: 'An embedded player (YouTube, Vimeo, Loom — the embed capability is granted automatically) or a plain link card.',
+      needs: '`provider` (youtube|vimeo|loom|link|local), `url`, `videoId`, `title`.',
+      rules: [
+        'a plain link (provider "link") carries videoId "" and an https url (or "" while unset)',
+        'a provider embed needs its videoId and gains the deck an embed:<host> capability',
+        'a local file is a deck-relative path — a browser page cannot serve one, so use link or a provider here',
+      ],
+      example: { provider: 'link', videoId: '', url: '', title: 'Watch' },
+    },
+    calendar: {
+      kind: 'calendar',
+      use: 'An editable month grid with a note per day.',
+      needs: '`year`, `month` (1-12); `entries` (ISO date -> text) optional.',
+      rules: ['year within 1970-2100', 'month 1-12', 'entries key on an ISO date inside the month'],
+      example: { year: 2026, month: 9 },
+    },
+    gallery: {
+      kind: 'gallery',
+      use: 'A picture board: single, accordion, dome, drift, compare or carousel.',
+      needs: '`style` (single|accordion|dome|drift|compare|carousel — omit for single) and `images`: [{ asset, alt?, caption?, tag? }].',
+      rules: [
+        'each image ASSET names an id loaded with load_image — a missing one renders WITHOUT that picture (the save does not catch it; only an <img data-oasset> figure is refused at save_deck)',
+        'NO figcaption — the mounted board is its own caption; captions go in images[].caption',
+      ],
+      example: { style: 'single', images: [] },
+    },
+    timeline: {
+      kind: 'timeline',
+      use: 'A dated sequence of stages, vertical by default.',
+      needs: '`events` ({ title, body } each); `orientation` ("horizontal") optional.',
+      rules: ['every event needs a title and a body', 'orientation, when named, is vertical|horizontal'],
+      example: {
+        events: [
+          { title: 'Understand', body: 'Clarify the people, process and outcome that matter.' },
+          { title: 'Build', body: 'Make the smallest thing that works end to end.' },
+        ],
+      },
+    },
     sankey: {
       kind: 'chart',
       use: 'A flow diagram: nodes in columns, ribbons sized by throughput. chart.type "sankey".',
@@ -465,8 +504,7 @@ function blocksTopic(): Record<string, unknown> {
   return {
     model: [
       'A fold is a titled card; add_fold builds one in ONE call from a title, an optional eyebrow, and an ordered list of blocks.',
-      "A data block is JSON — chart | venn | flow | graph | gantt | draw | table — validated against its OWN kind's schema before anything lands; nothing partially-valid is written.",
-      'venn, flow, graph, gantt and draw are each their OWN block kind, not a chart.type — chart is the only one of the seven with a `type` field (see kinds.chart.rules).',
+      "A data block is JSON — chart | venn | flow | graph | gantt | draw | table | video | calendar | gallery | timeline — validated against its OWN kind's schema before anything lands. venn, flow, graph, gantt and draw are each their OWN block kind, not a chart.type. A gallery's images and an <img data-oasset> figure address pictures loaded with load_image, by asset id.",
       'Prose blocks — text | bullets | stats | quote — carry markup, not JSON, and have no shape rules.',
       'Inside run_batch, a refusal STOPS the batch right there: every call before it already landed, so a failed batch is fixed by re-running from the failure, not from scratch.',
     ].join(' '),

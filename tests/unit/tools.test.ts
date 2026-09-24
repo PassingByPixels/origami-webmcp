@@ -23,7 +23,7 @@ import { harness, innerWith, miniHarness, runtimeJs, sampleDeck } from './harnes
    serialized file contains), never about which internal function was called. */
 
 describe('tool surface', () => {
-  it('registers exactly the 39 web tools, including accept/reject so an agent runs unattended', () => {
+  it('registers exactly the 40 web tools, including accept/reject so an agent runs unattended', () => {
     const h = harness();
     const names = h.registry.list().map((t) => t.name).sort();
     expect(names).toEqual([
@@ -48,6 +48,7 @@ describe('tool surface', () => {
       'list_proposals',
       'list_starters',
       'list_themes',
+      'load_image',
       'move_chunk',
       'origami_guide',
       'propose_add',
@@ -683,7 +684,7 @@ describe('whole-fold starters, ported from the Studio rail', () => {
 
   it('keeps the data-block carrier invariant: no raw "<" inside any seed', () => {
     for (const s of FOLD_STARTERS) {
-      const json = /data-odata="[a-z]+">\n([\s\S]*?)\n<\/script>/.exec(s.inner());
+      const json = /data-odata="[a-z]+">([\s\S]*?)<\/script>/.exec(s.inner());
       expect(json, s.key).not.toBeNull();
       expect(json![1], s.key).not.toContain('<'); // must be <-escaped, or it terminates the block
     }
@@ -753,6 +754,132 @@ describe('whole-fold starters, ported from the Studio rail', () => {
     const topic = await h.json('origami_guide', { topic: 'starters' });
     expect(topic.starters.folds.map((s: any) => s.starter)).toEqual(FOLD_STARTERS.map((s) => s.key));
     expect(topic.starters.howToUse).toBe(guide.starters.howToUse);
+  });
+});
+
+describe('the 0.4.9 kinds and load_image', () => {
+  /* The recipes' own 1x1 PNG — real base64, real bytes, small enough to assert on. */
+  const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+  it('load_image stores an asset, mints an id, and hands back markup that names it', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Pictures' });
+    const res = await h.json('load_image', { dataUrl: PNG, alt: 'One pixel' });
+    expect(res.assetId).toMatch(/^img-/);
+    expect(res.replaced).toBe(false);
+    expect(res.useItNow.imageFigure).toContain(`data-oasset="${res.assetId}"`);
+    expect(res.useItNow.gallery.images[0].asset).toBe(res.assetId);
+    // the asset IS in the deck's asset table, and the deck still validates clean
+    expect(h.deck.model().assets.get(res.assetId)).toBe(PNG);
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('load_image refuses a non-image URL, a remote URL and a malformed id — storing nothing', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Refusals' });
+    for (const bad of ['https://example.com/pic.png', 'data:text/html;base64,PGI+', 'data:image/png;base64,not!!base64']) {
+      const res = await h.call('load_image', { dataUrl: bad });
+      expect(res.isError, bad).toBe(true);
+      expect(JSON.parse(res.content[0]!.text).error).toMatch(/dataUrl must be a data:image/);
+    }
+    const badId = await h.call('load_image', { dataUrl: PNG, id: 'brand logo!' });
+    expect(badId.isError).toBe(true);
+    expect(h.deck.model().assets.size).toBe(0);
+  });
+
+  it('load_image with an explicit id REPLACES the bytes, and one undo puts the old picture back', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Replace' });
+    await h.json('load_image', { dataUrl: PNG, id: 'brand-logo' });
+    const before = h.deck.serialize();
+    // a DIFFERENT picture (a GIF header), so the replacement actually changes the deck bytes
+    const gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    const res = await h.json('load_image', { dataUrl: gif, id: 'brand-logo' });
+    expect(res.replaced).toBe(true);
+    expect(h.deck.model().assets.get('brand-logo')).toBe(gif);
+    expect(h.deck.serialize()).not.toBe(before);
+    await h.json('undo');
+    expect(h.deck.serialize()).toBe(before);
+  });
+
+  it('a gallery starter plus set_block naming a loaded asset saves clean — and carries no figcaption', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Gallery flow' });
+    const img = await h.json('load_image', { dataUrl: PNG, alt: 'One pixel' });
+    const added = await h.json('add_chunk', { starter: 'gallery' });
+    const res = await h.json('set_block', {
+      chunkId: added.chunkId,
+      kind: 'gallery',
+      data: { style: 'accordion', images: [{ asset: img.assetId, alt: 'One pixel' }] },
+      caption: 'ignored on a gallery',
+    });
+    expect(res.captionApplied).toBe(false);
+    const inner = h.deck.model().slides.get(added.chunkId)!.inner;
+    expect(inner).toContain('data-gallery-mount'); // the gallery's own carrier, not a mount class
+    expect(inner).not.toContain('<figcaption>'); // the board is its own caption
+    expect(inner).toContain(`"asset":"${img.assetId}"`); // compact JSON, palette bytes
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('set_block rewrites a timeline fold and a video fold validates against its own schema', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: '0.4.9 edits' });
+    const tl = await h.json('add_chunk', { starter: 'timeline' });
+    const res = await h.json('set_block', {
+      chunkId: tl.chunkId,
+      kind: 'timeline',
+      data: { orientation: 'horizontal', events: [{ title: 'Ship', body: 'The only stage that matters.' }] },
+      caption: 'Road to launch',
+    });
+    expect(res.caption).toBe('Road to launch');
+    const inner = h.deck.model().slides.get(tl.chunkId)!.inner;
+    expect(inner).toContain('"orientation": "horizontal"');
+    expect(inner).toContain('Road to launch');
+
+    const vid = await h.json('add_chunk', { starter: 'video' });
+    const bad = await h.call('set_block', { chunkId: vid.chunkId, kind: 'video', data: { provider: 'vimeo', videoId: 'x', url: 7, title: '' } });
+    expect(bad.isError).toBe(true);
+    expect(JSON.parse(bad.content[0]!.text).error).toMatch(/breaks its own schema/);
+    expect(h.deck.model().slides.get(vid.chunkId)!.inner).toContain('data-odata="video"');
+  });
+
+  it('add_fold composes the new kinds, and a provider embed auto-grants its capability', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Composed 0.4.9' });
+    const res = await h.json('add_fold', {
+      title: 'Launch plan',
+      blocks: [
+        { video: { provider: 'youtube', videoId: 'dQw4w9WgXcQ', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'The film' }, caption: 'One minute version' },
+        { calendar: { year: 2026, month: 9 } },
+        { timeline: { events: [{ title: 'Understand', body: 'People, process, outcome.' }] } },
+      ],
+    });
+    expect(res.isError).toBeFalsy();
+    // youtube is a provider embed -> the deck.caps grant rides the same op as the insert
+    expect(res.capabilitiesGranted.length).toBeGreaterThan(0);
+    expect(res.capabilitiesGranted[0]).toMatch(/^embed:/);
+    expect(h.deck.model().capabilities).toEqual(res.capabilitiesGranted);
+    const inner = h.deck.model().slides.get(res.chunkId)!.inner;
+    expect(inner).toContain('data-odata="video"');
+    expect(inner).toContain('data-odata="calendar"');
+    expect(inner).toContain('data-odata="timeline"');
+    expect(validateDeck(parseDeck(h.deck.serialize()))).toEqual([]);
+  });
+
+  it('an <img data-oasset> naming an unloaded asset is refused at save; a gallery one is not — the honest gap', async () => {
+    const h = harness();
+    await h.json('create_deck', { title: 'Missing asset' });
+    // the img-figure path: validateAssets scans data-oasset attributes, so a ghost id is a save refusal
+    await h.json('write_chunk', {
+      chunkId: h.deck.model().order[0],
+      html: '<div class="slide-inner"><figure class="o-img anim"><img data-oasset="img-ghost" alt="never loaded"><figcaption>x</figcaption></figure></div>',
+    });
+    expect(validateDeck(parseDeck(h.deck.serialize())).map((v: any) => v.rule)).toContain('assets.ref');
+    // the gallery path: the JSON's asset refs are NOT scanned by the vendored validator, so a
+    // ghost id saves — and renders without that picture. The docs say exactly this.
+    const added = await h.json('add_chunk', { starter: 'gallery' });
+    await h.json('set_block', { chunkId: added.chunkId, kind: 'gallery', data: { images: [{ asset: 'img-ghost', alt: 'never loaded' }] } });
+    expect(validateDeck(parseDeck(h.deck.serialize())).every((v: any) => !/gallery/.test(v.rule))).toBe(true);
   });
 });
 
@@ -3095,11 +3222,11 @@ describe('S4 — themes an agent can own', () => {
 
   const tokensOf = (h: ReturnType<typeof harness>) => h.deck.model().theme.tokens;
 
-  it('lists the four runtime presets with their complete token maps', async () => {
+  it('lists the seven runtime presets with their complete token maps', async () => {
     const h = harness();
     await h.json('create_deck', { title: 'Themes' });
     const res = await h.json('list_themes');
-    expect(res.themes.map((t: any) => t.name)).toEqual(['origami-default', 'boardroom', 'meadow', 'dusk']);
+    expect(res.themes.map((t: any) => t.name)).toEqual(['origami-default', 'boardroom', 'meadow', 'dusk', 'ink', 'harbour', 'bloom']);
     for (const t of res.themes) {
       expect(t.source, t.name).toBe('preset');
       expect(Object.keys(t.tokens).length, t.name).toBeGreaterThanOrEqual(14);

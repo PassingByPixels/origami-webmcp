@@ -220,27 +220,102 @@ var CARD_CANVAS_CSS = `
    blocks, so BASE_CSS's own .slide rule comes back carrying width:100% and min-height:100vh at the
    same weight as these and later in the cascade \u2014 measured, it stretched the fold to 1363px at
    1920x1080. Repeating .o-cardfit is the same move the float margin rule makes, and for the same
-   reason: win the tie without !important, so an author's own CSS can still beat it. */
-.o-cardfit { display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
-/* the un-scaled layout box is still 1280x720 behind the paint, so the letterbox has to clip it;
-   clip and not hidden \u2014 a scroll container here would let the page scroll to the dead area */
-.o-stage.o-cardfit { height: 100vh; padding-top: var(--mast-h, 0px); overflow: clip; }
+   reason: win the tie without !important, so an author's own CSS can still beat it.
+
+   THE CARD IS ANCHORED TO THE TOP OF THE ROOM, AND THE LETTERBOX SLACK ALL SITS BELOW IT (0.4.5).
+   align-items:center split the slack above and below, so a room narrower than 16:9 put a band of
+   dead space between the masthead and the card's first block \u2014 measured in the Studio at a
+   1536x982 host: mount 54-900, card top 106.31, i.e. 52.31px of nothing under the bar, and it grows
+   as the room narrows. flex-start makes the card's LAYOUT top the room's top; the transform-origin
+   below is what makes its PAINT top agree at every scale. Horizontal centring is unchanged. */
+/* THE LETTERBOX BANDS ARE THE FOLD'S OWN COLOUR, SO THE FOLD READS EDGE TO EDGE (0.4.5 UAT).
+   The room under the masthead is almost never 16:9 \u2014 measured, a 1906x948 viewer window leaves a
+   1906x882 room, which is 2.16:1, so a card scaled to fit by HEIGHT is 1568 wide and leaves a 169px
+   band on each side. Painted in the page colour those bands framed the card, and the owner read the
+   whole fold as narrow: "the proportions of the fold don't seem to be a default screen dimension".
+   Painting the bands in the CURRENT fold's background makes the colour run to both window edges
+   while the CONTENT stays a 1280x720 canvas \u2014 the fold looks full-bleed and none of its geometry
+   moves, which is the whole point of the canvas.
+   --band-bg IS PUBLISHED BY publishFoldBg, AND IT IS DELIBERATELY NOT --fold-bg. The box is an
+   ANCESTOR of the fold, so writing --fold-bg here would be inherited by a later fold that has none
+   of its own and paint it in the previous fold's colour. A name only the band reads cannot leak.
+   Unset === the theme background, which is the same expression .slide falls back to, so a deck
+   that never coloured a fold has one continuous background across the card and the bands.
+   CLIPPED TO THE CONTENT BOX, so the colour stops where the ROOM does. The stage reserves the
+   masthead as its own padding-top (below), and the bar's default chrome is a fade into the page
+   --bg; running the fold's colour up behind it would recolour the band the masthead fades into. */
+.o-cardfit {
+  display: flex; align-items: flex-start; justify-content: center; box-sizing: border-box;
+  background:
+    radial-gradient(circle at 12% 8%, var(--tint-a, transparent) 0%, transparent 42%),
+    radial-gradient(circle at 88% 92%, var(--tint-b, transparent) 0%, transparent 42%),
+    var(--band-bg, var(--bg-grad, var(--bg)));
+  background-clip: content-box;
+  /* THE ROOM IS THE SCROLLPORT, NOT THE CARD (0.4.5 UAT). A tall fold used to scroll INSIDE the
+     card, putting its scrollbar at the CARD's edge \u2014 181px in from the window at 1881x932, which
+     the owner read as a bar "so far into the slide". A transformed descendant counts toward an
+     ancestor scroller's overflow, so the scroll only moves one box out: measured, room scrollHeight
+     2087 against clientHeight 932. The scrollbar is now at the window edge, where one belongs.
+     scrollbar-gutter IS LOAD-BEARING. cardScale reads clientWidth, which the gutter comes out of \u2014
+     so where WIDTH binds, a scrollbar shrinks the card, a smaller card can stop overflowing, and
+     the scrollbar removes the overflow that raised it: a flicker with no fixed point. Reserved
+     always, clientWidth is one number for a tall fold and a short one (measured 1851 at 1881x932
+     for both), so the scale is a function of the window alone. BOTH-EDGES because the card is
+     CENTRED: a one-sided gutter takes its 15px off the right only and put the card 7.5px left of
+     the window's middle (measured; viewer.spec's "centred in it" caught it). Symmetric costs 30px
+     of room width where width binds and NOTHING where height binds (the drawn card is 1539.56px
+     wide either way), and neither strip shows \u2014 the band paints across both reserves.
+     overflow-x stays CLIP: the un-scaled 1280x720 box is still behind the paint, and a scrollbar
+     along the bottom would be this same defect sideways. */
+  overflow-x: clip; overflow-y: auto; scrollbar-gutter: stable both-edges;
+}
+/* \u2026AND THE CARD STOPS PAINTING ITS OWN, which is what removes the seam rather than merely matching
+   it. Giving the bands the same base colour is not enough on its own: the fold's background is
+   THREE layers, and the two tint gradients resolve against the box that paints them. Painted on the
+   card they stop at the card's edge, and the shipped default theme tints at 5-6% alpha are enough
+   to draw the rectangle \u2014 measured on the default cover at 1906x948, the card's left edge is a
+   visible line at x=169 with the base colours already identical on both sides. One box paints the
+   whole background, so there is no second box for an edge to appear between.
+   THE FALLBACKS ARE LOAD-BEARING. A bare var(--tint-a) with no theme to define it makes the whole
+   background shorthand invalid at computed-value time \u2014 the property falls back to transparent and
+   the paint is lost. On BASE_CSS's .slide the page behind it covered for that; here the room IS the
+   paint, so each tint carries its own transparent fallback and a themeless deck still gets its
+   background colour.
+   NOT the print clones (they take .o-cardgeom only, keep .slide's own background and are already a
+   1280x720 page), not a document, not a scroll. */
+.o-cardfit.o-cardfit > .slide:has(> .slide-inner:not(.o-doc)) { background: transparent; }
+/* the viewer's room is the window below the fixed masthead; the Studio's #mount is the flex
+   remainder under a static one. The overflow both need is on .o-cardfit above, so the two surfaces
+   cannot drift apart on WHICH box scrolls. */
+.o-stage.o-cardfit { height: 100vh; padding-top: var(--mast-h, 0px); }
 .o-cardfit.o-cardfit > .slide:has(> .slide-inner:not(.o-doc)) {
   flex: none; width: 1280px; height: 720px; min-height: 0;
-  transform: scale(var(--oscale, 1)); transform-origin: center center;
-  /* flex-START, with the column's own margin:auto doing the centring. justify-content:center
+  /* ORIGIN AT THE TOP EDGE, because the paint is what the reader sees and the layout box is not.
+     A centred origin scales the card about its own middle, so the painted top sits 360*(1-scale)
+     away from the layout top \u2014 ABOVE it when the card is drawn bigger than 1280x720, below it when
+     smaller. Against a top-anchored card that offset is pure error at the masthead, and it is not
+     small: measured with the anchor in place and the origin forced back to center center, the paint
+     top missed the room top by -10.69px in the Studio at a 1536x982 host (scale 1.03) \u2014 the card
+     sliding UP behind the bar \u2014 and by +78.75px in the viewer at 1000x1000 (scale 0.78), which is
+     the old dead space back again. top center pins paint-top to layout-top at every scale, so "the
+     card starts where the bar ends" holds without arithmetic. */
+  transform: scale(var(--oscale, 1)); transform-origin: top center;
+  /* flex-START inside the card too, so the column begins at the canvas top. justify-content:center
      overflows a too-tall column BOTH ways and the first line goes off the top of the scrollport \u2014
-     measured, the column's layout top sat 869.5px above the fold. An auto margin absorbs only
-     POSITIVE free space, so it centres a short fold and yields to flex-start on a tall one. */
+     measured, the column's layout top sat 869.5px above the fold. */
   justify-content: flex-start;
-  /* A card taller than its own canvas scrolls INSIDE the canvas \u2014 the "starts at the top, scrolls,
-     stays reachable" guarantee, kept but moved: the fold is a fixed rectangle now, so the overflow
-     belongs to it rather than to the page. margin:auto on the column is what centres a short fold
-     while leaving a tall one's first line reachable; justify-content:center alone would push the
-     top of an overflowing column out of the scrollport. */
-  overflow-x: clip; overflow-y: auto;
+  /* AND THE CARD CLIPS NOTHING AND SCROLLS NOTHING: a too-tall column overflows this 720px box and
+     extends the ROOM's overflow instead. Stated, not left to the initial value \u2014 BASE_CSS's .slide
+     carries overflow-x:clip and the frozen sheet re-emits that block later in the cascade. */
+  overflow: visible;
 }
-.o-cardfit.o-cardfit > .slide:has(> .slide-inner:not(.o-doc)) > .slide-inner { margin: auto; }
+.o-cardfit.o-cardfit > .slide:has(> .slide-inner:not(.o-doc)) > .slide-inner { margin: 0 auto; }
+/* 0.4.5 UAT: the column used to carry margin:auto here, which CENTRED a short fold vertically in
+   the canvas \u2014 the cover's first block floated ~226px below the masthead (measured: band ends at
+   66, first heading at 435) and read as a tall, wasted masthead. The first block's start coordinate
+   is now the top of the canvas: the stage's own --mast-h pad clears the bar, the fold's own pad
+   gives the breathing room, and the rest of the slack sits at the BOTTOM. A tall fold was never
+   centred by this margin (auto absorbs no negative space), so nothing but short folds moves. */
 /* \u2026AND THE FOLD IS TOLD THE BAR IS NOT ITS PROBLEM. The reserve above is the stage's own padding, so
    the in-fold reserve \u2014 BASE_CSS's .o-stage .slide-inner padding-top, max(constant, --mast-h) \u2014
    must not add a second one: measured, a 189px masthead put 189px of padding inside a card whose
@@ -251,6 +326,23 @@ var CARD_CANVAS_CSS = `
    rewrites it to the card's own px \u2014 and every other reader of --mast-h is outside a card fold (the
    stage itself, and the scroll/document clearances). */
 .o-cardgeom > .slide:has(> .slide-inner:not(.o-doc)) { --mast-h: 0px; }
+html:has(body.o-ledgerfull-page), body.o-ledgerfull-page { width:100%;height:100%;overflow:hidden; }
+body.o-ledgerfull-page .o-top, body.o-ledgerfull-page #masthead { display:none!important; }
+.o-ledgerfull.o-ledgerfull { height:100vh;padding:0;overflow:hidden; }
+.o-ledgerfull.o-ledgerfull > .slide { width:100%;height:100%;min-height:0;background:var(--paper);overflow:hidden; }
+.o-ledgerfull.o-ledgerfull > .slide > .slide-inner[data-oledger="full"] { --obw:100%;width:100%;height:100%;max-width:none;margin:0;padding:0; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] { display:flex;flex-direction:column;width:100%;height:100%;min-height:0;margin:0; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] > [data-table-mount],
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger,
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .block { display:flex;flex:1;flex-direction:column;min-height:0; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .lv { display:flex;flex:1;flex-direction:column;min-height:0;box-sizing:border-box;border-radius:0; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .lv > .lv-wrap { flex:1;min-height:0;max-height:none;overflow:auto; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .lv > .kpis { flex-wrap:nowrap;overflow-x:auto;padding:6px 10px; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .lv > .kpis .kpi { min-width:96px;padding:4px 8px; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .lv > .kpis .k-val { font-size:16px;margin-top:0; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger > .block.editing { box-shadow:inset 0 0 0 3px var(--lg-forest-soft); }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] .o-ledger .viewport { flex:1;height:auto;min-height:0;max-height:none;overflow:scroll;scrollbar-gutter:stable; }
+.slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed] > figcaption { display:none; }
 `;
 function freezeCardUnits(doc = document) {
   const out = [];
@@ -272,8 +364,8 @@ function freezeCardUnits(doc = document) {
   doc.head.appendChild(style);
   style.textContent = CARD_CANVAS_CSS + "\n" + out.join("\n");
 }
-function canvasScale(el6) {
-  const v = parseFloat(getComputedStyle(el6).getPropertyValue("--oscale"));
+function canvasScale(el7) {
+  const v = parseFloat(getComputedStyle(el7).getPropertyValue("--oscale"));
   return Number.isFinite(v) && v > 0.01 ? v : 1;
 }
 function cardScale(box) {
@@ -283,10 +375,19 @@ function cardScale(box) {
   if (!(w > 0) || !(h > 0)) return 1;
   return Math.min(w / CARD_W, h / CARD_H);
 }
+function publishFoldBg(box, slide) {
+  const bg = slide?.style.getPropertyValue("--fold-bg").trim();
+  if (bg) box.style.setProperty("--band-bg", bg);
+  else box.style.removeProperty("--band-bg");
+}
 function fitCardSlide(box, slide) {
-  const isCard = !!slide && !!slide.querySelector(":scope > .slide-inner:not(.o-doc)");
+  const fullLedger = !!slide?.querySelector(':scope > .slide-inner[data-oledger="full"] > figure[data-o-ledger-fold-seed]');
+  const isCard = !fullLedger && !!slide && !!slide.querySelector(":scope > .slide-inner:not(.o-doc)");
+  document.body.classList.toggle("o-ledgerfull-page", fullLedger);
+  box.classList.toggle("o-ledgerfull", fullLedger);
   box.classList.toggle("o-cardgeom", isCard);
   box.classList.toggle("o-cardfit", isCard);
+  publishFoldBg(box, isCard ? slide : null);
   if (!isCard || !slide) return () => {
   };
   let last = -1;
@@ -295,6 +396,7 @@ function fitCardSlide(box, slide) {
     if (Math.abs(s2 - last) < 1e-4) return;
     last = s2;
     slide.style.setProperty("--oscale", String(s2));
+    box.ownerDocument.defaultView?.dispatchEvent(new CustomEvent("o-cardscale", { detail: s2 }));
   };
   publish();
   if (typeof ResizeObserver === "undefined") return () => {
@@ -572,11 +674,11 @@ function mountRuns(leaf, exclusions, minRun) {
   let i = 0;
   for (const ln of lines) {
     for (const r of ln.runs) {
-      const el6 = document.createElement("span");
-      el6.className = "o-run";
-      el6.style.cssText = `left:${r.x + padL}px;top:${ln.y + padT}px;height:${lh}px;line-height:${lh}px;`;
-      el6.appendChild(frags[i++]);
-      out.appendChild(el6);
+      const el7 = document.createElement("span");
+      el7.className = "o-run";
+      el7.style.cssText = `left:${r.x + padL}px;top:${ln.y + padT}px;height:${lh}px;line-height:${lh}px;`;
+      el7.appendChild(frags[i++]);
+      out.appendChild(el7);
     }
   }
   const border = cs.boxSizing === "border-box" ? padT + padB + bT + bB : 0;
@@ -611,7 +713,7 @@ function releaseRuns(leaf) {
 }
 function withSource(root, fn) {
   const mounted = runsMounted(root) ? [root] : [];
-  for (const el6 of Array.from(root.querySelectorAll("[data-orun]"))) mounted.push(el6);
+  for (const el7 of Array.from(root.querySelectorAll("[data-orun]"))) mounted.push(el7);
   if (mounted.length === 0) return fn();
   const args = mounted.map((leaf) => MOUNT_ARGS.get(leaf) ?? null);
   for (const leaf of mounted) releaseRuns(leaf);
@@ -676,24 +778,24 @@ function renderDocToc(slide, interactive) {
   const heads = Array.from(slide.querySelectorAll(".o-doc h2, .o-doc h3"));
   let h2 = 0;
   let h3 = 0;
-  const entries = heads.map((el6, idx) => {
-    const isH2 = el6.tagName === "H2";
-    const numbered = el6.getAttribute("data-onum") !== "off";
+  const entries = heads.map((el7, idx) => {
+    const isH2 = el7.tagName === "H2";
+    const numbered = el7.getAttribute("data-onum") !== "off";
     if (isH2) {
       if (numbered) h2++;
       h3 = 0;
     } else if (numbered) {
       h3++;
     }
-    const st = el6.getAttribute("data-onumst");
-    const pre = el6.getAttribute("data-opre") ?? "";
+    const st = el7.getAttribute("data-onumst");
+    const pre = el7.getAttribute("data-opre") ?? "";
     return {
       level: isH2 ? 2 : 3,
       num: numbered ? pre + (isH2 ? styled(h2, st) : `${styled(h2, st)}.${styled(h3, st)}`) : pre.trim(),
-      text: (el6.textContent ?? "").trim(),
-      el: el6,
+      text: (el7.textContent ?? "").trim(),
+      el: el7,
       idx,
-      listed: !el6.hasAttribute("data-onotoc")
+      listed: !el7.hasAttribute("data-onotoc")
     };
   });
   const groups = [];
@@ -1013,7 +1115,7 @@ function wrapShapeFor(b, layer, frame, s2) {
 var LEAF_TAGS = /* @__PURE__ */ new Set(["P", "H1", "H2", "H3", "H4", "FOOTER"]);
 function runLeaves(b) {
   const self = LEAF_TAGS.has(b.tagName);
-  const kids = (el6) => Array.from(el6.children).filter((n) => n instanceof HTMLElement);
+  const kids = (el7) => Array.from(el7.children).filter((n) => n instanceof HTMLElement);
   let leaves;
   if (self) leaves = [b];
   else if (b.classList.contains("o-tcols")) {
@@ -1028,19 +1130,19 @@ function runLeaves(b) {
 function leafOrigin(leaf, frame) {
   let x = 0;
   let y = 0;
-  for (let el6 = leaf; el6 && el6 !== frame; el6 = el6.offsetParent) {
-    if (el6.hasAttribute("data-ofloat")) {
+  for (let el7 = leaf; el7 && el7 !== frame; el7 = el7.offsetParent) {
+    if (el7.hasAttribute("data-ofloat")) {
       const fr = frame.getBoundingClientRect();
-      const lr = el6.getBoundingClientRect();
+      const lr = el7.getBoundingClientRect();
       const raw = frame.offsetWidth > 0 ? fr.width / frame.offsetWidth : 1;
       const s2 = raw > 0.01 ? raw : 1;
-      const lcs = getComputedStyle(el6);
+      const lcs = getComputedStyle(el7);
       x += (lr.left - fr.left) / s2 + (parseFloat(lcs.borderLeftWidth) || 0);
       y += (lr.top - fr.top) / s2 + (parseFloat(lcs.borderTopWidth) || 0);
       break;
     }
-    x += el6.offsetLeft;
-    y += el6.offsetTop;
+    x += el7.offsetLeft;
+    y += el7.offsetTop;
   }
   const cs = getComputedStyle(leaf);
   return {
@@ -1094,31 +1196,31 @@ function applyRuns(b, shape, band, bTop, frame) {
   }
   return met;
 }
-function pinLayerWidth(el6) {
-  if (el6.hasAttribute("data-obwpin")) return;
-  const w = getComputedStyle(el6).width;
+function pinLayerWidth(el7) {
+  if (el7.hasAttribute("data-obwpin")) return;
+  const w = getComputedStyle(el7).width;
   if (!/^[\d.]+px$/.test(w)) return;
-  el6.setAttribute("data-obwidth", el6.style.width);
-  el6.style.width = w;
-  el6.setAttribute("data-obwpin", el6.style.width);
+  el7.setAttribute("data-obwidth", el7.style.width);
+  el7.style.width = w;
+  el7.setAttribute("data-obwpin", el7.style.width);
 }
-function releaseLayerWidth(el6) {
-  const pinned = el6.getAttribute("data-obwpin");
+function releaseLayerWidth(el7) {
+  const pinned = el7.getAttribute("data-obwpin");
   if (pinned === null) return;
-  if (el6.style.width === pinned) {
-    const prev = el6.getAttribute("data-obwidth") ?? "";
-    if (prev) el6.style.width = prev;
-    else el6.style.removeProperty("width");
+  if (el7.style.width === pinned) {
+    const prev = el7.getAttribute("data-obwidth") ?? "";
+    if (prev) el7.style.width = prev;
+    else el7.style.removeProperty("width");
   }
-  el6.removeAttribute("data-obwpin");
-  el6.removeAttribute("data-obwidth");
+  el7.removeAttribute("data-obwpin");
+  el7.removeAttribute("data-obwidth");
 }
 function wrapLayerOnLayer(layers, frame, s2) {
   const pics = [];
-  for (const el6 of layers) {
-    if (!el6.matches("figure.o-img")) continue;
-    const w = wrapOptsOf(el6);
-    pics.push({ ex: wrapBoxOf(el6, frame, s2), margin: w.margin, minRun: w.minRun, blocked: false });
+  for (const el7 of layers) {
+    if (!el7.matches("figure.o-img")) continue;
+    const w = wrapOptsOf(el7);
+    pics.push({ ex: wrapBoxOf(el7, frame, s2), margin: w.margin, minRun: w.minRun, blocked: false });
   }
   if (!pics.length) return;
   for (const layer of layers) {
@@ -1131,7 +1233,7 @@ function wrapLayerOnLayer(layers, frame, s2) {
     const leaves = runLeaves(layer);
     if (leaves === null) continue;
     const minRun = Math.max(...over.map((p) => p.minRun));
-    const layerTop = (el6) => (el6.getBoundingClientRect().top - frame.getBoundingClientRect().top) / s2;
+    const layerTop = (el7) => (el7.getBoundingClientRect().top - frame.getBoundingClientRect().top) / s2;
     const want = layerTop(layer);
     pinLayerWidth(layer);
     let placed = true;
@@ -1152,32 +1254,49 @@ function wrapLayerOnLayer(layers, frame, s2) {
     }
   }
 }
+function holdBandPx(el7) {
+  if (!wrapOptsOf(el7).flow) return null;
+  const v = Number.parseFloat(el7.getAttribute("data-ohold") ?? "");
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+function holdSpec(el7, kids, flow, topOf) {
+  const hold = holdBandPx(el7);
+  if (hold === null) return { at: kids.indexOf(el7), band: { top: 0, bottom: 0 }, trail: false };
+  const raw = parseInt(el7.getAttribute("data-oholdat") ?? "", 10);
+  const k = Number.isFinite(raw) && raw >= 0 ? Math.min(raw, flow.length) : flow.length;
+  if (k >= flow.length) return { at: kids.length, band: { top: 0, bottom: 0, hold: true }, trail: true };
+  const base = topOf(flow[k]);
+  return { at: kids.indexOf(flow[k]) - 1, band: { top: base, bottom: base + hold, hold: true }, trail: false };
+}
 function prepareFloatBands(doc) {
   const kids = Array.from(doc.children).filter((n) => n instanceof HTMLElement);
   releaseFloatBands(doc);
   const dr = doc.getBoundingClientRect();
   const scale = doc.offsetWidth > 0 ? dr.width / doc.offsetWidth : 1;
   const s2 = scale > 0.01 ? scale : 1;
-  const topOf = (el6) => (el6.getBoundingClientRect().top - dr.top) / s2;
+  const topOf = (el7) => (el7.getBoundingClientRect().top - dr.top) / s2;
   const layers = [];
-  for (const el6 of kids) {
-    if (!el6.hasAttribute("data-ofloat")) continue;
-    if (wrapOptsOf(el6).flow) continue;
-    const z = parseInt(getComputedStyle(el6).zIndex, 10);
+  for (const el7 of kids) {
+    if (!el7.hasAttribute("data-ofloat")) continue;
+    const hold = holdBandPx(el7);
+    if (wrapOptsOf(el7).flow && hold === null) continue;
+    const z = parseInt(getComputedStyle(el7).zIndex, 10);
     if (Number.isFinite(z) && z < 0) continue;
-    if (el6.style.top.trim().endsWith("%")) continue;
-    layers.push(el6);
+    if (el7.style.top.trim().endsWith("%")) continue;
+    layers.push(el7);
   }
   if (layers.length === 0) return null;
-  wrapLayerOnLayer(layers, doc, s2);
-  const bands = layers.map((el6) => {
-    const m = wrapOptsOf(el6).margin;
-    const ex = wrapBoxOf(el6, doc, s2);
-    stampWrapBox(el6, ex, doc, s2);
+  const flow = kids.filter((b) => !b.hasAttribute("data-ofloat") && !b.classList.contains("o-doc-bg"));
+  wrapLayerOnLayer(layers.filter((el7) => holdBandPx(el7) === null), doc, s2);
+  const specs = layers.map((el7) => holdSpec(el7, kids, flow, topOf));
+  const bands = layers.map((el7, i) => {
+    if (holdBandPx(el7) !== null) return specs[i].band;
+    const m = wrapOptsOf(el7).margin;
+    const ex = wrapBoxOf(el7, doc, s2);
+    stampWrapBox(el7, ex, doc, s2);
     return { top: ex.top - m, bottom: ex.bottom + m };
   });
-  const flow = kids.filter((b) => !b.hasAttribute("data-ofloat") && !b.classList.contains("o-doc-bg"));
-  return { kids, layers, bands, layerAt: layers.map((el6) => kids.indexOf(el6)), flow, s: s2, topOf };
+  return { kids, layers, bands, layerAt: specs.map((sp) => sp.at), flow, s: s2, topOf };
 }
 function reserveFloatBands(doc) {
   const fb = prepareFloatBands(doc);
@@ -1191,14 +1310,18 @@ function reserveFloatBands(doc) {
     settleBlock(b, splitFloor(b, active, fb.layers, fb.bands, doc, fb.s, fb.topOf), fb.bands, fb.topOf, doc);
   }
 }
+function isWidgetBlock(b) {
+  return b.matches("figure.o-trackerfig, figure.o-calendarfig, figure.o-notesfig, figure.o-gridfig, figure.o-ganttfig");
+}
 function splitFloor(b, active, layers, bands, frame, s2, topOf) {
+  if (isWidgetBlock(b)) return { floor: -Infinity, shape: null, shapeAt: -1 };
   const top = topOf(b);
   const bottom = top + b.offsetHeight;
   let floor = -Infinity;
   let shape = null;
   let shapeAt = -1;
   for (const i of active) {
-    if (shape === null && bands[i].bottom > top + 0.5 && bands[i].top < bottom - 0.5) {
+    if (shape === null && !bands[i].hold && bands[i].bottom > top + 0.5 && bands[i].top < bottom - 0.5) {
       const c = wrapShapeFor(b, layers[i], frame, s2);
       if (c !== null) {
         shape = c;
@@ -1247,41 +1370,49 @@ function reserveCardBands(inner) {
   releaseCardBands(inner);
   if (inner.classList.contains("o-doc")) return;
   if (inner.offsetWidth === 0 && inner.offsetHeight === 0) return;
-  const layers = kids.filter((el6) => {
-    if (!el6.hasAttribute("data-ofloat")) return false;
-    if (wrapOptsOf(el6).flow) return false;
-    const z = parseInt(getComputedStyle(el6).zIndex, 10);
+  const layers = kids.filter((el7) => {
+    if (!el7.hasAttribute("data-ofloat")) return false;
+    if (wrapOptsOf(el7).flow && holdBandPx(el7) === null) return false;
+    const z = parseInt(getComputedStyle(el7).zIndex, 10);
     return !(Number.isFinite(z) && z < 0);
   });
   const flow = kids.filter((b) => !b.hasAttribute("data-ofloat") && !b.classList.contains("o-doc-bg"));
   if (layers.length === 0) return;
-  const frameTop = (el6) => {
+  const frameTop = (el7) => {
     const fr = inner.getBoundingClientRect();
     const scale = inner.offsetWidth > 0 ? fr.width / inner.offsetWidth : 1;
-    return (el6.getBoundingClientRect().top - fr.top) / (scale > 0.01 ? scale : 1);
+    return (el7.getBoundingClientRect().top - fr.top) / (scale > 0.01 ? scale : 1);
   };
   const fr0 = inner.getBoundingClientRect();
   const sc = inner.offsetWidth > 0 ? fr0.width / inner.offsetWidth : 1;
   const s2 = sc > 0.01 ? sc : 1;
-  wrapLayerOnLayer(layers, inner, s2);
+  wrapLayerOnLayer(layers.filter((el7) => holdBandPx(el7) === null), inner, s2);
   if (flow.length === 0) return;
   const anchor = layers.map(frameTop);
-  const bands = layers.map((el6) => {
-    const m = wrapOptsOf(el6).margin;
-    const ex = wrapBoxOf(el6, inner, s2);
-    stampWrapBox(el6, ex, inner, s2);
+  const specs = layers.map((el7) => holdSpec(el7, kids, flow, (e) => e.offsetTop));
+  const bands = layers.map((el7, i) => {
+    if (holdBandPx(el7) !== null) return specs[i].band;
+    const m = wrapOptsOf(el7).margin;
+    const ex = wrapBoxOf(el7, inner, s2);
+    stampWrapBox(el7, ex, inner, s2);
     return { top: ex.top - m, bottom: ex.bottom + m };
   });
-  const layerAt = layers.map((el6) => kids.indexOf(el6));
+  let heldFrame = 0;
+  layers.forEach((el7, i) => {
+    if (!specs[i].trail) return;
+    heldFrame = Math.max(heldFrame, inner.offsetHeight + (holdBandPx(el7) ?? 0));
+  });
+  if (heldFrame > 0) inner.style.minHeight = `${Math.round(heldFrame)}px`;
+  const layerAt = specs.map((sp) => sp.at);
   const active = [];
   let next = 0;
   for (const b of flow) {
     const at = kids.indexOf(b);
     while (next < layers.length && layerAt[next] < at) active.push(next++);
     if (active.length === 0) continue;
-    settleBlock(b, splitFloor(b, active, layers, bands, inner, s2, (el6) => el6.offsetTop), bands, (el6) => el6.offsetTop, inner);
+    settleBlock(b, splitFloor(b, active, layers, bands, inner, s2, (el7) => el7.offsetTop), bands, (el7) => el7.offsetTop, inner);
   }
-  layers.forEach((el6, i) => pinLayerTop(el6, anchor[i], frameTop));
+  layers.forEach((el7, i) => pinLayerTop(el7, anchor[i], frameTop));
 }
 function bandSlot(inner, layer) {
   const kids = Array.from(inner.children).filter((n) => n instanceof HTMLElement);
@@ -1295,6 +1426,7 @@ function bandSlot(inner, layer) {
   return at === -1 ? Math.max(0, kids.length - 1) : at;
 }
 function releaseCardBands(inner) {
+  inner.style.removeProperty("min-height");
   for (const n of Array.from(inner.children)) {
     if (!(n instanceof HTMLElement)) continue;
     n.removeAttribute("data-oband");
@@ -1305,31 +1437,31 @@ function releaseCardBands(inner) {
     releaseLayerTop(n);
   }
 }
-function pinLayerTop(el6, want, frameTop) {
-  const now = frameTop(el6);
+function pinLayerTop(el7, want, frameTop) {
+  const now = frameTop(el7);
   if (Math.abs(now - want) <= 0.5) return;
-  const cur = parseFloat(getComputedStyle(el6).top);
+  const cur = parseFloat(getComputedStyle(el7).top);
   if (!Number.isFinite(cur)) return;
-  if (!el6.hasAttribute("data-obtop")) el6.setAttribute("data-obtop", el6.style.top);
+  if (!el7.hasAttribute("data-obtop")) el7.setAttribute("data-obtop", el7.style.top);
   let v = cur + (want - now);
-  el6.style.top = `${v}px`;
-  const err = frameTop(el6) - want;
+  el7.style.top = `${v}px`;
+  const err = frameTop(el7) - want;
   if (Math.abs(err) > 0.5) {
     v -= err;
-    el6.style.top = `${v}px`;
+    el7.style.top = `${v}px`;
   }
-  el6.setAttribute("data-obpin", el6.style.top);
+  el7.setAttribute("data-obpin", el7.style.top);
 }
-function releaseLayerTop(el6) {
-  const pinned = el6.getAttribute("data-obpin");
+function releaseLayerTop(el7) {
+  const pinned = el7.getAttribute("data-obpin");
   if (pinned === null) return;
-  if (el6.style.top === pinned) {
-    const prev = el6.getAttribute("data-obtop") ?? "";
-    if (prev) el6.style.top = prev;
-    else el6.style.removeProperty("top");
+  if (el7.style.top === pinned) {
+    const prev = el7.getAttribute("data-obtop") ?? "";
+    if (prev) el7.style.top = prev;
+    else el7.style.removeProperty("top");
   }
-  el6.removeAttribute("data-obpin");
-  el6.removeAttribute("data-obtop");
+  el7.removeAttribute("data-obpin");
+  el7.removeAttribute("data-obtop");
 }
 function reserveCardBandsWhenSettled(slide) {
   const inner = slide.querySelector(".slide-inner:not(.o-doc)");
@@ -1577,18 +1709,18 @@ function renderPageFurniture(slide, pages) {
     band.style.top = `${i * sheet}px`;
     band.style.height = "0";
     const ov = overrides[String(i)] ?? {};
-    const mk = (cls, slots, top, h, pad2, which, cols) => {
-      const el6 = document.createElement("div");
-      el6.className = cls;
-      el6.style.top = `${top}px`;
-      el6.style.height = `${h}px`;
-      if (pad2 > 0) el6.style[which === "h" ? "paddingTop" : "paddingBottom"] = `${pad2}px`;
-      el6.setAttribute("data-opfwhich", which);
-      el6.setAttribute("data-opfpage", String(i));
+    const mk = (cls, slots, top, h, pad3, which, cols) => {
+      const el7 = document.createElement("div");
+      el7.className = cls;
+      el7.style.top = `${top}px`;
+      el7.style.height = `${h}px`;
+      if (pad3 > 0) el7.style[which === "h" ? "paddingTop" : "paddingBottom"] = `${pad3}px`;
+      el7.setAttribute("data-opfwhich", which);
+      el7.setAttribute("data-opfpage", String(i));
       const tplOver = overrides[String(i)]?.[which];
       if (tplOver !== void 0) {
-        el6.setAttribute("data-opfover", "");
-        el6.setAttribute("data-opfovertpl", tplOver);
+        el7.setAttribute("data-opfover", "");
+        el7.setAttribute("data-opfovertpl", tplOver);
       }
       const SLOT_CLASS = ["o-pf-l", "o-pf-c", "o-pf-r"];
       const SLOT_KEY = ["l", "c", "r"];
@@ -1604,9 +1736,9 @@ function renderPageFurniture(slide, pages) {
             if (slots[j] === "") s2.setAttribute("data-opfhint", "Add text\u2026");
           }
         }
-        el6.appendChild(s2);
+        el7.appendChild(s2);
       }
-      band.appendChild(el6);
+      band.appendChild(el7);
     };
     if (hdr && ov.h !== "") mk("o-pf-h", [ov.h ?? hslots[0], hslots[1], hslots[2]], headerTop, headerH, headerPad, "h", hcols);
     if (ftr && ov.f !== "") mk("o-pf-f", [ov.f ?? fslots[0], fslots[1], fslots[2]], footerTop, footerH, footerPad, "f", fcols);
@@ -1655,18 +1787,18 @@ function yieldGhostsToFloats(doc, layer) {
     if (best[0] > r.left) g.style.paddingLeft = `${Math.round(best[0] - r.left)}px`;
   }
 }
-function ghost(band, which, top, h, pad2, page, removed, cols) {
-  const el6 = document.createElement("div");
-  el6.className = which === "h" ? "o-pf-h o-pf-ghost" : "o-pf-f o-pf-ghost";
-  el6.style.top = `${top}px`;
-  el6.style.height = `${h}px`;
-  if (pad2 > 0 && h > pad2) el6.style[which === "h" ? "paddingTop" : "paddingBottom"] = `${pad2}px`;
-  el6.setAttribute("data-opfwhich", which);
-  el6.setAttribute("data-opfpage", String(page));
-  el6.setAttribute("data-opfghost", "");
+function ghost(band, which, top, h, pad3, page, removed, cols) {
+  const el7 = document.createElement("div");
+  el7.className = which === "h" ? "o-pf-h o-pf-ghost" : "o-pf-f o-pf-ghost";
+  el7.style.top = `${top}px`;
+  el7.style.height = `${h}px`;
+  if (pad3 > 0 && h > pad3) el7.style[which === "h" ? "paddingTop" : "paddingBottom"] = `${pad3}px`;
+  el7.setAttribute("data-opfwhich", which);
+  el7.setAttribute("data-opfpage", String(page));
+  el7.setAttribute("data-opfghost", "");
   if (removed) {
-    el6.setAttribute("data-opfover", "");
-    el6.setAttribute("data-opfovertpl", "");
+    el7.setAttribute("data-opfover", "");
+    el7.setAttribute("data-opfovertpl", "");
   }
   const SLOT_CLASS = ["o-pf-l", "o-pf-c", "o-pf-r"];
   const SLOT_KEY = ["l", "c", "r"];
@@ -1681,9 +1813,9 @@ function ghost(band, which, top, h, pad2, page, removed, cols) {
       s2.setAttribute("data-opftpl", "");
       s2.setAttribute("data-opfhint", j === open[0] ? which === "h" ? "+ Header" : "+ Footer" : "Add text\u2026");
     }
-    el6.appendChild(s2);
+    el7.appendChild(s2);
   }
-  band.appendChild(el6);
+  band.appendChild(el7);
 }
 function paginateWhenSettled(slide) {
   requestAnimationFrame(() => paginateDoc(slide));
@@ -1779,8 +1911,8 @@ function syncPrintFurniture() {
   const padTopMm = mm(Math.max(0, headerPad));
   const padBotMm = mm(Math.max(0, footerPad));
   const SIDE = ["left", "center", "right"];
-  const slotBoxes = (edge, slots, face, pad2) => {
-    const align = edge === "top" ? `vertical-align: top; padding-top: ${pad2};` : `vertical-align: bottom; padding-bottom: ${pad2};`;
+  const slotBoxes = (edge, slots, face, pad3) => {
+    const align = edge === "top" ? `vertical-align: top; padding-top: ${pad3};` : `vertical-align: bottom; padding-bottom: ${pad3};`;
     let css = "";
     for (let i = 0; i < 3; i++) {
       if (!slots[i]) continue;
@@ -1842,10 +1974,10 @@ function applyFavicon(assets) {
   }
   link.href = logo;
 }
-function applyBrandLogoVar(el6, assets) {
+function applyBrandLogoVar(el7, assets) {
   const logo = assets["brand-logo"];
-  if (logo) el6.style.setProperty("--brand-logo", `url("${logo}")`);
-  else el6.style.removeProperty("--brand-logo");
+  if (logo) el7.style.setProperty("--brand-logo", `url("${logo}")`);
+  else el7.style.removeProperty("--brand-logo");
 }
 var FONT_SLOTS = {
   "font-display": "Origami Display",
@@ -1855,7 +1987,11 @@ var FONT_SLOTS = {
   "font-lora": "Lora",
   "font-inter": "Inter",
   "font-source-serif": "Source Serif 4",
-  "font-caveat": "Caveat"
+  "font-caveat": "Caveat",
+  "font-dm-serif": "DM Serif Display",
+  "font-bitter": "Bitter",
+  "font-space-grotesk": "Space Grotesk",
+  "font-nunito": "Nunito"
 };
 var FONT_FORMAT = [
   ["data:font/woff2;", "woff2"],
@@ -1880,6 +2016,8 @@ function fontFacesCss(assets) {
 var GANTT_LANE_PADDING = 8;
 var GANTT_CARD_HEIGHT = 36;
 var GANTT_CARD_VSPACING = 6;
+var GANTT_AXIS_H = 52;
+var GANTT_GRID_PAD_B = 10;
 var GANTT_LABEL_WIDTH = 230;
 var GANTT_PX_PER_WEEK = 80;
 var GANTT_PX_MIN = 24;
@@ -2120,7 +2258,9 @@ function renderGanttCard(tracks, data, ppw, c, row) {
   card.style.background = ganttLensColor(data, c.lens);
   card.style.left = `${ganttWeekIndex(c.start) * ppw + GANTT_CARD_INSET}px`;
   card.style.width = `${Math.max(GANTT_CARD_MIN_PX, c.durationWeeks * ppw - GANTT_CARD_GAP)}px`;
-  card.style.top = `${GANTT_LANE_PADDING + row * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING)}px`;
+  const naturalTop = GANTT_LANE_PADDING + row * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING);
+  card.dataset.naturalTop = String(naturalTop);
+  card.style.top = `${naturalTop}px`;
   el("span", "o-gantt-dot", card).title = c.type;
   el("span", "o-gantt-card-title", card).textContent = c.title;
   card.title = `${c.id} \u2014 ${c.title}
@@ -2144,9 +2284,10 @@ function renderLaneBands(tracks, data, ppw) {
 }
 function renderLane(grid, data, ppw, lane, cardsInLane) {
   const { rows, numRows: numRows2 } = packLane(cardsInLane);
-  const laneHeight = numRows2 * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING) + 2 * GANTT_LANE_PADDING;
+  const laneHeight = naturalLaneHeight(numRows2);
   const laneDiv = el("div", "o-gantt-lane", grid);
   laneDiv.setAttribute("data-lane", lane.name);
+  laneDiv.dataset.naturalH = String(laneHeight);
   const label = el("div", "o-gantt-label", laneDiv);
   label.style.minHeight = `${laneHeight}px`;
   el("div", "o-gantt-lane-name", label).textContent = lane.name;
@@ -2157,6 +2298,36 @@ function renderLane(grid, data, ppw, lane, cardsInLane) {
   tracks.setAttribute("data-lane-tracks", lane.name);
   renderLaneBands(tracks, data, ppw);
   for (const c of cardsInLane) renderGanttCard(tracks, data, ppw, c, rows.get(c.id) ?? 0);
+}
+function ganttRowScale(wrap, naturalLanesPx) {
+  if (naturalLanesPx <= 0) return 1;
+  const authored = parseFloat(getComputedStyle(wrap).getPropertyValue("--obh"));
+  if (!Number.isFinite(authored) || authored <= 0) return 1;
+  const forLanes = wrap.clientHeight - GANTT_AXIS_H - GANTT_GRID_PAD_B;
+  if (!Number.isFinite(forLanes) || forLanes <= 0) return 1;
+  return Math.max(1, forLanes / naturalLanesPx);
+}
+function naturalLaneHeight(numRows2) {
+  return numRows2 * (GANTT_CARD_HEIGHT + GANTT_CARD_VSPACING) + 2 * GANTT_LANE_PADDING;
+}
+function applyGanttRowScale(wrap) {
+  const grid = wrap.querySelector(".o-gantt-grid");
+  if (!grid) return;
+  const lanes = Array.from(grid.querySelectorAll(".o-gantt-lane"));
+  const natural = lanes.reduce((h, l) => h + Number(l.dataset.naturalH ?? 0), 0);
+  const k = ganttRowScale(wrap, natural);
+  if (Math.abs(Number(grid.dataset.rowk ?? 1) - k) < 5e-3) return;
+  grid.dataset.rowk = String(k);
+  grid.style.setProperty("--gantt-rowk", String(Math.round(k * 1e3) / 1e3));
+  for (const lane of lanes) {
+    const h = Number(lane.dataset.naturalH ?? 0) * k;
+    lane.querySelectorAll(".o-gantt-label, .o-gantt-tracks").forEach((el7) => {
+      el7.style.minHeight = `${h}px`;
+    });
+    lane.querySelectorAll(".o-gantt-card").forEach((card) => {
+      card.style.top = `${Number(card.dataset.naturalTop ?? 0) * k}px`;
+    });
+  }
 }
 function renderGanttLanes(grid, data, ppw) {
   const byLane = /* @__PURE__ */ new Map();
@@ -2224,6 +2395,10 @@ function renderGantt(slide, data, opts = {}) {
   grid.style.setProperty("--gantt-w", `${trackWidth}px`);
   renderGanttAxis(grid, data, ppw);
   renderGanttLanes(grid, data, ppw);
+  applyGanttRowScale(wrap);
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => applyGanttRowScale(wrap)).observe(wrap, { box: "border-box" });
+  }
   const count = renderGanttLegend(mount, data);
   const applyFilter = () => applyGanttFilter(mount, data, lens, count);
   drawLensChips(chips, data, opts, lens, applyFilter);
@@ -2655,6 +2830,52 @@ function dmHalo(g, cx, cy, w, h) {
     "stroke-dasharray": "5 4"
   }, g);
 }
+function dmResizeGrip(svg, g, w, h, pad3, bounds, commitSize) {
+  const place = (rw, rh) => {
+    const gx = (rw + pad3.x) / 2 + 7;
+    const gy = (rh + pad3.y) / 2 + 7;
+    grip.setAttribute("x", String(gx - 5));
+    grip.setAttribute("y", String(gy - 5));
+    const halo2 = g.querySelector(".o-dhalo");
+    if (halo2) {
+      halo2.setAttribute("x", String(-(rw + pad3.x) / 2 - 7));
+      halo2.setAttribute("y", String(-(rh + pad3.y) / 2 - 7));
+      halo2.setAttribute("width", String(rw + pad3.x + 14));
+      halo2.setAttribute("height", String(rh + pad3.y + 14));
+    }
+  };
+  const grip = svgEl("rect", {
+    class: "o-dgrip",
+    width: "10",
+    height: "10",
+    rx: "3",
+    fill: "var(--accent)",
+    stroke: "var(--paper)",
+    "stroke-width": "1.5"
+  }, g);
+  grip.style.cursor = "nwse-resize";
+  place(w, h);
+  grip.addEventListener("pointerdown", (down) => {
+    down.preventDefault();
+    down.stopPropagation();
+    const origin = clientToVb(svg, down.clientX, down.clientY);
+    let nw = w;
+    let nh = h;
+    const move = (e) => {
+      const p = clientToVb(svg, e.clientX, e.clientY);
+      nw = Math.round(Math.max(bounds.wMin, Math.min(bounds.wMax, w + (p.x - origin.x) * 2)));
+      nh = Math.round(Math.max(bounds.hMin, Math.min(bounds.hMax, h + (p.y - origin.y) * 2)));
+      place(nw, nh);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (nw !== w || nh !== h) commitSize(nw, nh);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
 var dmLane = null;
 function dmSyncLane(data) {
   if (dmLane && !(data.lanes ?? []).some((l) => l.id === dmLane)) dmLane = null;
@@ -2761,15 +2982,19 @@ function closeDmInput(save) {
   setTimeout(() => own.apply(v), 0);
   return true;
 }
-function dmTextInput(mount, left, top, current, apply) {
+function dmMountScale(mount) {
+  const w = mount.offsetWidth;
+  return w > 0 ? mount.getBoundingClientRect().width / w : 1;
+}
+function dmTextInput(mount, cx, cy, current, apply) {
   const pending = closeDmInput(true);
   const open = () => {
     const input = document.createElement("input");
     input.className = "o-dmrename";
     input.value = current;
-    input.style.left = `${left}px`;
-    input.style.top = `${top}px`;
     mount.appendChild(input);
+    input.style.left = `${Math.round(cx - input.offsetWidth / 2)}px`;
+    input.style.top = `${Math.round(cy - input.offsetHeight / 2)}px`;
     dmEdit = { input, was: current, apply };
     input.focus();
     input.select();
@@ -2787,14 +3012,16 @@ function dmTextInput(mount, left, top, current, apply) {
 function dmRename(mount, nodeEl, current, apply) {
   const r = nodeEl.getBoundingClientRect();
   const m = mount.getBoundingClientRect();
-  dmTextInput(mount, r.left - m.left + r.width / 2 - 90, r.top - m.top + r.height / 2 - 14, current, apply);
+  const s2 = dmMountScale(mount);
+  dmTextInput(mount, (r.left - m.left + r.width / 2) / s2, (r.top - m.top + r.height / 2) / s2, current, apply);
 }
 function dmInputAt(mount, svg, vb, current, apply) {
   const ctm = svg.getScreenCTM();
   if (!ctm) return;
   const p = new DOMPoint(vb.x, vb.y).matrixTransform(ctm);
   const m = mount.getBoundingClientRect();
-  dmTextInput(mount, p.x - m.left - 90, p.y - m.top - 14, current, apply);
+  const s2 = dmMountScale(mount);
+  dmTextInput(mount, (p.x - m.left) / s2, (p.y - m.top) / s2, current, apply);
 }
 function wireEdgeHit(group, mount, svg, geom, mid, edge, data, edit) {
   const commit = edit.onCommit;
@@ -2879,15 +3106,16 @@ function openSpawnMenu(mount, svg, source, kind, data, commit, basis) {
   const menu = document.createElement("div");
   menu.className = "o-dmenu";
   const m = mount.getBoundingClientRect();
+  const sc = dmMountScale(mount);
   const ctm = svg.getScreenCTM();
   if (ctm) {
     const p = new DOMPoint(source.vx, source.vy).matrixTransform(ctm);
-    menu.style.left = `${p.x - m.left + 12}px`;
-    menu.style.top = `${p.y - m.top - 10}px`;
+    menu.style.left = `${(p.x - m.left) / sc + 12}px`;
+    menu.style.top = `${(p.y - m.top) / sc - 10}px`;
   } else {
     const rect = svg.getBoundingClientRect();
-    menu.style.left = `${rect.left - m.left + source.vx / Number(svg.viewBox.baseVal.width) * rect.width + 12}px`;
-    menu.style.top = `${rect.top - m.top + source.vy / Number(svg.viewBox.baseVal.height) * rect.height - 10}px`;
+    menu.style.left = `${(rect.left - m.left + source.vx / Number(svg.viewBox.baseVal.width) * rect.width) / sc + 12}px`;
+    menu.style.top = `${(rect.top - m.top + source.vy / Number(svg.viewBox.baseVal.height) * rect.height) / sc - 10}px`;
   }
   const choices = kind === "flow" ? [["Step", "box"], ["Decision", "diamond"], ["Terminal", "pill"]] : [["New node", ""]];
   const sx = Math.round(Math.max(2, Math.min(98, source.vx / basis.w * 100 + 15)) * 10) / 10;
@@ -3319,6 +3547,7 @@ var GVW = 1e3;
 var GVH = 600;
 var GW = 150;
 var GH = 50;
+var GRAPH_NODE_BOUNDS = { wMin: 60, wMax: 400, hMin: 30, hMax: 200 };
 function fitPositions(pts, ids) {
   const minX = Math.min(...pts.map((p) => p.x));
   const maxX = Math.max(...pts.map((p) => p.x));
@@ -3603,7 +3832,21 @@ function renderGraph(slide, data, opts = {}) {
         (x, y) => ed.onCommit({ nodes: data.nodes.map((m) => m.id === n.id ? { ...m, x, y } : m), edges: data.edges, lanes: data.lanes })
       );
       wireNodeContextDelete(g, n.id, data, ed.onCommit);
-      const halo2 = () => dmHalo(g, 0, 0, w + (shape === "diamond" ? 24 : 0), h + (shape === "diamond" ? 20 : 0));
+      const pad3 = { x: shape === "diamond" ? 24 : 0, y: shape === "diamond" ? 20 : 0 };
+      const halo2 = () => {
+        dmHalo(g, 0, 0, w + pad3.x, h + pad3.y);
+        dmResizeGrip(svg, g, w, h, pad3, GRAPH_NODE_BOUNDS, (width, height) => {
+          const d = dmLive(data);
+          ed.onCommit({
+            // equal to the default = omit it, the same rule the Size boxes keep
+            nodes: d.nodes.map(
+              (m) => m.id === n.id ? { ...m, ...width === GW ? { width: void 0 } : { width }, ...height === GH ? { height: void 0 } : { height } } : m
+            ),
+            edges: d.edges,
+            lanes: d.lanes
+          });
+        });
+      };
       g.addEventListener("click", (e) => {
         e.stopPropagation();
         if (suppress.dragged) {
@@ -3926,6 +4169,8 @@ function themeCssFromTokens(tokens) {
 var TREEMAP_MAX_NODES = 60;
 var SANKEY_MAX_NODES = 60;
 var SANKEY_MAX_LINKS = 120;
+var CHORD_MAX_NODES = 60;
+var CHORD_MAX_LINKS = 120;
 var CHART_PLOT_H_MIN = 180;
 var CHART_PLOT_H_MAX = 1200;
 var TEXT_SCALE_MIN = 0.75;
@@ -3960,15 +4205,32 @@ var VIDEO_PROVIDER_SPECS = {
   }
 };
 function videoCapability(provider) {
-  return provider === "link" ? null : `embed:${VIDEO_PROVIDER_SPECS[provider].host}`;
+  if (provider === "link" || provider === "local")
+    return null;
+  return `embed:${VIDEO_PROVIDER_SPECS[provider].host}`;
 }
 function videoEmbedUrl(data) {
-  if (data.provider === "link")
+  if (data.provider === "link" || data.provider === "local")
     return null;
   const spec = VIDEO_PROVIDER_SPECS[data.provider];
   if (!spec || !spec.idRe.test(data.videoId))
     return null;
   return spec.embedUrl(data.videoId);
+}
+var LOCAL_PATH_MAX = 300;
+var LOCAL_PATH_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+function localVideoPathIsSafe(url) {
+  if (url === "" || url.length > LOCAL_PATH_MAX)
+    return false;
+  if (LOCAL_PATH_SCHEME.test(url))
+    return false;
+  if (url.startsWith("/"))
+    return false;
+  if (url.includes("\\"))
+    return false;
+  if (url.split("/").includes(".."))
+    return false;
+  return true;
 }
 
 // ../format/dist/tracker-data.js
@@ -4300,7 +4562,7 @@ function evaluateCondFmt(values, rules, merges) {
 // ../format/dist/draw-data.js
 var DRAW_MAX_ELEMENTS = 200;
 var DRAW_MAX_POINTS = 1200;
-var DRAW_TYPES = ["rect", "diamond", "ellipse", "arrow", "line", "freedraw", "text"];
+var DRAW_TYPES = ["rect", "diamond", "ellipse", "cylinder", "arrow", "line", "freedraw", "text"];
 var DRAW_FILL_STYLES = ["none", "hachure", "cross", "solid"];
 var DRAW_STROKE_STYLES = ["solid", "dashed", "dotted"];
 var DRAW_FONTS = ["playfair", "lora", "inter", "source-serif", "caveat"];
@@ -4311,6 +4573,42 @@ var DRAW_ARROW_HEADS = ["end", "both"];
 var VENN_SIZE_MIN = 0.5;
 var VENN_SIZE_MAX = 2;
 var VENN_NUDGE_MAX = 60;
+
+// ../format/dist/calendar-data.js
+var CALENDAR_YEAR_MIN = 1900;
+var CALENDAR_YEAR_MAX = 2200;
+var CALENDAR_HEADING_MAX = 80;
+var CALENDAR_ENTRY_MAX = 500;
+var CALENDAR_MAX_ENTRIES = 3660;
+var pad = (n) => String(n).padStart(2, "0");
+function parseCalendarNote(value) {
+  if (typeof value === "string") {
+    const text2 = value.trim().slice(0, CALENDAR_ENTRY_MAX);
+    return text2 ? { text: text2 } : null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const raw = value;
+  const heading = typeof raw.heading === "string" ? raw.heading.trim().slice(0, CALENDAR_HEADING_MAX) : "";
+  const text = typeof raw.text === "string" ? raw.text.trim().slice(0, CALENDAR_ENTRY_MAX) : "";
+  if (!heading && !text)
+    return null;
+  return { ...heading ? { heading } : {}, ...text ? { text } : {} };
+}
+function calendarDaysInMonth(year, month) {
+  if (month === 2)
+    return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+}
+function calendarIsoDate(year, month, day) {
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+// ../format/dist/timeline-data.js
+var TIMELINE_TITLE_MAX = 200;
+var TIMELINE_BODY_MAX = 2e3;
+var TIMELINE_DATE_MAX = 40;
+var TIMELINE_MAX_EVENTS = 200;
 
 // ../format/dist/cell-format.js
 var ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -4334,17 +4632,17 @@ function typedFromBaked(s2) {
   }
   return { kind: "text", text: s2 };
 }
-var pad = (n) => n < 10 ? "0" + n : String(n);
+var pad2 = (n) => n < 10 ? "0" + n : String(n);
 var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var MONF = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 function dateDisplay(y, m, d, df) {
   switch (df) {
     case "yyyy-mm-dd":
-      return y + "-" + pad(m) + "-" + pad(d);
+      return y + "-" + pad2(m) + "-" + pad2(d);
     case "dd/mm/yyyy":
-      return pad(d) + "/" + pad(m) + "/" + y;
+      return pad2(d) + "/" + pad2(m) + "/" + y;
     case "mm/dd/yyyy":
-      return pad(m) + "/" + pad(d) + "/" + y;
+      return pad2(m) + "/" + pad2(d) + "/" + y;
     case "d mmmm yyyy":
       return d + " " + MONF[m - 1] + " " + y;
     case "d mmm yyyy":
@@ -4377,7 +4675,7 @@ function formatCell(baked, fmt) {
     if (v.kind === "bool")
       return v.b ? "TRUE" : "FALSE";
     if (v.kind === "date")
-      return `${v.y}-${pad(v.m)}-${pad(v.d)}`;
+      return `${v.y}-${pad2(v.m)}-${pad2(v.d)}`;
     if (v.kind === "num")
       return String(v.n);
     return baked;
@@ -4505,6 +4803,13 @@ function fitPrefix(text, fontSize, avail) {
   }
   return out;
 }
+function markTip(el7, text) {
+  if (!text) return;
+  el7.setAttribute("data-otip", text);
+  const t = document.createElementNS(SVG_NS, "title");
+  t.textContent = text;
+  el7.insertBefore(t, el7.firstChild);
+}
 var extendMax = (hi2, yMax) => typeof yMax === "number" && yMax > hi2 ? yMax : hi2;
 function sumScale(max, count) {
   if (!Number.isFinite(max) || !(max > 0) || !(count >= 1)) return 1;
@@ -4565,9 +4870,9 @@ function niceRange(lo2, hi2, div = 5) {
   lo2 = Math.max(-SPAN_CAP, Math.min(SPAN_CAP, lo2));
   hi2 = Math.max(-SPAN_CAP, Math.min(SPAN_CAP, hi2));
   if (hi2 - lo2 <= MIN_SPAN) {
-    const pad2 = Math.abs(lo2) * 0.5 || 1;
-    lo2 -= pad2;
-    hi2 += pad2;
+    const pad3 = Math.abs(lo2) * 0.5 || 1;
+    lo2 -= pad3;
+    hi2 += pad3;
   }
   const step = niceStep(hi2 - lo2, div);
   return { min: R(Math.floor(lo2 / step) * step), max: R(Math.ceil(hi2 / step) * step), step };
@@ -4675,12 +4980,13 @@ function renderBox(svg, data, w, lay) {
     svgEl2("line", { x1: cx - bw / 4, y1: yLo, x2: cx + bw / 4, y2: yLo, stroke: color, "stroke-width": 1.5 }, g);
     const yQ3 = sy.at(q3);
     const h = sy.at(q1) - yQ3;
-    svgEl2(
+    const box = svgEl2(
       "rect",
       // a zero IQR is a real distribution (every observation equal); 1 unit keeps it visible
       { x: cx - bw / 2, y: yQ3, width: bw, height: Math.max(h, 1), fill: color, "fill-opacity": 0.35, stroke: color, "stroke-width": 1.5, "data-label": i },
       g
     );
+    markTip(box, `${data.labels[i]}: min ${Math.round(wLo * 100) / 100} \u2014 median ${Math.round(med * 100) / 100} \u2014 max ${Math.round(wHi * 100) / 100}`);
     const yMed = sy.at(med);
     svgEl2("line", { x1: cx - bw / 2, y1: yMed, x2: cx + bw / 2, y2: yMed, stroke: color, "stroke-width": 2.5, "data-median": i }, g);
     c.out.forEach((v) => svgEl2("circle", { cx, cy: sy.at(v), r: 3, fill: dot, "data-outlier": i }, g));
@@ -4689,6 +4995,42 @@ function renderBox(svg, data, w, lay) {
       t.textContent = String(Math.round(med * 100) / 100);
     }
   });
+}
+
+// src/chart/arc.ts
+var TOP = -Math.PI / 2;
+var FULL_TURN = Math.PI * 2;
+var EPS = 1e-9;
+function polarPt(cx, cy, r, a) {
+  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+}
+function arcPath(cx, cy, rIn, rOut, a0, a12) {
+  const rO = Math.max(0, rOut);
+  const rI = Math.max(0, Math.min(rIn, rO));
+  const sweep = a12 - a0;
+  const span2 = Math.abs(sweep);
+  if (rO <= 0 || span2 < EPS) return "";
+  const cw = sweep > 0 ? 1 : 0;
+  const P = (r, a) => polarPt(cx, cy, r, a);
+  if (span2 >= FULL_TURN - EPS) {
+    const ring = (r, dir) => {
+      const s2 = P(r, a0);
+      const m = P(r, a0 + (dir === 1 ? Math.PI : -Math.PI));
+      return `M ${s2.x} ${s2.y} A ${r} ${r} 0 0 ${dir} ${m.x} ${m.y} A ${r} ${r} 0 0 ${dir} ${s2.x} ${s2.y} Z`;
+    };
+    return rI > 0 ? `${ring(rO, cw)} ${ring(rI, cw === 1 ? 0 : 1)}` : ring(rO, cw);
+  }
+  const large = span2 > Math.PI ? 1 : 0;
+  const oA = P(rO, a0);
+  const oB = P(rO, a12);
+  if (rI <= 0) return `M ${cx} ${cy} L ${oA.x} ${oA.y} A ${rO} ${rO} 0 ${large} ${cw} ${oB.x} ${oB.y} Z`;
+  const iA = P(rI, a0);
+  const iB = P(rI, a12);
+  return `M ${oA.x} ${oA.y} A ${rO} ${rO} 0 ${large} ${cw} ${oB.x} ${oB.y} L ${iB.x} ${iB.y} A ${rI} ${rI} 0 ${large} ${cw === 1 ? 0 : 1} ${iA.x} ${iA.y} Z`;
+}
+function areaRadius(frac, rIn, rOut) {
+  const f = frac > 1 ? 1 : frac > 0 ? frac : 0;
+  return Math.sqrt(rIn * rIn + f * (rOut * rOut - rIn * rIn));
 }
 
 // src/chart/colorscale.ts
@@ -4814,689 +5156,8 @@ function scaleLegend(svg, x, y, h, lo2, hi2, fmt = scaleFormat(hi2), snap) {
   }
 }
 
-// src/chart/defs.ts
-var FADE_TOP = 0.38;
-var FADE_BOTTOM = 0.02;
-function fillGradient(svg, color, ns = "") {
-  const id = "ocg" + ns + color.replace(/[^0-9a-fA-F]/g, "").toLowerCase();
-  let defs = svg.querySelector("defs");
-  if (!defs) {
-    defs = document.createElementNS(SVG_NS, "defs");
-    svg.insertBefore(defs, svg.firstChild);
-  }
-  if (!defs.querySelector("#" + id)) {
-    const g = svgEl2("linearGradient", { id, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
-    svgEl2("stop", { offset: 0, "stop-color": color, "stop-opacity": FADE_TOP }, g);
-    svgEl2("stop", { offset: 1, "stop-color": color, "stop-opacity": FADE_BOTTOM }, g);
-  }
-  return `url(#${id})`;
-}
-
-// src/chart/funnel.ts
-var LABEL_GUTTER = 150;
-var GAP = 4;
-var NAME_FONT = 10;
-var EDGE_PAD = 4;
-function fitStageLabel(name, value, avail) {
-  const tail = ` \u2014 ${value}`;
-  const tailW = estTextWidth(tail, NAME_FONT);
-  if (estTextWidth(name, NAME_FONT) + tailW <= avail) return name + tail;
-  const room = avail - tailW - estTextWidth("\u2026", NAME_FONT);
-  const kept = room > 0 ? fitPrefix(name, NAME_FONT, room) : "";
-  return kept ? kept + "\u2026" + tail : String(value);
-}
-function renderFunnel(svg, data, w, lay) {
-  const values = (data.series[0]?.values ?? []).map((v) => v > 0 ? v : 0);
-  const n = Math.max(1, values.length);
-  const plotW = w - lay.mL - lay.mR;
-  const bodyW = Math.max(80, plotW - LABEL_GUTTER);
-  const cx = lay.mL + bodyW / 2;
-  const peak = Math.max(data.yMax ?? 0, ...values, 0) || 1;
-  const labelX = lay.mL + bodyW + 10;
-  const avail = Math.max(0, w - labelX - EDGE_PAD);
-  const bandH = (lay.plotH - GAP * (n - 1)) / n;
-  const half = (v) => Math.max(bodyW / 2 * (v / peak), 0.5);
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  values.forEach((v, i) => {
-    const y0 = lay.mT + i * (bandH + GAP);
-    const y1 = y0 + bandH;
-    const hTop = half(v);
-    const hBot = half(i + 1 < values.length ? values[i + 1] : v);
-    const color = sliceColor(data, i);
-    svgEl2(
-      "path",
-      {
-        d: `M ${cx - hTop} ${y0} L ${cx + hTop} ${y0} L ${cx + hBot} ${y1} L ${cx - hBot} ${y1} Z`,
-        fill: color,
-        "data-label": i,
-        "data-stage": i
-      },
-      g
-    );
-    const t = svgEl2("text", { x: labelX, y: (y0 + y1) / 2 + 3.5, "text-anchor": "start", class: "o-chart-name" }, g);
-    t.textContent = fitStageLabel(data.labels[i] ?? "", v, avail);
-  });
-}
-
-// src/chart/arc.ts
-var TOP = -Math.PI / 2;
-var FULL_TURN = Math.PI * 2;
-var EPS = 1e-9;
-function polarPt(cx, cy, r, a) {
-  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
-}
-function arcPath(cx, cy, rIn, rOut, a0, a12) {
-  const rO = Math.max(0, rOut);
-  const rI = Math.max(0, Math.min(rIn, rO));
-  const sweep = a12 - a0;
-  const span2 = Math.abs(sweep);
-  if (rO <= 0 || span2 < EPS) return "";
-  const cw = sweep > 0 ? 1 : 0;
-  const P = (r, a) => polarPt(cx, cy, r, a);
-  if (span2 >= FULL_TURN - EPS) {
-    const ring = (r, dir) => {
-      const s2 = P(r, a0);
-      const m = P(r, a0 + (dir === 1 ? Math.PI : -Math.PI));
-      return `M ${s2.x} ${s2.y} A ${r} ${r} 0 0 ${dir} ${m.x} ${m.y} A ${r} ${r} 0 0 ${dir} ${s2.x} ${s2.y} Z`;
-    };
-    return rI > 0 ? `${ring(rO, cw)} ${ring(rI, cw === 1 ? 0 : 1)}` : ring(rO, cw);
-  }
-  const large = span2 > Math.PI ? 1 : 0;
-  const oA = P(rO, a0);
-  const oB = P(rO, a12);
-  if (rI <= 0) return `M ${cx} ${cy} L ${oA.x} ${oA.y} A ${rO} ${rO} 0 ${large} ${cw} ${oB.x} ${oB.y} Z`;
-  const iA = P(rI, a0);
-  const iB = P(rI, a12);
-  return `M ${oA.x} ${oA.y} A ${rO} ${rO} 0 ${large} ${cw} ${oB.x} ${oB.y} L ${iB.x} ${iB.y} A ${rI} ${rI} 0 ${large} ${cw === 1 ? 0 : 1} ${iA.x} ${iA.y} Z`;
-}
-function areaRadius(frac, rIn, rOut) {
-  const f = frac > 1 ? 1 : frac > 0 ? frac : 0;
-  return Math.sqrt(rIn * rIn + f * (rOut * rOut - rIn * rIn));
-}
-
-// src/chart/polar.ts
-function polarBox(w, lay, pad2) {
-  return {
-    cx: w / 2,
-    cy: lay.mT + lay.plotH / 2,
-    r: Math.max(10, Math.min(w - lay.mL - lay.mR, lay.plotH) / 2 - pad2)
-  };
-}
-var spokeAngle = (i, n) => TOP + FULL_TURN * i / (n || 1);
-function polarGrid(svg, box, spokes, rings, ringLabel2, web, namePad = 12) {
-  const n = spokes.length;
-  for (let k = 1; k <= rings; k++) {
-    const rr = box.r * k / rings;
-    if (web && n >= 3) {
-      const pts = spokes.map((_s, i) => {
-        const p = polarPt(box.cx, box.cy, rr, spokeAngle(i, n));
-        return `${p.x},${p.y}`;
-      });
-      svgEl2("polygon", { points: pts.join(" "), fill: "none", class: "o-chart-grid" }, svg);
-    } else {
-      svgEl2("circle", { cx: box.cx, cy: box.cy, r: rr, fill: "none", class: "o-chart-grid" }, svg);
-    }
-  }
-  spokes.forEach((name, i) => {
-    const a = spokeAngle(i, n);
-    const tip = polarPt(box.cx, box.cy, box.r, a);
-    svgEl2("line", { x1: box.cx, y1: box.cy, x2: tip.x, y2: tip.y, class: "o-chart-grid" }, svg);
-    const lp = polarPt(box.cx, box.cy, box.r + namePad, a);
-    const cos = Math.cos(a);
-    const sin = Math.sin(a);
-    const t = svgEl2(
-      "text",
-      {
-        x: lp.x,
-        y: lp.y + (sin > 0.4 ? 9 : sin < -0.4 ? -2 : 4),
-        "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle",
-        class: "o-chart-tick"
-      },
-      svg
-    );
-    t.textContent = name;
-  });
-  for (let k = 1; k <= rings; k++) {
-    const t = svgEl2(
-      "text",
-      { x: box.cx + 4, y: box.cy - box.r * k / rings + 4, "text-anchor": "start", class: "o-chart-tick" },
-      svg
-    );
-    t.textContent = ringLabel2(k);
-  }
-}
-
-// src/chart/gauge.ts
-var A0 = 150 * Math.PI / 180;
-var SPAN = 240 * Math.PI / 180;
-var BAND = 16;
-var TICKS = 5;
-var tidy2 = (n) => Math.round(n * 100) / 100;
-function gaugeRange(data) {
-  return {
-    value: data.series[0]?.values[0] ?? 0,
-    min: data.gaugeMin ?? 0,
-    max: data.gaugeMax ?? 100
-  };
-}
-function renderGauge(svg, data, w, lay) {
-  const { value, min, max } = gaugeRange(data);
-  const box = polarBox(w, lay, 26);
-  const frac = Math.min(1, Math.max(0, (value - min) / (max - min || 1)));
-  const color = data.series[0]?.color ?? CHART_PALETTE[0];
-  const unit = data.unit ?? "";
-  const rIn = box.r - BAND;
-  svgEl2("path", { d: arcPath(box.cx, box.cy, rIn, box.r, A0, A0 + SPAN), class: "o-chart-track" }, svg);
-  for (let k = 0; k <= TICKS; k++) {
-    const a = A0 + SPAN * k / TICKS;
-    const p1 = polarPt(box.cx, box.cy, rIn - 2, a);
-    const p2 = polarPt(box.cx, box.cy, rIn - 9, a);
-    svgEl2("line", { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, class: "o-chart-grid" }, svg);
-    const lp = polarPt(box.cx, box.cy, rIn - 20, a);
-    const cos = Math.cos(a);
-    const t2 = svgEl2(
-      "text",
-      { x: lp.x, y: lp.y + 4, "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle", class: "o-chart-tick" },
-      svg
-    );
-    t2.textContent = String(tidy2(min + (max - min) * k / TICKS));
-  }
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  if (frac > 0) {
-    svgEl2("path", { d: arcPath(box.cx, box.cy, rIn, box.r, A0, A0 + SPAN * frac), fill: color, "data-gauge": "progress" }, g);
-  }
-  const tip = polarPt(box.cx, box.cy, box.r * 0.62, A0 + SPAN * frac);
-  svgEl2(
-    "line",
-    { x1: box.cx, y1: box.cy, x2: tip.x, y2: tip.y, "stroke-width": 4, "stroke-linecap": "round", class: "o-chart-needle", "data-gauge": "needle" },
-    g
-  );
-  svgEl2("circle", { cx: box.cx, cy: box.cy, r: 5, class: "o-chart-needle" }, g);
-  const t = svgEl2("text", { x: box.cx, y: box.cy + 48, "text-anchor": "middle", class: "o-chart-centre" }, g);
-  t.textContent = tidy2(value) + unit;
-  const name = data.labels[0] ?? "";
-  if (name) {
-    const c = svgEl2("text", { x: box.cx, y: box.cy + 68, "text-anchor": "middle", class: "o-chart-sub" }, g);
-    c.textContent = name;
-  }
-}
-
-// src/chart/heatmap.ts
-var VAL_FONT = 10;
-var VAL_PAD = 3;
-var NAME_FONT2 = 10;
-var NAME_GAP = 8;
-function renderHeatmap(svg, data, w, lay) {
-  const plotW = w - lay.mL - lay.mR;
-  const cols = Math.max(1, data.labels.length);
-  const rows = Math.max(1, data.series.length);
-  const cellW = plotW / cols;
-  const cellH = lay.plotH / rows;
-  const peak = Math.max(0, ...data.series.flatMap((s2) => s2.values));
-  const hi2 = extendMax(peak, data.yMax) || 1;
-  const fmt = scaleFormat(hi2);
-  const nameAvail = Math.max(0, lay.mL - NAME_GAP - (data.yTitle ? 24 : 4));
-  xLabels(svg, data.labels, plotW, lay);
-  axisTitles(svg, data, plotW, lay);
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  data.series.forEach((s2, ri) => {
-    const y = lay.mT + cellH * ri;
-    data.labels.forEach((_l, ci) => {
-      const v = s2.values[ci] ?? 0;
-      const fill = rampColor(v / hi2);
-      const x = lay.mL + cellW * ci;
-      svgEl2("rect", { x, y, width: cellW, height: cellH, fill, "data-series": ri, "data-label": ci }, g);
-      const txt = fmt(v);
-      if (estTextWidth(txt, VAL_FONT) + VAL_PAD * 2 <= cellW) {
-        const t = svgEl2(
-          "text",
-          {
-            x: x + cellW / 2,
-            y: y + cellH / 2 + VAL_FONT * 0.35,
-            "text-anchor": "middle",
-            class: "o-chart-cellvalue",
-            fill: inkOn(fill)
-          },
-          g
-        );
-        t.textContent = txt;
-      }
-    });
-    const nm = svgEl2(
-      "text",
-      { x: lay.mL - NAME_GAP, y: y + cellH / 2 + 3.5, "text-anchor": "end", class: "o-chart-name" },
-      g
-    );
-    nm.textContent = fitPrefix(s2.name, NAME_FONT2, nameAvail);
-  });
-  scaleLegend(g, lay.mL + plotW + LEGEND_GAP, lay.mT, lay.plotH, 0, hi2, fmt);
-}
-
-// src/chart/hexbin.ts
-var SQRT3 = Math.sqrt(3);
-var DEFAULT_HEX_BINS = 20;
-var VAL_FONT2 = 10;
-var VAL_PAD2 = 2;
-var MAX_INSET = 0.42;
-var PAD_TRIES = 12;
-var tidy3 = (n) => Math.round(n * 100) / 100;
-function hexRound(q, r) {
-  const x = q;
-  const z = r;
-  const y = -x - z;
-  let rx = Math.round(x);
-  let ry = Math.round(y);
-  let rz = Math.round(z);
-  const dx = Math.abs(rx - x);
-  const dy = Math.abs(ry - y);
-  const dz = Math.abs(rz - z);
-  if (dx > dy && dx > dz) rx = -ry - rz;
-  else if (dy > dz) ry = -rx - rz;
-  else rz = -rx - ry;
-  return [rx === 0 ? 0 : rx, rz === 0 ? 0 : rz];
-}
-var hexAxial = (px, py, R2) => [
-  (SQRT3 / 3 * px - 1 / 3 * py) / R2,
-  2 / 3 * py / R2
-];
-var hexCentre = (q, r, R2) => [SQRT3 * R2 * (q + r / 2), 1.5 * R2 * r];
-function binPoints(pxs, pys, R2) {
-  const cells = /* @__PURE__ */ new Map();
-  const n = Math.min(pxs.length, pys.length);
-  for (let i = 0; i < n; i++) {
-    const [fq, fr] = hexAxial(pxs[i], pys[i], R2);
-    const [q, r] = hexRound(fq, fr);
-    const key = q + "," + r;
-    const c = cells.get(key);
-    if (c) c.count++;
-    else cells.set(key, { q, r, count: 1 });
-  }
-  return [...cells.values()].sort((a, b) => a.r - b.r || a.q - b.q);
-}
-function hexPoints(cx, cy, R2) {
-  const out = [];
-  for (let i = 0; i < 6; i++) {
-    const a = (30 + 60 * i) * Math.PI / 180;
-    out.push(`${tidy3(cx + R2 * Math.cos(a))},${tidy3(cy + R2 * Math.sin(a))}`);
-  }
-  return out.join(" ");
-}
-var cap = (v) => Math.max(-SPAN_CAP, Math.min(SPAN_CAP, v));
-function padded(lo2, hi2, p0, p1, want) {
-  const px = Math.abs(p1 - p0);
-  const dir = p1 >= p0 ? 1 : -1;
-  const target = Math.min(want, px * MAX_INSET);
-  const clear = (s2) => Math.min((s2.at(lo2) - p0) * dir, (p1 - s2.at(hi2)) * dir);
-  let best = numScale(lo2, hi2, p0, p1);
-  let bLo = lo2;
-  let bHi = hi2;
-  let pad2 = target / px * (best.max - best.min);
-  for (let i = 0; i < PAD_TRIES && clear(best) < target; i++) {
-    const l = cap(lo2 - pad2);
-    const h = cap(hi2 + pad2);
-    const s2 = numScale(l, h, p0, p1);
-    if (clear(s2) > clear(best)) {
-      best = s2;
-      bLo = l;
-      bHi = h;
-    }
-    pad2 = Math.min(pad2 * 2, SPAN_CAP);
-  }
-  let inset = target - clear(best);
-  for (let i = 0; i < PAD_TRIES && clear(best) < target; i++) {
-    const held = Math.min(inset, px * MAX_INSET);
-    const s2 = numScale(bLo, bHi, p0 + held * dir, p1 - held * dir);
-    if (clear(s2) > clear(best)) best = s2;
-    if (held >= px * MAX_INSET) break;
-    inset *= 2;
-  }
-  return best;
-}
-function renderHexbin(svg, data, w, lay) {
-  const plotW = w - lay.mL - lay.mR;
-  const bins = data.hexBins ?? DEFAULT_HEX_BINS;
-  const R2 = plotW / (SQRT3 * bins);
-  const pxs = [];
-  const pys = [];
-  for (const s2 of data.series) {
-    const xs = s2.xs ?? [];
-    for (let i = 0; i < xs.length; i++) {
-      const y = s2.values[i];
-      if (typeof y === "number" && Number.isFinite(y) && Number.isFinite(xs[i])) {
-        pxs.push(cap(xs[i]));
-        pys.push(cap(y));
-      }
-    }
-  }
-  const lo2 = (a) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : 0;
-  const hi2 = (a) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : 1;
-  const yTop = cap(data.yMax != null ? Math.max(data.yMax, hi2(pys)) : hi2(pys));
-  const sx = padded(lo2(pxs), hi2(pxs), lay.mL, lay.mL + plotW, 2 * R2);
-  const sy = padded(lo2(pys), yTop, lay.mT + lay.plotH, lay.mT, 2 * R2);
-  numericAxes(svg, sx, sy, lay, plotW);
-  axisTitles(svg, data, plotW, lay);
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  const ax = lay.mL + plotW / 2;
-  const ay = lay.mT + lay.plotH / 2;
-  const cells = binPoints(
-    pxs.map((v) => sx.at(v) - ax),
-    pys.map((v) => sy.at(v) - ay),
-    R2
-  );
-  const peak = cells.reduce((m, c) => c.count > m ? c.count : m, 0);
-  for (const c of cells) {
-    const [qx, qy] = hexCentre(c.q, c.r, R2);
-    const cx = qx + ax;
-    const cy = qy + ay;
-    const fill = rampColor(c.count / (peak || 1));
-    svgEl2("polygon", { points: hexPoints(cx, cy, R2), fill, class: "o-chart-hexedge", "data-count": c.count }, g);
-    if (data.showValues) {
-      const txt = String(c.count);
-      if (R2 >= VAL_FONT2 && estTextWidth(txt, VAL_FONT2) + VAL_PAD2 * 2 <= SQRT3 * R2) {
-        const t = svgEl2(
-          "text",
-          { x: tidy3(cx), y: tidy3(cy + VAL_FONT2 * 0.35), "text-anchor": "middle", class: "o-chart-cellvalue", fill: inkOn(fill) },
-          g
-        );
-        t.textContent = txt;
-      }
-    }
-  }
-  scaleLegend(g, lay.mL + plotW + LEGEND_GAP, lay.mT, lay.plotH, 0, peak, (v) => String(v), Math.round);
-}
-
-// src/chart/pareto.ts
-var PARETO_AXIS_W = 34;
-var paretoColor = (data) => altColor(data.series[0]?.color ?? "", 3);
-var PARETO_LEGEND = "Cumulative %";
-function renderPareto(svg, data, lay, plotW) {
-  const values = (data.series[0]?.values ?? []).map((v) => Math.max(0, v));
-  const total = values.reduce((a, b) => a + b, 0);
-  if (total <= 0) return;
-  const color = paretoColor(data);
-  const at = rightValueAxis(svg, lay, plotW, 0, 100, color, "%");
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  const groupW = plotW / data.labels.length;
-  let run = 0;
-  const pts = data.labels.map((_l, i) => {
-    run += values[i] ?? 0;
-    return { x: lay.mL + groupW * (i + 0.5), y: at(run / total * 100), pct: run / total * 100 };
-  });
-  svgEl2(
-    "polyline",
-    {
-      points: pts.map((p) => `${p.x},${p.y}`).join(" "),
-      fill: "none",
-      stroke: color,
-      "stroke-width": 2.5,
-      "stroke-linejoin": "round",
-      "data-pareto": "cumulative"
-    },
-    g
-  );
-  pts.forEach((p, i) => {
-    svgEl2("circle", { cx: p.x, cy: p.y, r: 3.5, fill: color, "data-label": i }, g);
-    if (data.showValues) {
-      const t = svgEl2("text", { x: p.x, y: p.y - 7, "text-anchor": "middle", class: "o-chart-datalabel" }, g);
-      t.textContent = `${Math.round(p.pct * 10) / 10}%`;
-    }
-  });
-}
-
-// src/chart/pie.ts
-var DONUT_RATIO = 0.58;
-var NAME_FONT3 = 10;
-var NAME_PAD = 3;
-var LABEL_R = 0.62;
-var MIN_BAND = NAME_FONT3 + 2;
-var GLYPH_UP = NAME_FONT3 * 1.15 - 3.5;
-var GLYPH_DN = NAME_FONT3 * 0.35 + 3.5;
-var GEO_EPS = 1e-9;
-function inWedge(x, y, a0, a12, rIn, rOut) {
-  const rad = Math.hypot(x, y);
-  if (rad < rIn - GEO_EPS || rad > rOut + GEO_EPS) return false;
-  const span2 = a12 - a0;
-  if (span2 >= FULL_TURN - GEO_EPS) return true;
-  let d = Math.atan2(y, x) - a0;
-  d -= Math.floor(d / FULL_TURN) * FULL_TURN;
-  return d <= span2 + GEO_EPS;
-}
-function halfRuns(x, y, a0, a12, rIn, rOut) {
-  if (!inWedge(x, y, a0, a12, rIn, rOut)) return { l: 0, r: 0 };
-  const xs = [];
-  const arc = (rad) => {
-    const dx2 = rad * rad - y * y;
-    if (dx2 >= 0) {
-      const dx = Math.sqrt(dx2);
-      xs.push(-dx, dx);
-    }
-  };
-  arc(rOut);
-  if (rIn > 0) arc(rIn);
-  for (const a of [a0, a12]) {
-    const sy = Math.sin(a);
-    if (Math.abs(sy) < GEO_EPS) continue;
-    const t = y / sy;
-    if (t >= rIn - GEO_EPS && t <= rOut + GEO_EPS) xs.push(t * Math.cos(a));
-  }
-  let l = Infinity;
-  let r = Infinity;
-  for (const c of xs) {
-    if (c <= x) l = Math.min(l, x - c);
-    else r = Math.min(r, c - x);
-  }
-  return { l: Number.isFinite(l) ? l : 0, r: Number.isFinite(r) ? r : 0 };
-}
-function horizRun(a0, a12, rIn, rOut, rLab) {
-  const p = polarPt(0, 0, rLab, (a0 + a12) / 2);
-  const ys = [p.y - GLYPH_UP, p.y, p.y + GLYPH_DN];
-  if (p.y - GLYPH_UP < 0 && p.y + GLYPH_DN > 0) ys.push(0);
-  let l = Infinity;
-  let r = Infinity;
-  for (const y of ys) {
-    const run = halfRuns(p.x, y, a0, a12, rIn, rOut);
-    l = Math.min(l, run.l);
-    r = Math.min(r, run.r);
-  }
-  return { l, r };
-}
-function sliceLabel(name, a0, a12, rIn, rOut) {
-  const NONE = { text: "", dx: 0 };
-  const band = rOut - rIn;
-  if (name.length === 0 || band < MIN_BAND) return NONE;
-  const rLab = rIn + band * LABEL_R;
-  const chord = 2 * rLab * Math.sin(Math.min(Math.abs(a12 - a0), Math.PI) / 2);
-  const run = horizRun(a0, a12, rIn, rOut, rLab);
-  const room = Math.min(chord, run.l + run.r) - NAME_PAD * 2;
-  if (room <= 0) return NONE;
-  let text = fitPrefix(name, NAME_FONT3, room);
-  if (text !== name) {
-    const shown = fitPrefix(name, NAME_FONT3, room - estTextWidth("\u2026", NAME_FONT3));
-    if (shown.length < 2) return NONE;
-    text = shown + "\u2026";
-  }
-  const half = estTextWidth(text, NAME_FONT3) / 2;
-  const lo2 = half + NAME_PAD - run.l;
-  const hi2 = run.r - NAME_PAD - half;
-  return { text, dx: lo2 > 0 ? lo2 : hi2 < 0 ? hi2 : 0 };
-}
-function renderPie(svg, data, w, lay) {
-  const values = data.series[0]?.values ?? [];
-  const total = values.reduce((a, b) => a + b, 0);
-  const cx = w / 2;
-  const cy = lay.mT + lay.plotH / 2;
-  const r = Math.min(w - lay.mL - lay.mR, lay.plotH) / 2 - 4;
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  if (total <= 0) {
-    svgEl2("circle", { cx, cy, r, fill: "none", stroke: "#ccc", "stroke-width": 1.5 }, g);
-    return;
-  }
-  const rose = data.rose === true;
-  const donut = data.donut === true;
-  const rIn = donut ? r * DONUT_RATIO : 0;
-  const n = values.length;
-  const peak = rose ? values.reduce((a, b) => b > a ? b : a, 0) : 0;
-  let angle = TOP;
-  values.forEach((v, i) => {
-    const frac = rose ? 1 / n : v / total;
-    const a2 = angle + frac * FULL_TURN;
-    if (v > 0) {
-      const color = sliceColor(data, i);
-      const rOut = rose ? areaRadius(v / (peak || 1), rIn, r) : r;
-      if (!rose && rIn <= 0 && frac >= 0.999999) {
-        svgEl2("circle", { cx, cy, r, fill: color, "data-label": i }, g);
-      } else {
-        svgEl2("path", { d: arcPath(cx, cy, rIn, rOut, angle, a2), fill: color, "data-label": i }, g);
-      }
-      if ((rose || donut) && data.showValues) {
-        const lp = polarPt(cx, cy, rOut + 11, angle + (a2 - angle) / 2);
-        const cos = Math.cos(angle + (a2 - angle) / 2);
-        const t = svgEl2(
-          "text",
-          { x: lp.x, y: lp.y + 3.5, "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle", class: "o-chart-datalabel" },
-          g
-        );
-        t.textContent = String(v);
-      }
-      if (data.pieLabels) {
-        const rLab = rIn + (rOut - rIn) * LABEL_R;
-        const shown = sliceLabel(data.labels[i] ?? "", angle, a2, rIn, rOut);
-        if (shown.text) {
-          const lp = polarPt(cx, cy, rLab, angle + (a2 - angle) / 2);
-          const t = svgEl2(
-            // the ink beats `.o-chart-name`'s own fill only as an attribute — see the header
-            "text",
-            { x: lp.x + shown.dx, y: lp.y + 3.5, "text-anchor": "middle", fill: inkOn(color), class: "o-chart-name", "data-label": i },
-            g
-          );
-          t.textContent = shown.text;
-        }
-      }
-    }
-    angle = a2;
-  });
-  if (donut) {
-    const t = svgEl2("text", { x: cx, y: cy + 4, "text-anchor": "middle", class: "o-chart-centre" }, g);
-    t.textContent = String(Math.round(total * 100) / 100);
-    const name = data.series[0]?.name ?? "";
-    if (name) {
-      const c = svgEl2("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "o-chart-sub" }, g);
-      c.textContent = name;
-    }
-  }
-}
-
-// src/chart/radar.ts
-var RINGS = 4;
-var FILL = 0.18;
-var LABEL_OUT = 14;
-var VALUE_FONT = 10;
-var NAME_GAP2 = 8;
-var BASE_NAME_PAD = 12;
-var RING_GUTTER = 4;
-var tidy4 = (n) => Math.round(n * 100) / 100;
-function spokeMaxes(data) {
-  const shared = data.yMax ?? niceMax(Math.max(0, ...data.series.flatMap((s2) => s2.values)));
-  return data.labels.map((_l, i) => {
-    const m = data.maxes?.[i];
-    return typeof m === "number" && m > 0 ? m : shared;
-  });
-}
-function renderRadar(svg, data, w, lay) {
-  const n = data.labels.length;
-  const widest = data.showValues ? data.series.reduce(
-    (mx, s2) => data.labels.reduce((m, _l, i) => Math.max(m, estTextWidth(String(s2.values[i] ?? 0), VALUE_FONT)), mx),
-    0
-  ) : 0;
-  const MAX_EXTRA = 26;
-  const wanted = LABEL_OUT + widest + NAME_GAP2;
-  const namePad = data.showValues ? BASE_NAME_PAD + Math.min(wanted, MAX_EXTRA) : BASE_NAME_PAD;
-  const box = polarBox(w, lay, 34 + (namePad - BASE_NAME_PAD));
-  const maxes = spokeMaxes(data);
-  const uniform = maxes.every((m) => m === maxes[0]);
-  const spokes = uniform ? data.labels : data.labels.map((l, i) => `${l} /${tidy4(maxes[i])}`);
-  polarGrid(svg, box, spokes, RINGS, (k) => uniform ? String(tidy4(maxes[0] * k / RINGS)) : `${100 * k / RINGS}%`, true, namePad);
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  data.series.forEach((s2, si) => {
-    const rs = data.labels.map((_l, i) => box.r * Math.min(1, Math.max(0, (s2.values[i] ?? 0) / (maxes[i] || 1))));
-    const pts = rs.map((r, i) => polarPt(box.cx, box.cy, r, spokeAngle(i, n)));
-    svgEl2(
-      "polygon",
-      {
-        points: pts.map((p) => `${p.x},${p.y}`).join(" "),
-        fill: s2.color,
-        "fill-opacity": FILL,
-        stroke: s2.color,
-        "stroke-width": 2.5,
-        "stroke-linejoin": "round",
-        "data-series": si
-      },
-      g
-    );
-    pts.forEach((p, i) => svgEl2("circle", { cx: p.x, cy: p.y, r: 3, fill: s2.color, "data-label": i }, g));
-    if (data.showValues) {
-      rs.forEach((r, i) => {
-        const a = spokeAngle(i, n);
-        const lp = polarPt(box.cx, box.cy, r + LABEL_OUT, a);
-        const cos = Math.cos(a);
-        const upright = Math.abs(cos) <= 0.2 && Math.sin(a) < 0;
-        const t = svgEl2(
-          "text",
-          {
-            x: upright ? lp.x - RING_GUTTER : lp.x,
-            y: lp.y + 3.5,
-            "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : upright ? "end" : "middle",
-            class: "o-chart-datalabel"
-          },
-          g
-        );
-        t.textContent = String(s2.values[i] ?? 0);
-      });
-    }
-  });
-}
-
-// src/chart/radial.ts
-var RINGS2 = 4;
-var FILL_RATIO = 0.7;
-var NAME_FONT4 = 11;
-var NAME_GAP3 = 12;
-var tidy5 = (n) => Math.round(n * 100) / 100;
-function renderRadialBar(svg, data, w, lay) {
-  const values = (data.series[0]?.values ?? []).map((v) => v > 0 ? v : 0);
-  const n = Math.max(1, data.labels.length);
-  const box = polarBox(w, lay, 30);
-  const peak = Math.max(data.yMax ?? 0, niceMax(Math.max(0, ...values))) || 1;
-  const spokes = data.showValues ? data.labels.map((l, i) => {
-    const tail = ` \u2014 ${values[i] ?? 0}`;
-    const avail = w - (box.cx + box.r + NAME_GAP3) - 4 - estTextWidth(tail, NAME_FONT4);
-    return fitPrefix(l, NAME_FONT4, Math.max(0, avail)) + tail;
-  }) : data.labels;
-  polarGrid(svg, box, spokes, RINGS2, (k) => String(tidy5(peak * k / RINGS2)), false);
-  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
-  const halfW = FULL_TURN / n * FILL_RATIO / 2;
-  values.forEach((v, i) => {
-    const a = spokeAngle(i, n);
-    const rr = box.r * (v / peak);
-    if (rr <= 0) return;
-    const color = sliceColor(data, i);
-    svgEl2(
-      "path",
-      {
-        d: arcPath(box.cx, box.cy, 0, rr, a - halfW, a + halfW),
-        fill: color,
-        stroke: color,
-        "stroke-width": 2,
-        "stroke-linejoin": "round",
-        "data-label": i
-      },
-      g
-    );
-  });
-}
-
 // src/chart/sankey.ts
-var NAME_FONT5 = 10;
+var NAME_FONT = 10;
 var PAD = 4;
 var NODE_W = 16;
 var NODE_GAP = 14;
@@ -5580,13 +5241,13 @@ function emptyFrame(svg, r) {
 }
 function caption(name, value, room) {
   if (room <= 0 || name.length === 0) return "";
-  const cut = fitPrefix(name, NAME_FONT5, room);
-  const head = cut === name ? name : fitPrefix(name, NAME_FONT5, room - estTextWidth("\u2026", NAME_FONT5));
+  const cut = fitPrefix(name, NAME_FONT, room);
+  const head = cut === name ? name : fitPrefix(name, NAME_FONT, room - estTextWidth("\u2026", NAME_FONT));
   if (cut !== name && [...head].length < 2) return "";
   const shown = cut === name ? name : `${head}\u2026`;
   if (value.length === 0) return shown;
   const both = `${shown} ${value}`;
-  return cut === name && estTextWidth(both, NAME_FONT5) <= room ? both : shown;
+  return cut === name && estTextWidth(both, NAME_FONT) <= room ? both : shown;
 }
 var INK_PLAIN = [0.8, 0.2];
 var INK_TALL = [1.15, 0.35];
@@ -5700,6 +5361,8 @@ function renderSankey(svg, data, w, lay) {
     }
   }
   const color = (i) => CHART_PALETTE[i % CHART_PALETTE.length];
+  const top = through.reduce((a, v) => v > a ? v : a, 0) * unit;
+  const fmt = scaleFormat(Number.isFinite(top) ? top : Number.MAX_VALUE);
   flows.forEach((f, k) => {
     const x0 = xAt(col[f.from]) + nodeW;
     const x1 = xAt(col[f.to]);
@@ -5712,16 +5375,24 @@ function renderSankey(svg, data, w, lay) {
     const b0 = dstY[k];
     const b1 = b0 + t;
     const d = `M ${x0} ${a0} C ${cx0} ${a0} ${cx1} ${b0} ${x1} ${b0} L ${x1} ${b1} C ${cx1} ${b1} ${cx0} ${a12} ${x0} ${a12} Z`;
-    svgEl2("path", { d, fill: rgba(color(f.from), RIBBON_ALPHA), "data-from": f.from, "data-to": f.to }, g);
+    const ribbon = svgEl2(
+      "path",
+      { d, fill: rgba(color(f.from), RIBBON_ALPHA), "data-from": f.from, "data-to": f.to },
+      g
+    );
+    markTip(ribbon, `${data.labels[f.from] ?? ""} \u2192 ${data.labels[f.to] ?? ""} \u2014 ${fmt(f.value * unit)}`);
   });
   for (let i = 0; i < n; i++) {
     if (!(h[i] > 0)) continue;
-    svgEl2("rect", { x: xAt(col[i]), y: y[i], width: nodeW, height: h[i], fill: color(i), "data-label": i }, g);
+    const node = svgEl2(
+      "rect",
+      { x: xAt(col[i]), y: y[i], width: nodeW, height: h[i], fill: color(i), "data-label": i },
+      g
+    );
+    markTip(node, `${data.labels[i] ?? ""} \u2014 ${printable(through[i] * unit, fmt)}`);
   }
-  const top = through.reduce((a, v) => v > a ? v : a, 0) * unit;
-  const fmt = scaleFormat(Number.isFinite(top) ? top : Number.MAX_VALUE);
   for (let i = 0; i < n; i++) {
-    if (h[i] < NAME_FONT5) continue;
+    if (h[i] < NAME_FONT) continue;
     const c = col[i];
     const last = c === C2 - 1 && C2 > 1;
     const shared = C2 > 2 ? c === C2 - 2 || last : true;
@@ -5736,7 +5407,7 @@ function renderSankey(svg, data, w, lay) {
     const x = last ? xAt(c) - PAD : xAt(c) + nodeW + PAD;
     const t = svgEl2(
       "text",
-      { x, y: centre(i) + NAME_FONT5 * 0.35, "text-anchor": last ? "end" : "start", class: "o-chart-name", "data-label": i },
+      { x, y: centre(i) + NAME_FONT * 0.35, "text-anchor": last ? "end" : "start", class: "o-chart-name", "data-label": i },
       g
     );
     t.textContent = text;
@@ -5746,8 +5417,8 @@ function vertical(svg, name, value, x, nodeW, barY, barH, fill, idx) {
   const text = caption(name, value, barH - PAD * 2);
   if (!text) return;
   const [asc, desc] = inkBox(text);
-  if (nodeW < (asc + desc) * NAME_FONT5) return;
-  const ax = x + nodeW / 2 + (asc - desc) / 2 * NAME_FONT5;
+  if (nodeW < (asc + desc) * NAME_FONT) return;
+  const ax = x + nodeW / 2 + (asc - desc) / 2 * NAME_FONT;
   const ay = barY + barH / 2;
   const t = svgEl2(
     "text",
@@ -5755,6 +5426,788 @@ function vertical(svg, name, value, x, nodeW, barY, barH, fill, idx) {
     svg
   );
   t.textContent = text;
+}
+
+// src/chart/chord.ts
+var NAME_FONT2 = 10;
+var PAD2 = 6;
+var BAND = 14;
+var GAP = 0.02;
+var RIBBON_ALPHA2 = 0.45;
+function rgba2(hex3, a) {
+  const s2 = hex3.replace("#", "");
+  const w = s2.length < 6 ? 1 : 2;
+  const at = (i) => {
+    const h = s2.substr(i * w, w);
+    const n = parseInt(w === 1 ? h + h : h, 16);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return `rgba(${at(0)},${at(1)},${at(2)},${a})`;
+}
+function emptyFrame2(svg, r) {
+  svgEl2("rect", { x: r.x, y: r.y, width: r.w, height: r.h, fill: "none", stroke: "#ccc", "stroke-width": 1.5 }, svg);
+}
+var printable2 = (v, fmt) => Number.isFinite(v) ? fmt(v) : "";
+function renderChord(svg, data, w, lay) {
+  const box = { x: lay.mL, y: lay.mT, w: w - lay.mL - lay.mR, h: lay.plotH };
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  const n = data.labels.length;
+  const flows = readFlows(data);
+  const vScale = sumScale(
+    flows.reduce((a, f) => f.value > a ? f.value : a, 0),
+    flows.length * 2
+  );
+  if (vScale !== 1) for (const f of flows) f.value *= vScale;
+  const unit = 1 / vScale;
+  const inSum = new Array(n).fill(0);
+  const outSum = new Array(n).fill(0);
+  const inFlows = Array.from({ length: n }, () => []);
+  const outFlows = Array.from({ length: n }, () => []);
+  flows.forEach((f, k) => {
+    outSum[f.from] += f.value;
+    inSum[f.to] += f.value;
+    outFlows[f.from].push(k);
+    inFlows[f.to].push(k);
+  });
+  const total = Array.from({ length: n }, (_x, i) => inSum[i] + outSum[i]);
+  const grand = total.reduce((a, v) => a + v, 0);
+  if (!(grand > 0)) {
+    emptyFrame2(g, box);
+    return;
+  }
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  const R2 = Math.min(box.w, box.h) / 2 - 2;
+  const rIn = Math.max(0, R2 - BAND);
+  if (!(R2 > 0)) {
+    emptyFrame2(g, box);
+    return;
+  }
+  const avail = Math.max(0, FULL_TURN - GAP * n);
+  const scale = avail / grand;
+  const start = new Array(n).fill(TOP);
+  {
+    let a = TOP;
+    for (let i = 0; i < n; i++) {
+      start[i] = a;
+      a += total[i] * scale + GAP;
+    }
+  }
+  const srcA = new Array(flows.length).fill(0);
+  const dstA = new Array(flows.length).fill(0);
+  for (let i = 0; i < n; i++) {
+    let a = start[i];
+    for (const k of outFlows[i].slice().sort((p, q) => flows[p].to - flows[q].to || p - q)) {
+      srcA[k] = a;
+      a += flows[k].value * scale;
+    }
+    for (const k of inFlows[i].slice().sort((p, q) => flows[p].from - flows[q].from || p - q)) {
+      dstA[k] = a;
+      a += flows[k].value * scale;
+    }
+  }
+  const color = (i) => CHART_PALETTE[i % CHART_PALETTE.length];
+  const top = total.reduce((a, v) => v > a ? v : a, 0) * unit;
+  const fmt = scaleFormat(Number.isFinite(top) ? top : Number.MAX_VALUE);
+  flows.forEach((f, k) => {
+    const t = f.value * scale;
+    if (!(t > 0)) return;
+    const a0 = srcA[k];
+    const a12 = a0 + t;
+    const b0 = dstA[k];
+    const b1 = b0 + t;
+    const A02 = polarPt(cx, cy, R2, a0);
+    const A1 = polarPt(cx, cy, R2, a12);
+    const B0 = polarPt(cx, cy, R2, b0);
+    const B1 = polarPt(cx, cy, R2, b1);
+    const large = t > Math.PI ? 1 : 0;
+    const d = `M ${A02.x} ${A02.y} C ${cx} ${cy} ${cx} ${cy} ${B0.x} ${B0.y} A ${R2} ${R2} 0 ${large} 1 ${B1.x} ${B1.y} C ${cx} ${cy} ${cx} ${cy} ${A1.x} ${A1.y} A ${R2} ${R2} 0 ${large} 0 ${A02.x} ${A02.y} Z`;
+    const ribbon = svgEl2("path", { d, fill: rgba2(color(f.from), RIBBON_ALPHA2), "data-from": f.from, "data-to": f.to }, g);
+    markTip(ribbon, `${data.labels[f.from] ?? ""} \u2192 ${data.labels[f.to] ?? ""} \u2014 ${fmt(f.value * unit)}`);
+  });
+  for (let i = 0; i < n; i++) {
+    if (!(total[i] > 0)) continue;
+    const d = arcPath(cx, cy, rIn, R2, start[i], start[i] + total[i] * scale);
+    if (!d) continue;
+    const node = svgEl2("path", { d, fill: color(i), "data-label": i }, g);
+    markTip(node, `${data.labels[i] ?? ""} \u2014 ${printable2(total[i] * unit, fmt)}`);
+  }
+  for (let i = 0; i < n; i++) {
+    if (!(total[i] > 0)) continue;
+    const mid = start[i] + total[i] * scale / 2;
+    const p = polarPt(cx, cy, R2 + PAD2 + NAME_FONT2, mid);
+    const cos = Math.cos(mid);
+    const anchor = cos > 0.25 ? "start" : cos < -0.25 ? "end" : "middle";
+    const room = anchor === "start" ? box.x + box.w - p.x : anchor === "end" ? p.x - box.x : box.w / 2;
+    const name = data.labels[i] ?? "";
+    const head = fitPrefix(name, NAME_FONT2, room);
+    if (head.length === 0) continue;
+    const cut = head === name ? name : `${fitPrefix(name, NAME_FONT2, room - estTextWidth("\u2026", NAME_FONT2))}\u2026`;
+    if (cut === "\u2026") continue;
+    const t = svgEl2("text", { x: p.x, y: p.y + NAME_FONT2 * 0.35, "text-anchor": anchor, class: "o-chart-name", "data-label": i }, g);
+    t.textContent = cut;
+    markTip(t, `${name} \u2014 ${printable2(total[i] * unit, fmt)}`);
+  }
+}
+
+// src/chart/defs.ts
+var FADE_TOP = 0.38;
+var FADE_BOTTOM = 0.02;
+function fillGradient(svg, color, ns = "") {
+  const id = "ocg" + ns + color.replace(/[^0-9a-fA-F]/g, "").toLowerCase();
+  let defs = svg.querySelector("defs");
+  if (!defs) {
+    defs = document.createElementNS(SVG_NS, "defs");
+    svg.insertBefore(defs, svg.firstChild);
+  }
+  if (!defs.querySelector("#" + id)) {
+    const g = svgEl2("linearGradient", { id, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    svgEl2("stop", { offset: 0, "stop-color": color, "stop-opacity": FADE_TOP }, g);
+    svgEl2("stop", { offset: 1, "stop-color": color, "stop-opacity": FADE_BOTTOM }, g);
+  }
+  return `url(#${id})`;
+}
+
+// src/chart/funnel.ts
+var LABEL_GUTTER = 150;
+var GAP2 = 4;
+var NAME_FONT3 = 10;
+var EDGE_PAD = 4;
+function fitStageLabel(name, value, avail) {
+  const tail = ` \u2014 ${value}`;
+  const tailW = estTextWidth(tail, NAME_FONT3);
+  if (estTextWidth(name, NAME_FONT3) + tailW <= avail) return name + tail;
+  const room = avail - tailW - estTextWidth("\u2026", NAME_FONT3);
+  const kept = room > 0 ? fitPrefix(name, NAME_FONT3, room) : "";
+  return kept ? kept + "\u2026" + tail : String(value);
+}
+function renderFunnel(svg, data, w, lay) {
+  const values = (data.series[0]?.values ?? []).map((v) => v > 0 ? v : 0);
+  const n = Math.max(1, values.length);
+  const plotW = w - lay.mL - lay.mR;
+  const bodyW = Math.max(80, plotW - LABEL_GUTTER);
+  const cx = lay.mL + bodyW / 2;
+  const peak = Math.max(data.yMax ?? 0, ...values, 0) || 1;
+  const labelX = lay.mL + bodyW + 10;
+  const avail = Math.max(0, w - labelX - EDGE_PAD);
+  const bandH = (lay.plotH - GAP2 * (n - 1)) / n;
+  const half = (v) => Math.max(bodyW / 2 * (v / peak), 0.5);
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  values.forEach((v, i) => {
+    const y0 = lay.mT + i * (bandH + GAP2);
+    const y1 = y0 + bandH;
+    const hTop = half(v);
+    const hBot = half(i + 1 < values.length ? values[i + 1] : v);
+    const color = sliceColor(data, i);
+    const band = svgEl2(
+      "path",
+      {
+        d: `M ${cx - hTop} ${y0} L ${cx + hTop} ${y0} L ${cx + hBot} ${y1} L ${cx - hBot} ${y1} Z`,
+        fill: color,
+        "data-label": i,
+        "data-stage": i
+      },
+      g
+    );
+    markTip(band, `${data.labels[i] ?? ""} \u2014 ${v}`);
+    const t = svgEl2("text", { x: labelX, y: (y0 + y1) / 2 + 3.5, "text-anchor": "start", class: "o-chart-name" }, g);
+    t.textContent = fitStageLabel(data.labels[i] ?? "", v, avail);
+  });
+}
+
+// src/chart/polar.ts
+function polarBox(w, lay, pad3) {
+  return {
+    cx: w / 2,
+    cy: lay.mT + lay.plotH / 2,
+    r: Math.max(10, Math.min(w - lay.mL - lay.mR, lay.plotH) / 2 - pad3)
+  };
+}
+var spokeAngle = (i, n) => TOP + FULL_TURN * i / (n || 1);
+function polarGrid(svg, box, spokes, rings, ringLabel2, web, namePad = 12) {
+  const n = spokes.length;
+  for (let k = 1; k <= rings; k++) {
+    const rr = box.r * k / rings;
+    if (web && n >= 3) {
+      const pts = spokes.map((_s, i) => {
+        const p = polarPt(box.cx, box.cy, rr, spokeAngle(i, n));
+        return `${p.x},${p.y}`;
+      });
+      svgEl2("polygon", { points: pts.join(" "), fill: "none", class: "o-chart-grid" }, svg);
+    } else {
+      svgEl2("circle", { cx: box.cx, cy: box.cy, r: rr, fill: "none", class: "o-chart-grid" }, svg);
+    }
+  }
+  spokes.forEach((name, i) => {
+    const a = spokeAngle(i, n);
+    const tip = polarPt(box.cx, box.cy, box.r, a);
+    svgEl2("line", { x1: box.cx, y1: box.cy, x2: tip.x, y2: tip.y, class: "o-chart-grid" }, svg);
+    const lp = polarPt(box.cx, box.cy, box.r + namePad, a);
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const t = svgEl2(
+      "text",
+      {
+        x: lp.x,
+        y: lp.y + (sin > 0.4 ? 9 : sin < -0.4 ? -2 : 4),
+        "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle",
+        class: "o-chart-tick"
+      },
+      svg
+    );
+    t.textContent = name;
+  });
+  for (let k = 1; k <= rings; k++) {
+    const t = svgEl2(
+      "text",
+      { x: box.cx + 4, y: box.cy - box.r * k / rings + 4, "text-anchor": "start", class: "o-chart-tick" },
+      svg
+    );
+    t.textContent = ringLabel2(k);
+  }
+}
+
+// src/chart/gauge.ts
+var A0 = 150 * Math.PI / 180;
+var SPAN = 240 * Math.PI / 180;
+var BAND2 = 16;
+var TICKS = 5;
+var tidy2 = (n) => Math.round(n * 100) / 100;
+function gaugeRange(data) {
+  return {
+    value: data.series[0]?.values[0] ?? 0,
+    min: data.gaugeMin ?? 0,
+    max: data.gaugeMax ?? 100
+  };
+}
+function renderGauge(svg, data, w, lay) {
+  const { value, min, max } = gaugeRange(data);
+  const box = polarBox(w, lay, 26);
+  const frac = Math.min(1, Math.max(0, (value - min) / (max - min || 1)));
+  const color = data.series[0]?.color ?? CHART_PALETTE[0];
+  const unit = data.unit ?? "";
+  const rIn = box.r - BAND2;
+  svgEl2("path", { d: arcPath(box.cx, box.cy, rIn, box.r, A0, A0 + SPAN), class: "o-chart-track" }, svg);
+  for (let k = 0; k <= TICKS; k++) {
+    const a = A0 + SPAN * k / TICKS;
+    const p1 = polarPt(box.cx, box.cy, rIn - 2, a);
+    const p2 = polarPt(box.cx, box.cy, rIn - 9, a);
+    svgEl2("line", { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, class: "o-chart-grid" }, svg);
+    const lp = polarPt(box.cx, box.cy, rIn - 20, a);
+    const cos = Math.cos(a);
+    const t2 = svgEl2(
+      "text",
+      { x: lp.x, y: lp.y + 4, "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle", class: "o-chart-tick" },
+      svg
+    );
+    t2.textContent = String(tidy2(min + (max - min) * k / TICKS));
+  }
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  if (frac > 0) {
+    const arc = svgEl2("path", { d: arcPath(box.cx, box.cy, rIn, box.r, A0, A0 + SPAN * frac), fill: color, "data-gauge": "progress" }, g);
+    markTip(arc, `${data.labels[0] ?? ""} \u2014 ${tidy2(value)}${unit}`);
+  }
+  const tip = polarPt(box.cx, box.cy, box.r * 0.62, A0 + SPAN * frac);
+  svgEl2(
+    "line",
+    { x1: box.cx, y1: box.cy, x2: tip.x, y2: tip.y, "stroke-width": 4, "stroke-linecap": "round", class: "o-chart-needle", "data-gauge": "needle" },
+    g
+  );
+  svgEl2("circle", { cx: box.cx, cy: box.cy, r: 5, class: "o-chart-needle" }, g);
+  const t = svgEl2("text", { x: box.cx, y: box.cy + 48, "text-anchor": "middle", class: "o-chart-centre" }, g);
+  t.textContent = tidy2(value) + unit;
+  const name = data.labels[0] ?? "";
+  if (name) {
+    const c = svgEl2("text", { x: box.cx, y: box.cy + 68, "text-anchor": "middle", class: "o-chart-sub" }, g);
+    c.textContent = name;
+  }
+}
+
+// src/chart/heatmap.ts
+var VAL_FONT = 10;
+var VAL_PAD = 3;
+var NAME_FONT4 = 10;
+var NAME_GAP = 8;
+function renderHeatmap(svg, data, w, lay) {
+  const plotW = w - lay.mL - lay.mR;
+  const cols = Math.max(1, data.labels.length);
+  const rows = Math.max(1, data.series.length);
+  const cellW = plotW / cols;
+  const cellH = lay.plotH / rows;
+  const peak = Math.max(0, ...data.series.flatMap((s2) => s2.values));
+  const hi2 = extendMax(peak, data.yMax) || 1;
+  const fmt = scaleFormat(hi2);
+  const nameAvail = Math.max(0, lay.mL - NAME_GAP - (data.yTitle ? 24 : 4));
+  xLabels(svg, data.labels, plotW, lay);
+  axisTitles(svg, data, plotW, lay);
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  data.series.forEach((s2, ri) => {
+    const y = lay.mT + cellH * ri;
+    data.labels.forEach((_l, ci) => {
+      const v = s2.values[ci] ?? 0;
+      const fill = rampColor(v / hi2);
+      const x = lay.mL + cellW * ci;
+      const cell = svgEl2("rect", { x, y, width: cellW, height: cellH, fill, "data-series": ri, "data-label": ci }, g);
+      markTip(cell, `${s2.name} \u2014 ${data.labels[ci] ?? ""} \u2014 ${fmt(v)}`);
+      const txt = fmt(v);
+      if (estTextWidth(txt, VAL_FONT) + VAL_PAD * 2 <= cellW) {
+        const t = svgEl2(
+          "text",
+          {
+            x: x + cellW / 2,
+            y: y + cellH / 2 + VAL_FONT * 0.35,
+            "text-anchor": "middle",
+            class: "o-chart-cellvalue",
+            fill: inkOn(fill)
+          },
+          g
+        );
+        t.textContent = txt;
+      }
+    });
+    const nm = svgEl2(
+      "text",
+      { x: lay.mL - NAME_GAP, y: y + cellH / 2 + 3.5, "text-anchor": "end", class: "o-chart-name" },
+      g
+    );
+    nm.textContent = fitPrefix(s2.name, NAME_FONT4, nameAvail);
+  });
+  scaleLegend(g, lay.mL + plotW + LEGEND_GAP, lay.mT, lay.plotH, 0, hi2, fmt);
+}
+
+// src/chart/hexbin.ts
+var SQRT3 = Math.sqrt(3);
+var DEFAULT_HEX_BINS = 20;
+var VAL_FONT2 = 10;
+var VAL_PAD2 = 2;
+var MAX_INSET = 0.42;
+var PAD_TRIES = 12;
+var tidy3 = (n) => Math.round(n * 100) / 100;
+function hexRound(q, r) {
+  const x = q;
+  const z = r;
+  const y = -x - z;
+  let rx = Math.round(x);
+  let ry = Math.round(y);
+  let rz = Math.round(z);
+  const dx = Math.abs(rx - x);
+  const dy = Math.abs(ry - y);
+  const dz = Math.abs(rz - z);
+  if (dx > dy && dx > dz) rx = -ry - rz;
+  else if (dy > dz) ry = -rx - rz;
+  else rz = -rx - ry;
+  return [rx === 0 ? 0 : rx, rz === 0 ? 0 : rz];
+}
+var hexAxial = (px, py, R2) => [
+  (SQRT3 / 3 * px - 1 / 3 * py) / R2,
+  2 / 3 * py / R2
+];
+var hexCentre = (q, r, R2) => [SQRT3 * R2 * (q + r / 2), 1.5 * R2 * r];
+function binPoints(pxs, pys, R2) {
+  const cells = /* @__PURE__ */ new Map();
+  const n = Math.min(pxs.length, pys.length);
+  for (let i = 0; i < n; i++) {
+    const [fq, fr] = hexAxial(pxs[i], pys[i], R2);
+    const [q, r] = hexRound(fq, fr);
+    const key = q + "," + r;
+    const c = cells.get(key);
+    if (c) c.count++;
+    else cells.set(key, { q, r, count: 1 });
+  }
+  return [...cells.values()].sort((a, b) => a.r - b.r || a.q - b.q);
+}
+function hexPoints(cx, cy, R2) {
+  const out = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (30 + 60 * i) * Math.PI / 180;
+    out.push(`${tidy3(cx + R2 * Math.cos(a))},${tidy3(cy + R2 * Math.sin(a))}`);
+  }
+  return out.join(" ");
+}
+var cap = (v) => Math.max(-SPAN_CAP, Math.min(SPAN_CAP, v));
+function padded(lo2, hi2, p0, p1, want) {
+  const px = Math.abs(p1 - p0);
+  const dir = p1 >= p0 ? 1 : -1;
+  const target = Math.min(want, px * MAX_INSET);
+  const clear = (s2) => Math.min((s2.at(lo2) - p0) * dir, (p1 - s2.at(hi2)) * dir);
+  let best = numScale(lo2, hi2, p0, p1);
+  let bLo = lo2;
+  let bHi = hi2;
+  let pad3 = target / px * (best.max - best.min);
+  for (let i = 0; i < PAD_TRIES && clear(best) < target; i++) {
+    const l = cap(lo2 - pad3);
+    const h = cap(hi2 + pad3);
+    const s2 = numScale(l, h, p0, p1);
+    if (clear(s2) > clear(best)) {
+      best = s2;
+      bLo = l;
+      bHi = h;
+    }
+    pad3 = Math.min(pad3 * 2, SPAN_CAP);
+  }
+  let inset = target - clear(best);
+  for (let i = 0; i < PAD_TRIES && clear(best) < target; i++) {
+    const held = Math.min(inset, px * MAX_INSET);
+    const s2 = numScale(bLo, bHi, p0 + held * dir, p1 - held * dir);
+    if (clear(s2) > clear(best)) best = s2;
+    if (held >= px * MAX_INSET) break;
+    inset *= 2;
+  }
+  return best;
+}
+function renderHexbin(svg, data, w, lay) {
+  const plotW = w - lay.mL - lay.mR;
+  const bins = data.hexBins ?? DEFAULT_HEX_BINS;
+  const R2 = plotW / (SQRT3 * bins);
+  const pxs = [];
+  const pys = [];
+  for (const s2 of data.series) {
+    const xs = s2.xs ?? [];
+    for (let i = 0; i < xs.length; i++) {
+      const y = s2.values[i];
+      if (typeof y === "number" && Number.isFinite(y) && Number.isFinite(xs[i])) {
+        pxs.push(cap(xs[i]));
+        pys.push(cap(y));
+      }
+    }
+  }
+  const lo2 = (a) => a.length ? a.reduce((m, v) => v < m ? v : m, a[0]) : 0;
+  const hi2 = (a) => a.length ? a.reduce((m, v) => v > m ? v : m, a[0]) : 1;
+  const yTop = cap(data.yMax != null ? Math.max(data.yMax, hi2(pys)) : hi2(pys));
+  const sx = padded(lo2(pxs), hi2(pxs), lay.mL, lay.mL + plotW, 2 * R2);
+  const sy = padded(lo2(pys), yTop, lay.mT + lay.plotH, lay.mT, 2 * R2);
+  numericAxes(svg, sx, sy, lay, plotW);
+  axisTitles(svg, data, plotW, lay);
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  const ax = lay.mL + plotW / 2;
+  const ay = lay.mT + lay.plotH / 2;
+  const cells = binPoints(
+    pxs.map((v) => sx.at(v) - ax),
+    pys.map((v) => sy.at(v) - ay),
+    R2
+  );
+  const peak = cells.reduce((m, c) => c.count > m ? c.count : m, 0);
+  for (const c of cells) {
+    const [qx, qy] = hexCentre(c.q, c.r, R2);
+    const cx = qx + ax;
+    const cy = qy + ay;
+    const fill = rampColor(c.count / (peak || 1));
+    const hex3 = svgEl2("polygon", { points: hexPoints(cx, cy, R2), fill, class: "o-chart-hexedge", "data-count": c.count }, g);
+    markTip(hex3, String(c.count));
+    if (data.showValues) {
+      const txt = String(c.count);
+      if (R2 >= VAL_FONT2 && estTextWidth(txt, VAL_FONT2) + VAL_PAD2 * 2 <= SQRT3 * R2) {
+        const t = svgEl2(
+          "text",
+          { x: tidy3(cx), y: tidy3(cy + VAL_FONT2 * 0.35), "text-anchor": "middle", class: "o-chart-cellvalue", fill: inkOn(fill) },
+          g
+        );
+        t.textContent = txt;
+      }
+    }
+  }
+  scaleLegend(g, lay.mL + plotW + LEGEND_GAP, lay.mT, lay.plotH, 0, peak, (v) => String(v), Math.round);
+}
+
+// src/chart/pareto.ts
+var PARETO_AXIS_W = 34;
+var paretoColor = (data) => altColor(data.series[0]?.color ?? "", 3);
+var PARETO_LEGEND = "Cumulative %";
+function renderPareto(svg, data, lay, plotW) {
+  const values = (data.series[0]?.values ?? []).map((v) => Math.max(0, v));
+  const total = values.reduce((a, b) => a + b, 0);
+  if (total <= 0) return;
+  const color = paretoColor(data);
+  const at = rightValueAxis(svg, lay, plotW, 0, 100, color, "%");
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  svg.querySelectorAll("rect[data-label]").forEach((r) => {
+    const i = Number(r.getAttribute("data-label"));
+    markTip(r, `${data.labels[i] ?? ""} \u2014 ${data.series[0]?.values[i] ?? 0}`);
+  });
+  const groupW = plotW / data.labels.length;
+  let run = 0;
+  const pts = data.labels.map((_l, i) => {
+    run += values[i] ?? 0;
+    return { x: lay.mL + groupW * (i + 0.5), y: at(run / total * 100), pct: run / total * 100 };
+  });
+  svgEl2(
+    "polyline",
+    {
+      points: pts.map((p) => `${p.x},${p.y}`).join(" "),
+      fill: "none",
+      stroke: color,
+      "stroke-width": 2.5,
+      "stroke-linejoin": "round",
+      "data-pareto": "cumulative"
+    },
+    g
+  );
+  pts.forEach((p, i) => {
+    const c = svgEl2("circle", { cx: p.x, cy: p.y, r: 3.5, fill: color, "data-label": i }, g);
+    markTip(c, `${data.labels[i] ?? ""} \u2014 cumulative ${Math.round(p.pct * 10) / 10}%`);
+    if (data.showValues) {
+      const t = svgEl2("text", { x: p.x, y: p.y - 7, "text-anchor": "middle", class: "o-chart-datalabel" }, g);
+      t.textContent = `${Math.round(p.pct * 10) / 10}%`;
+    }
+  });
+}
+
+// src/chart/pie.ts
+var DONUT_RATIO = 0.58;
+var NAME_FONT5 = 10;
+var NAME_PAD = 3;
+var LABEL_R = 0.62;
+var MIN_BAND = NAME_FONT5 + 2;
+var GLYPH_UP = NAME_FONT5 * 1.15 - 3.5;
+var GLYPH_DN = NAME_FONT5 * 0.35 + 3.5;
+var GEO_EPS = 1e-9;
+function inWedge(x, y, a0, a12, rIn, rOut) {
+  const rad = Math.hypot(x, y);
+  if (rad < rIn - GEO_EPS || rad > rOut + GEO_EPS) return false;
+  const span2 = a12 - a0;
+  if (span2 >= FULL_TURN - GEO_EPS) return true;
+  let d = Math.atan2(y, x) - a0;
+  d -= Math.floor(d / FULL_TURN) * FULL_TURN;
+  return d <= span2 + GEO_EPS;
+}
+function halfRuns(x, y, a0, a12, rIn, rOut) {
+  if (!inWedge(x, y, a0, a12, rIn, rOut)) return { l: 0, r: 0 };
+  const xs = [];
+  const arc = (rad) => {
+    const dx2 = rad * rad - y * y;
+    if (dx2 >= 0) {
+      const dx = Math.sqrt(dx2);
+      xs.push(-dx, dx);
+    }
+  };
+  arc(rOut);
+  if (rIn > 0) arc(rIn);
+  for (const a of [a0, a12]) {
+    const sy = Math.sin(a);
+    if (Math.abs(sy) < GEO_EPS) continue;
+    const t = y / sy;
+    if (t >= rIn - GEO_EPS && t <= rOut + GEO_EPS) xs.push(t * Math.cos(a));
+  }
+  let l = Infinity;
+  let r = Infinity;
+  for (const c of xs) {
+    if (c <= x) l = Math.min(l, x - c);
+    else r = Math.min(r, c - x);
+  }
+  return { l: Number.isFinite(l) ? l : 0, r: Number.isFinite(r) ? r : 0 };
+}
+function horizRun(a0, a12, rIn, rOut, rLab) {
+  const p = polarPt(0, 0, rLab, (a0 + a12) / 2);
+  const ys = [p.y - GLYPH_UP, p.y, p.y + GLYPH_DN];
+  if (p.y - GLYPH_UP < 0 && p.y + GLYPH_DN > 0) ys.push(0);
+  let l = Infinity;
+  let r = Infinity;
+  for (const y of ys) {
+    const run = halfRuns(p.x, y, a0, a12, rIn, rOut);
+    l = Math.min(l, run.l);
+    r = Math.min(r, run.r);
+  }
+  return { l, r };
+}
+function sliceLabel(name, a0, a12, rIn, rOut) {
+  const NONE = { text: "", dx: 0 };
+  const band = rOut - rIn;
+  if (name.length === 0 || band < MIN_BAND) return NONE;
+  const rLab = rIn + band * LABEL_R;
+  const chord = 2 * rLab * Math.sin(Math.min(Math.abs(a12 - a0), Math.PI) / 2);
+  const run = horizRun(a0, a12, rIn, rOut, rLab);
+  const room = Math.min(chord, run.l + run.r) - NAME_PAD * 2;
+  if (room <= 0) return NONE;
+  let text = fitPrefix(name, NAME_FONT5, room);
+  if (text !== name) {
+    const shown = fitPrefix(name, NAME_FONT5, room - estTextWidth("\u2026", NAME_FONT5));
+    if (shown.length < 2) return NONE;
+    text = shown + "\u2026";
+  }
+  const half = estTextWidth(text, NAME_FONT5) / 2;
+  const lo2 = half + NAME_PAD - run.l;
+  const hi2 = run.r - NAME_PAD - half;
+  return { text, dx: lo2 > 0 ? lo2 : hi2 < 0 ? hi2 : 0 };
+}
+function renderPie(svg, data, w, lay) {
+  const values = data.series[0]?.values ?? [];
+  const total = values.reduce((a, b) => a + b, 0);
+  const cx = w / 2;
+  const cy = lay.mT + lay.plotH / 2;
+  const r = Math.min(w - lay.mL - lay.mR, lay.plotH) / 2 - 4;
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  if (total <= 0) {
+    svgEl2("circle", { cx, cy, r, fill: "none", stroke: "#ccc", "stroke-width": 1.5 }, g);
+    return;
+  }
+  const rose = data.rose === true;
+  const donut = data.donut === true;
+  const rIn = donut ? r * DONUT_RATIO : 0;
+  const n = values.length;
+  const peak = rose ? values.reduce((a, b) => b > a ? b : a, 0) : 0;
+  let angle = TOP;
+  values.forEach((v, i) => {
+    const frac = rose ? 1 / n : v / total;
+    const a2 = angle + frac * FULL_TURN;
+    if (v > 0) {
+      const color = sliceColor(data, i);
+      const rOut = rose ? areaRadius(v / (peak || 1), rIn, r) : r;
+      if (!rose && rIn <= 0 && frac >= 0.999999) {
+        const disc = svgEl2("circle", { cx, cy, r, fill: color, "data-label": i }, g);
+        markTip(disc, `${data.labels[i] ?? ""} \u2014 ${String(v)} (${Math.round(v / total * 100)}%)`);
+      } else {
+        const wedge = svgEl2("path", { d: arcPath(cx, cy, rIn, rOut, angle, a2), fill: color, "data-label": i }, g);
+        markTip(wedge, `${data.labels[i] ?? ""} \u2014 ${String(v)} (${Math.round(v / total * 100)}%)`);
+      }
+      if ((rose || donut) && data.showValues) {
+        const lp = polarPt(cx, cy, rOut + 11, angle + (a2 - angle) / 2);
+        const cos = Math.cos(angle + (a2 - angle) / 2);
+        const t = svgEl2(
+          "text",
+          { x: lp.x, y: lp.y + 3.5, "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : "middle", class: "o-chart-datalabel" },
+          g
+        );
+        t.textContent = String(v);
+      }
+      if (data.pieLabels) {
+        const rLab = rIn + (rOut - rIn) * LABEL_R;
+        const shown = sliceLabel(data.labels[i] ?? "", angle, a2, rIn, rOut);
+        if (shown.text) {
+          const lp = polarPt(cx, cy, rLab, angle + (a2 - angle) / 2);
+          const t = svgEl2(
+            // the ink beats `.o-chart-name`'s own fill only as an attribute — see the header
+            "text",
+            { x: lp.x + shown.dx, y: lp.y + 3.5, "text-anchor": "middle", fill: inkOn(color), class: "o-chart-name", "data-label": i },
+            g
+          );
+          t.textContent = shown.text;
+        }
+      }
+    }
+    angle = a2;
+  });
+  if (donut) {
+    const t = svgEl2("text", { x: cx, y: cy + 4, "text-anchor": "middle", class: "o-chart-centre" }, g);
+    t.textContent = String(Math.round(total * 100) / 100);
+    const name = data.series[0]?.name ?? "";
+    if (name) {
+      const c = svgEl2("text", { x: cx, y: cy + 22, "text-anchor": "middle", class: "o-chart-sub" }, g);
+      c.textContent = name;
+    }
+  }
+}
+
+// src/chart/radar.ts
+var RINGS = 4;
+var FILL = 0.18;
+var LABEL_OUT = 14;
+var VALUE_FONT = 10;
+var NAME_GAP2 = 8;
+var BASE_NAME_PAD = 12;
+var RING_GUTTER = 4;
+var tidy4 = (n) => Math.round(n * 100) / 100;
+function spokeMaxes(data) {
+  const shared = data.yMax ?? niceMax(Math.max(0, ...data.series.flatMap((s2) => s2.values)));
+  return data.labels.map((_l, i) => {
+    const m = data.maxes?.[i];
+    return typeof m === "number" && m > 0 ? m : shared;
+  });
+}
+function renderRadar(svg, data, w, lay) {
+  const n = data.labels.length;
+  const widest = data.showValues ? data.series.reduce(
+    (mx, s2) => data.labels.reduce((m, _l, i) => Math.max(m, estTextWidth(String(s2.values[i] ?? 0), VALUE_FONT)), mx),
+    0
+  ) : 0;
+  const MAX_EXTRA = 26;
+  const wanted = LABEL_OUT + widest + NAME_GAP2;
+  const namePad = data.showValues ? BASE_NAME_PAD + Math.min(wanted, MAX_EXTRA) : BASE_NAME_PAD;
+  const box = polarBox(w, lay, 34 + (namePad - BASE_NAME_PAD));
+  const maxes = spokeMaxes(data);
+  const uniform = maxes.every((m) => m === maxes[0]);
+  const spokes = uniform ? data.labels : data.labels.map((l, i) => `${l} /${tidy4(maxes[i])}`);
+  polarGrid(svg, box, spokes, RINGS, (k) => uniform ? String(tidy4(maxes[0] * k / RINGS)) : `${100 * k / RINGS}%`, true, namePad);
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  data.series.forEach((s2, si) => {
+    const rs = data.labels.map((_l, i) => box.r * Math.min(1, Math.max(0, (s2.values[i] ?? 0) / (maxes[i] || 1))));
+    const pts = rs.map((r, i) => polarPt(box.cx, box.cy, r, spokeAngle(i, n)));
+    svgEl2(
+      "polygon",
+      {
+        points: pts.map((p) => `${p.x},${p.y}`).join(" "),
+        fill: s2.color,
+        "fill-opacity": FILL,
+        stroke: s2.color,
+        "stroke-width": 2.5,
+        "stroke-linejoin": "round",
+        "data-series": si
+      },
+      g
+    );
+    pts.forEach((p, i) => {
+      const c = svgEl2("circle", { cx: p.x, cy: p.y, r: 3, fill: s2.color, "data-label": i }, g);
+      markTip(c, `${data.labels[i] ?? ""} \u2014 ${String(s2.values[i] ?? 0)}`);
+    });
+    if (data.showValues) {
+      rs.forEach((r, i) => {
+        const a = spokeAngle(i, n);
+        const lp = polarPt(box.cx, box.cy, r + LABEL_OUT, a);
+        const cos = Math.cos(a);
+        const upright = Math.abs(cos) <= 0.2 && Math.sin(a) < 0;
+        const t = svgEl2(
+          "text",
+          {
+            x: upright ? lp.x - RING_GUTTER : lp.x,
+            y: lp.y + 3.5,
+            "text-anchor": cos > 0.2 ? "start" : cos < -0.2 ? "end" : upright ? "end" : "middle",
+            class: "o-chart-datalabel"
+          },
+          g
+        );
+        t.textContent = String(s2.values[i] ?? 0);
+      });
+    }
+  });
+}
+
+// src/chart/radial.ts
+var RINGS2 = 4;
+var FILL_RATIO = 0.7;
+var NAME_FONT6 = 11;
+var NAME_GAP3 = 12;
+var tidy5 = (n) => Math.round(n * 100) / 100;
+function renderRadialBar(svg, data, w, lay) {
+  const values = (data.series[0]?.values ?? []).map((v) => v > 0 ? v : 0);
+  const n = Math.max(1, data.labels.length);
+  const box = polarBox(w, lay, 30);
+  const peak = Math.max(data.yMax ?? 0, niceMax(Math.max(0, ...values))) || 1;
+  const spokes = data.showValues ? data.labels.map((l, i) => {
+    const tail = ` \u2014 ${values[i] ?? 0}`;
+    const avail = w - (box.cx + box.r + NAME_GAP3) - 4 - estTextWidth(tail, NAME_FONT6);
+    return fitPrefix(l, NAME_FONT6, Math.max(0, avail)) + tail;
+  }) : data.labels;
+  polarGrid(svg, box, spokes, RINGS2, (k) => String(tidy5(peak * k / RINGS2)), false);
+  const g = svgEl2("g", { class: "o-chart-marks" }, svg);
+  const halfW = FULL_TURN / n * FILL_RATIO / 2;
+  values.forEach((v, i) => {
+    const a = spokeAngle(i, n);
+    const rr = box.r * (v / peak);
+    if (rr <= 0) return;
+    const color = sliceColor(data, i);
+    const sector = svgEl2(
+      "path",
+      {
+        d: arcPath(box.cx, box.cy, 0, rr, a - halfW, a + halfW),
+        fill: color,
+        stroke: color,
+        "stroke-width": 2,
+        "stroke-linejoin": "round",
+        "data-label": i
+      },
+      g
+    );
+    markTip(sector, `${data.labels[i] ?? ""} \u2014 ${String(v)}`);
+  });
 }
 
 // src/chart/scatter.ts
@@ -5803,8 +6256,9 @@ function renderScatter(svg, data, w, lay) {
       const r = sizes ? Math.max(R_MIN, R_MAX * Math.sqrt(Math.max(0, sizes[i] ?? 0) / (szMax || 1))) : q ? R_QUAD : R_DOT;
       const attrs = { cx, cy, r, fill: s2.color, "data-series": si, "data-label": i };
       if (sizes) attrs["fill-opacity"] = 0.72;
-      svgEl2("circle", attrs, g);
+      const pt = svgEl2("circle", attrs, g);
       const name = s2.pointLabels?.[i];
+      markTip(pt, `${s2.name ? `${s2.name}: ` : ""}${x} \u2014 ${s2.values[i] ?? 0}${name ? ` \u2014 ${name}` : ""}`);
       if (name) {
         const t = svgEl2("text", { x: cx, y: cy - r - 4, "text-anchor": "middle", class: "o-chart-datalabel" }, g);
         t.textContent = name;
@@ -5938,11 +6392,14 @@ function renderStream(svg, data, w, lay, ns) {
       curveBack(xs, by[si + 1], bm[si + 1]),
       "Z"
     ].join(" ");
-    svgEl2(
+    let best = 0;
+    for (let j = 1; j < K; j++) if (Tp[si][j] > Tp[si][best]) best = j;
+    const band = svgEl2(
       "path",
       { d, fill: fillGradient(svg, s2.color, ns), stroke: s2.color, "stroke-width": 1, "stroke-linejoin": "round", "data-series": si },
       g
     );
+    markTip(band, `${s2.name} \u2014 ${T[si][idx[best]]}`);
   });
   data.series.forEach((s2, si) => {
     let best = 0;
@@ -5961,13 +6418,13 @@ function renderStream(svg, data, w, lay, ns) {
 }
 
 // src/chart/treemap.ts
-var NAME_FONT6 = 10;
+var NAME_FONT7 = 10;
 var VAL_FONT3 = 10;
-var PAD2 = 3;
+var PAD3 = 3;
 var SIDE_CLEAR = 0.5;
 var ONE_LINE_H = 15;
 var TWO_LINE_H = 27;
-var GAP2 = 3;
+var GAP3 = 3;
 var RADIUS = 8;
 var TINT_STEP = 0.18;
 var TINT_MAX = 0.66;
@@ -6128,35 +6585,35 @@ function layoutTree(t, rect) {
   return cells;
 }
 function cellLabel(name, value, w, h) {
-  const room = w - PAD2 * 2;
+  const room = w - PAD3 * 2;
   if (room <= 0 || h < ONE_LINE_H || name.length === 0) return [];
-  const cut = fitPrefix(name, NAME_FONT6, room);
-  const shown = cut === name ? name : fitPrefix(name, NAME_FONT6, room - estTextWidth("\u2026", NAME_FONT6)) + "\u2026";
+  const cut = fitPrefix(name, NAME_FONT7, room);
+  const shown = cut === name ? name : fitPrefix(name, NAME_FONT7, room - estTextWidth("\u2026", NAME_FONT7)) + "\u2026";
   if (shown === "\u2026") return [];
   if (value.length > 0 && h >= TWO_LINE_H && estTextWidth(value, VAL_FONT3) <= room) return [shown, value];
   return [shown];
 }
-var printable2 = (v, fmt) => Number.isFinite(v) ? fmt(v) : "";
+var printable3 = (v, fmt) => Number.isFinite(v) ? fmt(v) : "";
 function drawLines(svg, lines, cx, cy, fill, idx) {
-  const top = cy - (lines.length - 1) * (NAME_FONT6 + 2) / 2 + NAME_FONT6 * 0.35;
+  const top = cy - (lines.length - 1) * (NAME_FONT7 + 2) / 2 + NAME_FONT7 * 0.35;
   const ink = [];
   lines.forEach((line, li) => {
-    const y = top + li * (NAME_FONT6 + 2);
+    const y = top + li * (NAME_FONT7 + 2);
     const t = svgEl2("text", { x: cx, y, "text-anchor": "middle", class: "o-chart-cellvalue", fill: inkOn(fill), "data-label": idx }, svg);
     t.textContent = line;
-    const half = estTextWidth(line, NAME_FONT6) / 2;
-    ink.push({ x: cx - half, y: y - NAME_FONT6 * INK_ASC, w: half * 2, h: NAME_FONT6 * (INK_ASC + INK_DESC) });
+    const half = estTextWidth(line, NAME_FONT7) / 2;
+    ink.push({ x: cx - half, y: y - NAME_FONT7 * INK_ASC, w: half * 2, h: NAME_FONT7 * (INK_ASC + INK_DESC) });
   });
   return ink;
 }
 var overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-function emptyFrame2(svg, r) {
+function emptyFrame3(svg, r) {
   svgEl2("rect", { x: r.x, y: r.y, width: r.w, height: r.h, fill: "none", stroke: "#ccc", "stroke-width": 1.5 }, svg);
 }
 function renderRects(svg, data, t, box) {
   const cells = layoutTree(t, box);
   if (cells.length === 0) {
-    emptyFrame2(svg, box);
+    emptyFrame3(svg, box);
     return;
   }
   const convex = data.convex === true;
@@ -6166,7 +6623,7 @@ function renderRects(svg, data, t, box) {
   const painted = [];
   for (const c of cells) {
     if (!c.self && t.kids[c.idx].length) continue;
-    const inset = convex ? GAP2 / 2 : 0;
+    const inset = convex ? GAP3 / 2 : 0;
     const w = c.w - inset * 2;
     const h = c.h - inset * 2;
     if (!(w > 0) || !(h > 0)) continue;
@@ -6176,31 +6633,33 @@ function renderRects(svg, data, t, box) {
     if (convex) attrs.rx = Math.min(RADIUS, w / 2, h / 2);
     else attrs.class = "o-chart-cellsep";
     attrs["data-label"] = c.idx;
-    svgEl2("rect", attrs, svg);
+    const rect = svgEl2("rect", attrs, svg);
+    markTip(rect, `${data.labels[c.idx] ?? ""} \u2014 ${printable3(figure * t.unit, fmt)}`);
     painted.push({ x: c.x + inset, y: c.y + inset, w, h, fill });
-    for (const b of drawLines(svg, cellLabel(data.labels[c.idx] ?? "", printable2(figure * t.unit, fmt), w, h), c.x + inset + w / 2, c.y + inset + h / 2, fill, c.idx)) {
+    for (const b of drawLines(svg, cellLabel(data.labels[c.idx] ?? "", printable3(figure * t.unit, fmt), w, h), c.x + inset + w / 2, c.y + inset + h / 2, fill, c.idx)) {
       taken.push(b);
     }
   }
   for (const c of cells) {
     if (c.self || t.kids[c.idx].length === 0) continue;
-    svgEl2("rect", { x: c.x, y: c.y, width: c.w, height: c.h, fill: "none", class: "o-chart-branch", "data-label": c.idx }, svg);
+    const branch = svgEl2("rect", { x: c.x, y: c.y, width: c.w, height: c.h, fill: "none", class: "o-chart-branch", "data-label": c.idx }, svg);
+    if (t.own[c.idx] > 0) markTip(branch, `${data.labels[c.idx] ?? ""} \u2014 ${printable3(t.total[c.idx] * t.unit, fmt)}`);
     const name = data.labels[c.idx] ?? "";
-    const room = c.w - PAD2 * 2;
+    const room = c.w - PAD3 * 2;
     if (name.length === 0 || room <= 0 || c.h < ONE_LINE_H) continue;
-    const cut = fitPrefix(name, NAME_FONT6, room);
-    const shown = cut === name ? name : fitPrefix(name, NAME_FONT6, room - estTextWidth("\u2026", NAME_FONT6)) + "\u2026";
+    const cut = fitPrefix(name, NAME_FONT7, room);
+    const shown = cut === name ? name : fitPrefix(name, NAME_FONT7, room - estTextWidth("\u2026", NAME_FONT7)) + "\u2026";
     if (shown === "\u2026") continue;
-    const figure = t.own[c.idx] > 0 ? printable2(t.total[c.idx] * t.unit, fmt) : "";
+    const figure = t.own[c.idx] > 0 ? printable3(t.total[c.idx] * t.unit, fmt) : "";
     const both = `${shown} ${figure}`;
-    const label = figure.length > 0 && cut === name && estTextWidth(both, NAME_FONT6) <= room ? both : shown;
-    const band = { x: c.x + PAD2, y: c.y + PAD2, w: estTextWidth(label, NAME_FONT6), h: NAME_FONT6 * (INK_ASC + INK_DESC) };
+    const label = figure.length > 0 && cut === name && estTextWidth(both, NAME_FONT7) <= room ? both : shown;
+    const band = { x: c.x + PAD3, y: c.y + PAD3, w: estTextWidth(label, NAME_FONT7), h: NAME_FONT7 * (INK_ASC + INK_DESC) };
     if (taken.some((o) => overlaps(band, o))) continue;
     const under = new Set(painted.filter((p) => overlaps(band, p)).map((p) => p.fill));
     if (under.size !== 1) continue;
     const t2 = svgEl2(
       "text",
-      { x: band.x, y: band.y + NAME_FONT6 * INK_ASC, "text-anchor": "start", class: "o-chart-cellvalue", fill: inkOn([...under][0]), "data-label": c.idx },
+      { x: band.x, y: band.y + NAME_FONT7 * INK_ASC, "text-anchor": "start", class: "o-chart-cellvalue", fill: inkOn([...under][0]), "data-label": c.idx },
       svg
     );
     t2.textContent = label;
@@ -6212,7 +6671,7 @@ function renderSun(svg, data, t, box) {
   const cy = box.y + box.h / 2;
   const rOut = Math.min(box.w, box.h) / 2 - 4;
   if (!(t.grand > 0) || !(rOut > 0)) {
-    emptyFrame2(svg, box);
+    emptyFrame3(svg, box);
     return;
   }
   const r0 = rOut * HOLE;
@@ -6226,8 +6685,9 @@ function renderSun(svg, data, t, box) {
     const d = arcPath(cx, cy, rIn, rHi, a0, a12);
     if (!d) return;
     const fill = t.color[i];
-    svgEl2("path", { d, fill, class: "o-chart-cellsep", "data-label": i }, svg);
-    ringLabel(svg, data.labels[i] ?? "", printable2(t.total[i] * t.unit, fmt), cx, cy, (rIn + rHi) / 2, ring, a0, a12, fill, i);
+    const wedgeEl = svgEl2("path", { d, fill, class: "o-chart-cellsep", "data-label": i }, svg);
+    markTip(wedgeEl, `${data.labels[i] ?? ""} \u2014 ${printable3(t.total[i] * t.unit, fmt)}`);
+    ringLabel(svg, data.labels[i] ?? "", printable3(t.total[i] * t.unit, fmt), cx, cy, (rIn + rHi) / 2, ring, a0, a12, fill, i);
     let a = a0;
     for (const k of t.kids[i]) {
       const span2 = t.total[k] / t.total[i] * (a12 - a0);
@@ -6246,23 +6706,23 @@ var INK_ASC = 0.7;
 var INK_DESC = 0.2;
 var INK_HALF = 0.6;
 function ringRoom(tangential, rMid, thickness, span2) {
-  const H = NAME_FONT6 * INK_HALF;
+  const H = NAME_FONT7 * INK_HALF;
   const rIn = rMid - thickness / 2;
   const rOut = rMid + thickness / 2;
   if (tangential) {
-    if (rMid - H < rIn + PAD2) return 0;
-    const far2 = rOut - PAD2 - H;
+    if (rMid - H < rIn + PAD3) return 0;
+    const far2 = rOut - PAD3 - H;
     if (!(far2 > rMid)) return 0;
     let half2 = Math.sqrt(far2 * far2 - rMid * rMid);
     const inner = rMid - H;
-    const halfSpan2 = span2 / 2 - PAD2 / inner;
+    const halfSpan2 = span2 / 2 - PAD3 / inner;
     if (!(halfSpan2 > 0)) return 0;
     if (halfSpan2 < Math.PI / 2) half2 = Math.min(half2, inner * Math.tan(halfSpan2));
     return half2 > 0 ? half2 * 2 : 0;
   }
-  let half = Math.min(rOut - PAD2 - rMid, rMid - (rIn + PAD2));
+  let half = Math.min(rOut - PAD3 - rMid, rMid - (rIn + PAD3));
   if (!(half > 0)) return 0;
-  const far = rOut - PAD2;
+  const far = rOut - PAD3;
   half = Math.min(half, Math.sqrt(Math.max(0, far * far - H * H)) - rMid);
   const halfSpan = span2 / 2;
   if (halfSpan < Math.PI / 2) half = Math.min(half, rMid - (H + SIDE_CLEAR) / Math.tan(halfSpan));
@@ -6280,11 +6740,11 @@ function ringLabel(svg, name, value, cx, cy, rMid, thickness, a0, a12, fill, idx
     room = ringRoom(tangential, rMid, thickness, span2);
   }
   if (room <= 0) return;
-  const cut = fitPrefix(name, NAME_FONT6, room);
-  const shown = cut === name ? name : fitPrefix(name, NAME_FONT6, room - estTextWidth("\u2026", NAME_FONT6)) + "\u2026";
+  const cut = fitPrefix(name, NAME_FONT7, room);
+  const shown = cut === name ? name : fitPrefix(name, NAME_FONT7, room - estTextWidth("\u2026", NAME_FONT7)) + "\u2026";
   if (shown === "\u2026") return;
   const both = `${shown} ${value}`;
-  const text = value.length > 0 && cut === name && estTextWidth(both, NAME_FONT6) <= room ? both : shown;
+  const text = value.length > 0 && cut === name && estTextWidth(both, NAME_FONT7) <= room ? both : shown;
   const mid = (a0 + a12) / 2;
   const p = polarPt(cx, cy, rMid, mid);
   let deg = mid * 180 / Math.PI + (tangential ? 90 : 0);
@@ -6293,7 +6753,7 @@ function ringLabel(svg, name, value, cx, cy, rMid, thickness, a0, a12, fill, idx
     "text",
     {
       x: p.x,
-      y: p.y + NAME_FONT6 * 0.35,
+      y: p.y + NAME_FONT7 * 0.35,
       "text-anchor": "middle",
       transform: `rotate(${deg} ${p.x} ${p.y})`,
       class: "o-chart-cellvalue",
@@ -6374,6 +6834,7 @@ function renderWaterfall(svg, data, w, lay) {
       g
     );
   }
+  let runAfter = 0;
   segs.forEach((sg, i) => {
     const cx = lay.mL + groupW * (i + 0.5);
     if (data.highlightIndex === i) {
@@ -6384,11 +6845,14 @@ function renderWaterfall(svg, data, w, lay) {
     const h = Math.abs(yB - yA);
     const hh = Math.max(h, 1);
     const top = Math.min(yA, yB) - (hh - h) / 2;
-    svgEl2(
+    const bar = svgEl2(
       "rect",
       { x: cx - barW / 2, y: top, width: barW, height: hh, rx: 2, fill: colors[kinds[i]], "data-series": 0, "data-label": i, "data-kind": kinds[i] },
       g
     );
+    runAfter += deltas[i];
+    const stepVal = Math.round((kinds[i] === "total" ? sg.to : deltas[i]) * 100) / 100;
+    markTip(bar, `${data.labels[i] ?? ""} \u2014 ${stepVal} (running ${Math.round(runAfter * 100) / 100})`);
     if (data.showValues) {
       const t = svgEl2("text", { x: cx, y: top - 4, "text-anchor": "middle", class: "o-chart-datalabel" }, g);
       t.textContent = String(Math.round((kinds[i] === "total" ? sg.to : deltas[i]) * 100) / 100);
@@ -6421,13 +6885,15 @@ function axisFree(data) {
   // axis anywhere on the picture for a title to name. The schema rejects xTitle/yTitle on it.
   data.type === "treemap" || // …and a SANKEY, whose columns LOOK like an axis and are not one: a column is a position in a
   // topological order, and the vertical extent is a stack of throughputs with no origin.
-  data.type === "sankey" || data.funnel === true || data.polar === true;
+  data.type === "sankey" || // …and a CHORD, whose nodes sit on a circle: the angle a node occupies is a share of the total,
+  // not a position on a scale, so there is no straight axis anywhere for a title to name.
+  data.type === "chord" || data.funnel === true || data.polar === true;
 }
 function isFixedWidth(data) {
   return axisFree(data);
 }
 function isPolarDisc(data) {
-  return data.type === "pie" || data.type === "radar" || data.type === "gauge" || data.type === "bar" && data.polar === true;
+  return data.type === "pie" || data.type === "radar" || data.type === "gauge" || data.type === "chord" || data.type === "bar" && data.polar === true;
 }
 function plotHeightOr(data, fallback) {
   const h = data.plotHeight;
@@ -6453,7 +6919,7 @@ function layout(data) {
     const plotH = Math.max(1, data.series.length) * HEAT_ROW_H;
     return { mL: mL2, mR: M.right + SCALE_LEGEND_W, mT, mB, chartH: mT + plotH + mB, plotH, horizontal: false };
   }
-  if (data.type === "treemap" || data.type === "sankey") {
+  if (data.type === "treemap" || data.type === "sankey" || data.type === "chord") {
     const m = M.right;
     const chartH2 = plotHeightOr(data, CHART_H - M.top - m) + mT + m;
     return { mL: m, mR: m, mT, mB: m, chartH: chartH2, plotH: chartH2 - mT - m, horizontal: false };
@@ -6472,7 +6938,7 @@ function viewWidth(data, lay) {
   if (data.type === "timeseries" || data.type === "scatter" || data.type === "heatmap") return TS_W;
   return chartWidth(data.labels.length);
 }
-var PRINT_COLUMN_H = 547;
+var PRINT_COLUMN_H = 604;
 function plotHeightBounds(data) {
   const lay = layout(data);
   const sheet = PRINT_COLUMN_H - lay.mT - lay.mB;
@@ -6531,6 +6997,7 @@ function normalizeChartData(raw) {
   if (d.type === "heatmap") return normalizeHeatmap(d);
   if (d.type === "treemap") return normalizeTreemap(d);
   if (d.type === "sankey") return normalizeSankey(d);
+  if (d.type === "chord") return normalizeChord(d);
   const type = d.type === "line" || d.type === "pie" || d.type === "waterfall" || d.type === "boxplot" || d.type === "radar" ? d.type : "bar";
   const signed = type === "waterfall" || type === "boxplot";
   const maxLabels = d.orientation === "horizontal" ? 60 : 24;
@@ -6843,6 +7310,76 @@ function normalizeSankey(d) {
     // 5/7 — see readPlotHeight
     ...readText(d)
     // 5/7 — see readText
+  };
+}
+function normalizeChord(d) {
+  const labels = (Array.isArray(d.labels) ? d.labels : []).map((l) => typeof l === "string" ? l : "").slice(0, CHORD_MAX_NODES);
+  if (labels.length === 0) labels.push("\u2014");
+  const n = labels.length;
+  const raw = Array.isArray(d.links) ? d.links : [];
+  const clean = [];
+  for (const l of raw) {
+    if (!l || typeof l !== "object" || Array.isArray(l)) continue;
+    const o = l;
+    const from = o.from;
+    const to = o.to;
+    const value = o.value;
+    if (typeof from !== "number" || !Number.isInteger(from) || from < 0 || from >= n) continue;
+    if (typeof to !== "number" || !Number.isInteger(to) || to < 0 || to >= n || to === from) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue;
+    clean.push({ from, to, value });
+  }
+  clean.sort((a, b) => a.from - b.from || a.to - b.to || a.value - b.value);
+  const capped = clean.slice(0, CHORD_MAX_LINKS);
+  const out = Array.from({ length: n }, () => []);
+  const links = [];
+  const reaches = (start, target) => {
+    const seen = new Array(n).fill(false);
+    const stack = [start];
+    seen[start] = true;
+    while (stack.length) {
+      const u = stack.pop();
+      if (u === target) return true;
+      for (const v of out[u]) {
+        if (!seen[v]) {
+          seen[v] = true;
+          stack.push(v);
+        }
+      }
+    }
+    return false;
+  };
+  for (const f of capped) {
+    if (reaches(f.to, f.from)) continue;
+    out[f.from].push(f.to);
+    links.push(f);
+  }
+  const s2 = Array.isArray(d.series) ? d.series[0] : null;
+  const str = (v) => typeof v === "string" && v.length > 0 ? v : void 0;
+  const title = str(d.title);
+  const subtitle = str(d.subtitle);
+  return {
+    type: "chord",
+    labels,
+    series: [
+      {
+        name: s2 && typeof s2.name === "string" ? s2.name : "Series 1",
+        color: s2 && typeof s2.color === "string" && HEX_RE3.test(s2.color) ? s2.color : CHART_PALETTE[0],
+        values: labels.map(() => 0)
+        // ballast — see the header
+      }
+    ],
+    /* Kept rather than nulled, and INERT, exactly as on a treemap/sankey: a chord has no value axis,
+       and chart/chord.ts reads nothing from it. Withhold the control, keep the value. */
+    yMax: typeof d.yMax === "number" && Number.isFinite(d.yMax) && d.yMax > 0 ? d.yMax : null,
+    ...title ? { title } : {},
+    ...subtitle ? { subtitle } : {},
+    // ALWAYS emitted on this type, empty array included: `links` is required by the schema
+    links,
+    // a chord DRAWS a swatch row keyed by node, so the switch is kept — see the header
+    ...readLegend(d) !== void 0 ? { legend: readLegend(d) } : {},
+    ...readPlotHeight(d) !== void 0 ? { plotHeight: readPlotHeight(d) } : {},
+    ...readText(d)
   };
 }
 function readQuadrant(raw) {
@@ -7281,6 +7818,7 @@ var CHART_PICTURES = /* @__PURE__ */ new Map([
   ["heatmap", renderHeatmap],
   ["treemap", renderTreemap],
   ["sankey", renderSankey],
+  ["chord", renderChord],
   ["waterfall", renderWaterfall],
   ["boxplot", renderBox],
   ["radar", renderRadar],
@@ -7318,6 +7856,7 @@ var KEYLESS_CHART_TYPES = /* @__PURE__ */ new Set(["gauge", "heatmap", "sankey"]
 function legendEntries(data) {
   if (KEYLESS_CHART_TYPES.has(data.type) || data.hexbin === true) return [];
   if (data.type === "treemap") return treemapLegend(data);
+  if (data.type === "chord") return data.labels.map((l, i) => ({ label: l, color: CHART_PALETTE[i % CHART_PALETTE.length] }));
   if (data.type === "pie" || data.funnel === true || data.polar === true) {
     return data.labels.map((l, i) => ({ label: l, color: sliceColor(data, i) }));
   }
@@ -7365,6 +7904,45 @@ function renderChart(figure, data, forPrint = false) {
   (CHART_PICTURES.get(data.type) ?? renderPie)(svg, data, w, lay, ns);
   if (data.legend === false) return;
   buildChartLegend(mount, data);
+  if (!forPrint) wireChartTooltip(figure);
+}
+var TOOLTIP_WIRED = /* @__PURE__ */ new WeakSet();
+function wireChartTooltip(figure) {
+  if (TOOLTIP_WIRED.has(figure)) return;
+  TOOLTIP_WIRED.add(figure);
+  const doc = figure.ownerDocument ?? globalThis.document;
+  if (!doc?.querySelector) return;
+  let tip = doc.querySelector(".o-ctip");
+  if (!tip) {
+    tip = doc.createElement("div");
+    tip.className = "o-ctip";
+    tip.setAttribute("aria-hidden", "true");
+    const style = doc.createElement("style");
+    style.textContent = ".o-ctip{position:fixed;z-index:2147483647;max-width:280px;padding:5px 9px;border-radius:6px;background:rgba(24,26,32,.94);color:#f2f3f5;font:500 12px/1.45 var(--font-body,system-ui,sans-serif);white-space:pre-line;pointer-events:none;opacity:0;transition:opacity .12s;box-shadow:0 2px 10px rgba(0,0,0,.35)}.o-ctip.on{opacity:1}";
+    doc.head.appendChild(style);
+    doc.body.appendChild(tip);
+  }
+  const figEl = figure;
+  figEl.addEventListener("mouseover", (ev) => {
+    const t = ev.target?.closest?.("[data-otip]");
+    if (!t) return;
+    if (tip) {
+      tip.textContent = t.getAttribute("data-otip") ?? "";
+      tip.classList.add("on");
+    }
+  });
+  figEl.addEventListener("mousemove", (ev) => {
+    if (!tip || !tip.classList.contains("on")) return;
+    const x = Math.min(ev.clientX + 14, doc.documentElement.clientWidth - tip.offsetWidth - 8);
+    const y = Math.max(8, ev.clientY - tip.offsetHeight - 12);
+    tip.style.left = `${Math.max(8, x)}px`;
+    tip.style.top = `${y}px`;
+  });
+  figEl.addEventListener("mouseout", (ev) => {
+    const from = ev.target;
+    const to = ev.relatedTarget;
+    if (from?.closest?.("[data-otip]") && !to?.closest?.("[data-otip]")) tip?.classList.remove("on");
+  });
 }
 function parseChartFigureData(figure) {
   const block = figure.querySelector('script[data-odata="chart"]');
@@ -7397,7 +7975,7 @@ function mountCharts(slide, forPrint = false) {
 // src/video.ts
 function normalizeVideoData(raw) {
   const d = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  const provider = VIDEO_PROVIDERS.includes(d.provider) ? d.provider : "link";
+  const provider = d.provider === "local" || VIDEO_PROVIDERS.includes(d.provider) ? d.provider : "link";
   return {
     provider,
     videoId: typeof d.videoId === "string" ? d.videoId : "",
@@ -7422,11 +8000,208 @@ function buildVideoIframe(data, embedUrl) {
   f.setAttribute("sandbox", "allow-scripts allow-same-origin allow-presentation allow-popups");
   return f;
 }
+function pageCanResolveRelativePath() {
+  const proto = typeof location !== "undefined" ? location.protocol : "";
+  return proto === "file:" || proto === "http:" || proto === "https:";
+}
+function buildLocalVideo(data, bytesMode) {
+  const v = document.createElement("video");
+  v.className = "o-vd-local";
+  v.setAttribute("controls", "");
+  v.setAttribute("preload", "metadata");
+  v.setAttribute("playsinline", "");
+  if (bytesMode) v.setAttribute("data-o-local-src", data.url);
+  else v.setAttribute("src", data.url);
+  if (data.title) v.setAttribute("title", data.title);
+  return v;
+}
+var SPOTLIGHT_CLASS = "o-vd-spot";
+var SPOTLIGHT_BUTTON_ATTR = "data-o-fs-btn";
+var videoSpotlight = null;
+function restoreNode(parent, node, next) {
+  if (next && next.parentNode === parent) parent.insertBefore(node, next);
+  else parent.appendChild(node);
+}
+function dismissVideoSpotlight() {
+  const s2 = videoSpotlight;
+  if (!s2) return;
+  videoSpotlight = null;
+  if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+    document.removeEventListener("keydown", s2.onKey, true);
+  }
+  s2.overlay.remove();
+  restoreNode(s2.parent, s2.video, s2.videoNext);
+  restoreNode(s2.parent, s2.button, s2.buttonNext);
+}
+function openVideoSpotlight(video, button) {
+  if (videoSpotlight) return;
+  const parent = video.parentElement;
+  if (!parent || typeof document === "undefined" || !document.body) return;
+  const overlay = document.createElement("div");
+  overlay.className = SPOTLIGHT_CLASS;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", video.getAttribute("title") || "Video");
+  const scrim = document.createElement("div");
+  scrim.className = "o-vd-spot-scrim";
+  const frame = document.createElement("div");
+  frame.className = "o-vd-spot-frame";
+  const onKey = (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    dismissVideoSpotlight();
+  };
+  const state = {
+    overlay,
+    video,
+    button,
+    parent,
+    videoNext: video.nextSibling,
+    buttonNext: button.nextSibling,
+    onKey
+  };
+  videoSpotlight = state;
+  scrim.addEventListener("click", dismissVideoSpotlight);
+  video.remove();
+  button.remove();
+  frame.appendChild(video);
+  frame.appendChild(button);
+  overlay.appendChild(scrim);
+  overlay.appendChild(frame);
+  document.body.appendChild(overlay);
+  document.addEventListener("keydown", onKey, true);
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      if (videoSpotlight === state) overlay.classList.add("on");
+    });
+  }
+}
+function fullscreenIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("stroke-linecap", "round");
+  svg.appendChild(path);
+  return svg;
+}
+function attachVideoSpotlight(mount, data) {
+  const video = mount.querySelector("video.o-vd-local");
+  if (!video) return;
+  video.setAttribute("controlslist", "nofullscreen");
+  video.controlsList?.add("nofullscreen");
+  const button = document.createElement("button");
+  button.setAttribute("type", "button");
+  button.className = "o-vd-fs-btn";
+  button.setAttribute(SPOTLIGHT_BUTTON_ATTR, "");
+  button.setAttribute("title", "Fullscreen");
+  button.setAttribute("aria-label", data.title ? `Fullscreen: ${data.title}` : "Fullscreen");
+  button.appendChild(fullscreenIcon());
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (videoSpotlight) dismissVideoSpotlight();
+    else openVideoSpotlight(video, button);
+  });
+  mount.appendChild(button);
+}
+function buildEmptyCard(data) {
+  const card = document.createElement("div");
+  card.className = "o-vd o-vd-empty";
+  span("o-vd-btn", "\u25B6", card);
+  span("o-vd-title", data.title || "No video link set", card);
+  span("o-vd-hint", "Open in Origami Folio to add one", card);
+  return card;
+}
+function buildLocalOfflineCard(data, hint) {
+  const card = document.createElement("div");
+  card.className = "o-vd o-vd-empty o-vd-local-off";
+  span("o-vd-btn", "\u25B6", card);
+  const meta = document.createElement("span");
+  meta.className = "o-vd-meta";
+  card.appendChild(meta);
+  span("o-vd-title", data.title || "Local video", meta);
+  span("o-vd-url", data.url, meta);
+  span("o-vd-hint", hint ?? "The file could not be read from the deck\u2019s folder \u2014 use Go Live to stream it.", card);
+  return card;
+}
+var localVideoBytes = /* @__PURE__ */ new Map();
+var localVideoUrls = /* @__PURE__ */ new Map();
+var MEDIA_TYPES = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  webm: "video/webm",
+  ogv: "video/ogg",
+  mov: "video/quicktime"
+};
+function mediaTypeFor(ref) {
+  const dot = ref.lastIndexOf(".");
+  return dot >= 0 && MEDIA_TYPES[ref.slice(dot + 1).toLowerCase()] || "video/mp4";
+}
+function playableUrl(ref, bytes) {
+  const cached = localVideoUrls.get(ref);
+  if (cached) return cached;
+  const url = URL.createObjectURL(new Blob([bytes], { type: mediaTypeFor(ref) }));
+  localVideoUrls.set(ref, url);
+  return url;
+}
+function applyKnownLocalVideos(root) {
+  root.querySelectorAll("[data-o-local-src]").forEach((el7) => {
+    const ref = el7.getAttribute("data-o-local-src") ?? "";
+    const payload = localVideoBytes.get(ref);
+    if (payload === void 0) return;
+    if (typeof payload === "string") {
+      const card = buildLocalOfflineCard(
+        { provider: "local", videoId: "", url: ref, title: el7.getAttribute("title") ?? "" },
+        payload
+      );
+      const parent = el7.parentElement;
+      if (parent) {
+        parent.querySelector(`[${SPOTLIGHT_BUTTON_ATTR}]`)?.remove();
+        parent.insertBefore(card, el7);
+        el7.remove();
+      }
+      return;
+    }
+    if (el7.getAttribute("src") !== null) return;
+    el7.setAttribute("src", playableUrl(ref, payload));
+    const video = el7;
+    if (typeof video.play === "function") {
+      try {
+        const played = video.play();
+        if (played && typeof played.catch === "function") void played.catch(() => {
+        });
+      } catch {
+      }
+    }
+  });
+}
+function applyLocalVideoBytes(map, root = document) {
+  for (const [ref, payload] of Object.entries(map)) localVideoBytes.set(ref, payload);
+  applyKnownLocalVideos(root);
+}
 function renderVideo(figure, data, opts = {}) {
   const mount = figure.querySelector("[data-video-mount]");
   if (!mount) return;
+  dismissVideoSpotlight();
   mount.textContent = "";
   const interactive = opts.interactive ?? false;
+  if (data.provider === "local") {
+    if (!localVideoPathIsSafe(data.url)) {
+      mount.appendChild(buildEmptyCard(data));
+      return;
+    }
+    const bytesMode = opts.localPlayback === false || opts.localPlayback === void 0 && !pageCanResolveRelativePath();
+    mount.appendChild(buildLocalVideo(data, bytesMode));
+    if (bytesMode) applyKnownLocalVideos(mount);
+    attachVideoSpotlight(mount, data);
+    return;
+  }
   const embedUrl = videoEmbedUrl(data);
   const cap2 = videoCapability(data.provider);
   const declared = embedUrl !== null && cap2 !== null && (opts.capabilities ?? []).includes(cap2);
@@ -7460,12 +8235,7 @@ function renderVideo(figure, data, opts = {}) {
     return;
   }
   if (!data.url) {
-    const card2 = document.createElement("div");
-    card2.className = "o-vd o-vd-empty";
-    span("o-vd-btn", "\u25B6", card2);
-    span("o-vd-title", data.title || "No video link set", card2);
-    span("o-vd-hint", "Open in Origami Folio to add one", card2);
-    mount.appendChild(card2);
+    mount.appendChild(buildEmptyCard(data));
     return;
   }
   const card = document.createElement(interactive ? "a" : "div");
@@ -7499,6 +8269,7 @@ function parseVideoFigureData(figure) {
   }
 }
 function mountVideos(slide, opts = {}) {
+  dismissVideoSpotlight();
   slide.querySelectorAll('script[data-odata="video"]').forEach((block) => {
     const figure = block.closest(".o-videofig") ?? block.parentElement;
     if (!figure) return;
@@ -8468,10 +9239,10 @@ function openTonePopover(anchor, c, slide, data, opts, view) {
       col.tone = { type: "scale", min: n.length ? Math.min(...n) : 0, max: n.length ? Math.max(...n) : 100 };
     } else col.tone = { type: "status", map: {} };
     local();
-    render();
+    render2();
   };
   const SWATCHES = [["", ""], ["green", "#3D8B5A"], ["amber", "#B07D2B"], ["red", "#B3402A"], ["accent", "var(--accent)"]];
-  function render() {
+  function render2() {
     const cur = col.tone?.type ?? "off";
     modes.textContent = "";
     [["Off", "off"], ["Heatmap", "scale"], ["By value", "status"]].forEach(([label, m]) => {
@@ -8534,13 +9305,13 @@ function openTonePopover(anchor, c, slide, data, opts, view) {
             if (tone2) t.map[v] = tone2;
             else delete t.map[v];
             local();
-            render();
+            render2();
           });
         }
       }
     }
   }
-  render();
+  render2();
   document.body.appendChild(pop);
   const r = anchor.getBoundingClientRect();
   pop.style.top = Math.min(r.bottom + 6, window.innerHeight - 40) + "px";
@@ -8761,8 +9532,13 @@ function renderTracker(slide, data, opts = {}) {
       });
     }
   };
+  let chrome = null;
+  const ensureChrome = () => {
+    if (!chrome) chrome = el4("div", "o-tracker-chrome", mount);
+    return chrome;
+  };
   if (opts.interactive) {
-    const bar = el4("div", "o-tracker-filterbar", mount);
+    const bar = el4("div", "o-tracker-filterbar", ensureChrome());
     const input = el4("input", "o-tracker-search", bar);
     input.setAttribute("type", "text");
     input.placeholder = "Search actions, owners, comments\u2026";
@@ -8793,14 +9569,14 @@ function renderTracker(slide, data, opts = {}) {
       buildChips();
       rerender();
     });
-    chipBar = el4("div", "o-tracker-chips", mount);
+    chipBar = el4("div", "o-tracker-chips", ensureChrome());
   }
   if (opts.edit) {
-    const toolbar = el4("div", "o-tracker-toolbar", mount);
-    const add = el4("button", "o-tracker-add", toolbar);
-    add.setAttribute("type", "button");
-    add.textContent = "+ Add action";
-    add.addEventListener("click", () => {
+    const toolbar = el4("div", "o-tracker-toolbar", ensureChrome());
+    const add2 = el4("button", "o-tracker-add", toolbar);
+    add2.setAttribute("type", "button");
+    add2.textContent = "+ Add action";
+    add2.addEventListener("click", () => {
       const specs = trackerColumnSpecs(data);
       const row = {};
       for (const spec of specs) row[spec.key] = coerceCell(void 0, spec.type, spec.options ?? []);
@@ -9610,10 +10386,10 @@ function renderNotes(slide, data, opts = {}) {
     });
   }
   if (opts.edit) {
-    const add = el5("button", "o-notes-add", bar);
-    add.setAttribute("type", "button");
-    add.textContent = "+ New note";
-    add.addEventListener("click", () => {
+    const add2 = el5("button", "o-notes-add", bar);
+    add2.setAttribute("type", "button");
+    add2.textContent = "+ New note";
+    add2.addEventListener("click", () => {
       const id = freshId();
       data.notes.unshift({ id, title: "", body: "", color: "", pinned: false, date: today() });
       opts.edit.onCommit(data);
@@ -9957,17 +10733,30 @@ function shapePolygon(e) {
     }
     return pts;
   }
+  if (e.type === "cylinder") {
+    const pts = [];
+    const cx = x + w / 2;
+    const ry = Math.max(3, Math.min(h * 0.24, h / 2));
+    const cyT = y + ry;
+    const cyB = y + h - ry;
+    const n = Math.min(32, Math.max(12, Math.round(Math.hypot(w, h) / 4)));
+    for (let i = 0; i <= n; i++) {
+      const a = Math.PI + i / n * Math.PI;
+      pts.push([cx + Math.cos(a) * w / 2, cyT + Math.sin(a) * ry]);
+    }
+    for (let i = 0; i <= n; i++) {
+      const a = i / n * Math.PI;
+      pts.push([cx + Math.cos(a) * w / 2, cyB + Math.sin(a) * ry]);
+    }
+    return pts;
+  }
   return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
 }
 function polygonPath(poly) {
   return "M" + poly.map((p) => `${f2(p[0])} ${f2(p[1])}`).join("L") + "Z";
 }
-function ellipsePaths(e, rand, jit) {
+function ellipseLoopPaths(cx, cy, rx, ry, rand, jit) {
   const out = [];
-  const cx = e.x + e.width / 2;
-  const cy = e.y + e.height / 2;
-  const rx = e.width / 2;
-  const ry = e.height / 2;
   const n = Math.min(28, Math.max(10, Math.round((rx + ry) / 6)));
   const passes = jit <= 0 ? 1 : 2;
   for (let pass = 0; pass < passes; pass++) {
@@ -9979,6 +10768,24 @@ function ellipsePaths(e, rand, jit) {
       pts.push([cx + Math.cos(a) * (rx + wobble), cy + Math.sin(a) * (ry + wobble)]);
     }
     out.push(smoothPath(pts) + "Z");
+  }
+  return out;
+}
+function ellipsePaths(e, rand, jit) {
+  return ellipseLoopPaths(e.x + e.width / 2, e.y + e.height / 2, e.width / 2, e.height / 2, rand, jit);
+}
+function arcPaths(cx, cy, rx, ry, a0, a12, rand, jit) {
+  const out = [];
+  const n = Math.min(28, Math.max(10, Math.round((rx + ry) / 6)));
+  const passes = jit <= 0 ? 1 : 2;
+  for (let pass = 0; pass < passes; pass++) {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const a = a0 + i / n * (a12 - a0);
+      const wobble = jit > 0 ? (rand() - 0.5) * jit * 0.6 : 0;
+      pts.push([cx + Math.cos(a) * (rx + wobble), cy + Math.sin(a) * (ry + wobble)]);
+    }
+    out.push(smoothPath(pts));
   }
   return out;
 }
@@ -10062,8 +10869,8 @@ function sceneBounds(data) {
     }
   }
   if (!Number.isFinite(xMin)) return null;
-  const pad2 = 4 + maxSw;
-  return { x: xMin - pad2, y: yMin - pad2, w: xMax - xMin + pad2 * 2, h: yMax - yMin + pad2 * 2 };
+  const pad3 = 4 + maxSw;
+  return { x: xMin - pad3, y: yMin - pad3, w: xMax - xMin + pad3 * 2, h: yMax - yMin + pad3 * 2 };
 }
 function strokePathsFor(e, rand, jit) {
   if (e.type === "rect") {
@@ -10085,6 +10892,19 @@ function strokePathsFor(e, rand, jit) {
     ];
   }
   if (e.type === "ellipse") return ellipsePaths(e, rand, jit);
+  if (e.type === "cylinder") {
+    const cx = e.x + e.width / 2;
+    const rx = e.width / 2;
+    const ry = Math.max(3, Math.min(e.height * 0.24, e.height / 2));
+    const cyT = e.y + ry;
+    const cyB = e.y + e.height - ry;
+    const out = ellipseLoopPaths(cx, cyT, rx, ry, rand, jit);
+    const o = jit > 0 ? 1.5 + rand() * 1.5 : 0;
+    out.push(...sketchyLine(e.x + e.width, cyT, e.x + e.width, cyB, rand, jit, o));
+    out.push(...sketchyLine(e.x, cyB, e.x, cyT, rand, jit, o));
+    out.push(...arcPaths(cx, cyB, rx, ry, 0, Math.PI, rand, jit));
+    return out;
+  }
   if (e.type === "freedraw") {
     const wob = jit * 0.55;
     const sm = e.smoothing === 0 || e.smoothing === 2 ? e.smoothing : 1;
@@ -10696,6 +11516,7 @@ function vennSceneSvg(data, selected) {
     }, blend);
     c.setAttribute("style", "mix-blend-mode: multiply");
     c.setAttribute("fill-opacity", "0.72");
+    markTip(c, set.label || DEFAULT_LABELS[i]);
   });
   const labels = svgEl4("g", { class: "o-venn-labels" }, svg);
   n.sets.forEach((set, i) => {
@@ -10773,6 +11594,1193 @@ function parseVennSlideData(root) {
   return parseVennFigureData(root);
 }
 
+// src/calendar.ts
+var MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+var WEEKDAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+var CALENDAR_PRESETS = [
+  { key: "m-4", label: "\u22124 months" },
+  { key: "m-1", label: "\u22121 month" },
+  { key: "today", label: "Today" },
+  { key: "m+1", label: "+1 month" },
+  { key: "m+4", label: "+4 months" }
+];
+function normalizeCalendarData(raw) {
+  const d = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const year = Number.isInteger(d.year) && Number(d.year) >= CALENDAR_YEAR_MIN && Number(d.year) <= CALENDAR_YEAR_MAX ? Number(d.year) : 2026;
+  const month = Number.isInteger(d.month) && Number(d.month) >= 1 && Number(d.month) <= 12 ? Number(d.month) : 1;
+  const entries = {};
+  const colors = {};
+  let entryCount = 0;
+  if (d.entries && typeof d.entries === "object" && !Array.isArray(d.entries)) {
+    for (const [key, value] of Object.entries(d.entries)) {
+      if (entryCount >= CALENDAR_MAX_ENTRIES) break;
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+      const y = match ? Number(match[1]) : 0;
+      const m = match ? Number(match[2]) : 0;
+      const day = match ? Number(match[3]) : 0;
+      const note = parseCalendarNote(value);
+      if (match && y >= CALENDAR_YEAR_MIN && y <= CALENDAR_YEAR_MAX && m >= 1 && m <= 12 && day >= 1 && day <= calendarDaysInMonth(y, m) && note) {
+        entries[key] = note;
+        entryCount += 1;
+      }
+    }
+  }
+  if (d.colors && typeof d.colors === "object" && !Array.isArray(d.colors)) {
+    let colorCount = 0;
+    for (const [key, value] of Object.entries(d.colors)) {
+      if (colorCount >= CALENDAR_MAX_ENTRIES) break;
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+      const y = match ? Number(match[1]) : 0;
+      const m = match ? Number(match[2]) : 0;
+      const day = match ? Number(match[3]) : 0;
+      if (match && y >= CALENDAR_YEAR_MIN && y <= CALENDAR_YEAR_MAX && m >= 1 && m <= 12 && day >= 1 && day <= calendarDaysInMonth(y, m) && typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)) {
+        colors[key] = value.toLowerCase();
+        colorCount += 1;
+      }
+    }
+  }
+  return {
+    year,
+    month,
+    ...Object.keys(entries).length ? { entries } : {},
+    ...d.weekendGrey === false ? { weekendGrey: false } : {},
+    ...d.presets === false ? { presets: false } : {},
+    ...Object.keys(colors).length ? { colors } : {}
+  };
+}
+function keepFields(data) {
+  return {
+    ...data.entries ? { entries: data.entries } : {},
+    ...data.weekendGrey === false ? { weekendGrey: false } : {},
+    ...data.presets === false ? { presets: false } : {},
+    ...data.colors ? { colors: data.colors } : {}
+  };
+}
+function add(parent, className, text = "", tag = "div") {
+  const el7 = document.createElement(tag);
+  el7.className = className;
+  el7.textContent = text;
+  parent.appendChild(el7);
+  return el7;
+}
+function calendarGrid(year, month) {
+  const start = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+  const days = calendarDaysInMonth(year, month);
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear = month === 1 ? year - 1 : year;
+  const prevDays = calendarDaysInMonth(prevYear, prevMonth);
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return Array.from({ length: 42 }, (_, i) => {
+    const day = i - start + 1;
+    if (day >= 1 && day <= days) return calendarIsoDate(year, month, day);
+    if (day < 1) return calendarIsoDate(prevYear, prevMonth, prevDays + day);
+    return calendarIsoDate(nextYear, nextMonth, day - days);
+  });
+}
+function shiftCalendarMonth(data, delta) {
+  const index = data.year * 12 + data.month - 1 + delta;
+  const year = Math.floor(index / 12);
+  const month = index - year * 12 + 1;
+  if (year < CALENDAR_YEAR_MIN || year > CALENDAR_YEAR_MAX) return data;
+  return { year, month, ...keepFields(data) };
+}
+var PRESET_MONTHS = { "m-4": -4, "m-1": -1, "m+1": 1, "m+4": 4 };
+function calendarPresetAnchor(kind, view, now = /* @__PURE__ */ new Date()) {
+  if (kind === "today") {
+    const year2 = now.getFullYear();
+    const month2 = now.getMonth() + 1;
+    const day = now.getDate();
+    return { year: year2, month: month2, day, iso: calendarIsoDate(year2, month2, day) };
+  }
+  const delta = PRESET_MONTHS[kind] ?? 0;
+  const index = view.year * 12 + view.month - 1 + delta;
+  const year = Math.floor(index / 12);
+  const month = index - year * 12 + 1;
+  return { year, month, day: 1, iso: calendarIsoDate(year, month, 1) };
+}
+function shiftCalendarTo(data, year, month) {
+  if (year < CALENDAR_YEAR_MIN || year > CALENDAR_YEAR_MAX || month < 1 || month > 12) return data;
+  return { year, month, ...keepFields(data) };
+}
+function todayIso(now = /* @__PURE__ */ new Date()) {
+  return calendarIsoDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+}
+function inMonth(date, year, month) {
+  return date.startsWith(`${year}-${String(month).padStart(2, "0")}-`);
+}
+function renderCalendar(figure, data) {
+  const mount = figure.querySelector("[data-calendar-mount]");
+  if (!mount) return;
+  const d = normalizeCalendarData(data);
+  mount.textContent = "";
+  const shell = add(mount, "o-calendar-shell");
+  if (d.presets !== false) {
+    const side = add(shell, "o-calendar-presets");
+    for (const p of CALENDAR_PRESETS) {
+      const b = add(side, "o-calendar-preset", p.label, "button");
+      b.dataset.calendarPreset = p.key;
+      b.type = "button";
+      if (p.key === "today") {
+        const n = /* @__PURE__ */ new Date();
+        if (n.getFullYear() === d.year && n.getMonth() + 1 === d.month) b.setAttribute("data-calendar-preset-on", "");
+      }
+    }
+  }
+  const main = add(shell, "o-calendar-main");
+  const head = add(main, "o-calendar-head");
+  const prev = add(head, "o-calendar-nav", "\u2039", "button");
+  prev.type = "button";
+  prev.dataset.calendarNav = "-1";
+  prev.setAttribute("aria-label", "Previous month");
+  add(head, "o-calendar-title", `${MONTHS[d.month - 1]} ${d.year}`);
+  const next = add(head, "o-calendar-nav", "\u203A", "button");
+  next.type = "button";
+  next.dataset.calendarNav = "1";
+  next.setAttribute("aria-label", "Next month");
+  const grid = add(main, "o-calendar-grid");
+  for (const name of WEEKDAYS) add(grid, "o-calendar-weekday", name);
+  const today2 = todayIso();
+  for (const date of calendarGrid(d.year, d.month)) {
+    if (!date) continue;
+    const outside = !inMonth(date, d.year, d.month);
+    const cell = add(grid, "o-calendar-day" + (outside ? " is-outside" : ""));
+    cell.dataset.date = date;
+    const weekday = (/* @__PURE__ */ new Date(`${date}T00:00:00Z`)).getUTCDay();
+    if (!outside && d.weekendGrey !== false && (weekday === 0 || weekday === 6)) cell.classList.add("is-weekend");
+    const color = d.colors?.[date];
+    if (color && !outside) cell.style.setProperty("--ocal-cell", color);
+    if (date === today2) cell.classList.add("is-today");
+    add(cell, "o-calendar-number", String(Number(date.slice(-2))), "span");
+    const note = d.entries?.[date];
+    if (note && !outside) {
+      cell.classList.add("has-note");
+      if (note.heading) {
+        cell.dataset.calHeading = note.heading;
+        add(cell, "o-calendar-heading", note.heading);
+      }
+      if (note.text) cell.dataset.calText = note.text;
+      if (!note.heading && note.text) add(cell, "o-calendar-mark");
+    }
+  }
+  wireCalendarTip(figure);
+}
+function mountCalendars(slide) {
+  slide.querySelectorAll('script[data-odata="calendar"]').forEach((script) => {
+    const figure = script.closest("figure");
+    if (!figure) return;
+    let current;
+    try {
+      current = normalizeCalendarData(JSON.parse(script.textContent || "{}"));
+    } catch {
+      current = { year: 2026, month: 1 };
+    }
+    const mount = () => {
+      renderCalendar(figure, current);
+      figure.querySelectorAll("[data-calendar-nav]").forEach((button) => button.addEventListener("click", () => {
+        current = shiftCalendarMonth(current, Number(button.dataset.calendarNav));
+        mount();
+      }));
+      figure.querySelectorAll("[data-calendar-preset]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const a = calendarPresetAnchor(button.dataset.calendarPreset || "today", current);
+          current = shiftCalendarTo(current, a.year, a.month);
+          mount();
+        });
+      });
+    };
+    mount();
+  });
+}
+var finalizeCalendars = mountCalendars;
+var TIP_WIRED = /* @__PURE__ */ new WeakSet();
+function calendarTipEl(doc) {
+  let tip = doc.querySelector(".o-caltip");
+  if (tip) return tip;
+  tip = doc.createElement("div");
+  tip.className = "o-caltip";
+  tip.setAttribute("aria-hidden", "true");
+  const heading = doc.createElement("div");
+  heading.className = "o-caltip-h";
+  const text = doc.createElement("div");
+  text.className = "o-caltip-t";
+  tip.append(heading, text);
+  doc.body.appendChild(tip);
+  return tip;
+}
+function placeTip(tip, doc, clientX, clientY) {
+  const x = Math.min(clientX + 14, doc.documentElement.clientWidth - tip.offsetWidth - 8);
+  const y = Math.max(8, clientY - tip.offsetHeight - 12);
+  tip.style.left = `${Math.max(8, x)}px`;
+  tip.style.top = `${y}px`;
+}
+function wireCalendarTip(figure) {
+  if (TIP_WIRED.has(figure)) return;
+  const doc = figure.ownerDocument ?? globalThis.document;
+  if (!doc?.querySelector) return;
+  TIP_WIRED.add(figure);
+  const tip = calendarTipEl(doc);
+  const heading = tip.querySelector(".o-caltip-h");
+  const text = tip.querySelector(".o-caltip-t");
+  figure.addEventListener("mouseover", (ev) => {
+    const cell = ev.target?.closest?.(".o-calendar-day.has-note");
+    if (!cell || !figure.contains(cell)) return;
+    const h = cell.dataset.calHeading ?? "";
+    const t = cell.dataset.calText ?? "";
+    heading.textContent = h;
+    heading.hidden = !h;
+    text.textContent = t;
+    text.hidden = !t;
+    tip.classList.add("on");
+  });
+  figure.addEventListener("mousemove", (ev) => {
+    if (!tip.classList.contains("on")) return;
+    placeTip(tip, doc, ev.clientX, ev.clientY);
+  });
+  figure.addEventListener("mouseout", (ev) => {
+    const from = ev.target;
+    const to = ev.relatedTarget;
+    if (from?.closest?.(".o-calendar-day.has-note") && !to?.closest?.(".o-calendar-day.has-note")) tip.classList.remove("on");
+  });
+}
+
+// src/gallery.ts
+var GALLERY_STYLES = ["single", "accordion", "dome", "drift", "compare", "carousel"];
+function parseGalleryData(root) {
+  const el7 = root.querySelector('script[data-odata="gallery"]');
+  if (!el7?.textContent) return null;
+  try {
+    const d = JSON.parse(el7.textContent);
+    if (!Array.isArray(d.images)) d.images = [];
+    if (typeof d.style !== "string" || !GALLERY_STYLES.includes(d.style)) d.style = "single";
+    return d;
+  } catch {
+    return null;
+  }
+}
+var galleryTileRef = /* @__PURE__ */ new WeakMap();
+function imgOf(im, index, images) {
+  const img = document.createElement("img");
+  img.setAttribute("data-oasset", im.asset ?? "");
+  img.setAttribute("data-gal-index", String(index));
+  img.alt = im.alt ?? "";
+  img.draggable = false;
+  galleryTileRef.set(img, { images, index });
+  return img;
+}
+function tileFor(mount, index) {
+  return mount.querySelector(`img[data-gal-index="${index}"]`);
+}
+function capOf(im) {
+  const caption2 = im.caption ?? "";
+  if (!caption2) return null;
+  const el7 = document.createElement("div");
+  el7.className = "o-gal-cap";
+  el7.textContent = caption2;
+  return el7;
+}
+function mountOf(fig) {
+  let mount = fig.querySelector(":scope > [data-gallery-mount]");
+  if (!mount) {
+    mount = document.createElement("div");
+    mount.setAttribute("data-gallery-mount", "");
+    fig.appendChild(mount);
+  }
+  return mount;
+}
+var FRAME_TRANSITION = "transform 300ms ease, opacity 300ms ease, left 260ms ease, top 260ms ease, width 260ms ease, height 260ms ease";
+var spot = null;
+function setTilesHidden(mount, index, hidden) {
+  mount.querySelectorAll(`img[data-gal-index="${index}"]`).forEach((el7) => {
+    el7.style.visibility = hidden ? "hidden" : "";
+  });
+}
+function showSpotlightImage(s2, index) {
+  const n = s2.images.length;
+  if (n === 0) return;
+  const next = (index % n + n) % n;
+  setTilesHidden(s2.mount, s2.index, false);
+  const tile = tileFor(s2.mount, next);
+  if (tile) {
+    setTilesHidden(s2.mount, next, true);
+    s2.source = tile;
+    const src = tile.currentSrc || tile.src;
+    if (src) s2.big.src = src;
+    if (tile.naturalWidth > 0 && tile.naturalHeight > 0) {
+      resizeSpotlight(s2, tile.naturalWidth, tile.naturalHeight);
+    } else {
+      s2.big.addEventListener("load", () => {
+        if (spot === s2) resizeSpotlight(s2, s2.big.naturalWidth, s2.big.naturalHeight);
+      }, { once: true });
+    }
+  }
+  const im = s2.images[next];
+  s2.big.alt = im.alt ?? "";
+  const cap2 = im.caption ?? "";
+  s2.caption.textContent = cap2;
+  s2.caption.hidden = cap2.length === 0;
+  s2.index = next;
+}
+function navigateSpotlight(dir) {
+  const s2 = spot;
+  if (!s2 || s2.images.length < 2) return;
+  showSpotlightImage(s2, s2.index + dir);
+}
+function spotlightFrameTarget(vw, vh, natW, natH) {
+  const pad3 = Math.max(16, Math.round(Math.min(vw, vh) * 0.06));
+  const maxW = Math.max(40, vw - pad3 * 2);
+  const maxH = Math.max(40, vh - pad3 * 2);
+  const ar = natW > 0 && natH > 0 ? natW / natH : 1;
+  let tw = maxW;
+  let th = tw / ar;
+  if (th > maxH) {
+    th = maxH;
+    tw = th * ar;
+  }
+  return { left: (vw - tw) / 2, top: (vh - th) / 2, width: tw, height: th };
+}
+function resizeSpotlight(s2, natW, natH) {
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = document.documentElement.clientHeight || window.innerHeight;
+  const target = spotlightFrameTarget(vw, vh, natW, natH);
+  s2.target = target;
+  s2.frame.style.left = `${target.left}px`;
+  s2.frame.style.top = `${target.top}px`;
+  s2.frame.style.width = `${target.width}px`;
+  s2.frame.style.height = `${target.height}px`;
+}
+function dismissSpotlight() {
+  const s2 = spot;
+  if (!s2) return;
+  spot = null;
+  document.removeEventListener("keydown", s2.onKey, true);
+  setTilesHidden(s2.mount, s2.index, false);
+  s2.overlay.remove();
+}
+function closeSpotlight() {
+  const s2 = spot;
+  if (!s2) return;
+  if (performance.now() - s2.openedAt < 250) return;
+  spot = null;
+  document.removeEventListener("keydown", s2.onKey, true);
+  setTilesHidden(s2.mount, s2.index, false);
+  s2.prev?.focus({ preventScroll: true });
+  if (!s2.source.isConnected || !s2.overlay.isConnected) {
+    s2.overlay.remove();
+    return;
+  }
+  const r = s2.source.getBoundingClientRect();
+  s2.frame.style.transition = "transform 300ms ease, opacity 300ms ease";
+  s2.frame.style.transform = `translate(${r.left - s2.target.left}px, ${r.top - s2.target.top}px) scale(${r.width / s2.target.width}, ${r.height / s2.target.height})`;
+  s2.frame.style.opacity = "0";
+  s2.overlay.classList.remove("on");
+  window.setTimeout(() => s2.overlay.remove(), 320);
+}
+function openSpotlight(source) {
+  if (spot || document.querySelector(".o-gal-spot")) return;
+  if (!source.isConnected) return;
+  const src = source.currentSrc || source.src;
+  if (!src) return;
+  const r = source.getBoundingClientRect();
+  if (r.width < 2 || r.height < 2) return;
+  const mount = source.closest("[data-gallery-mount]") ?? source.parentElement;
+  if (!mount) return;
+  const ref = galleryTileRef.get(source);
+  const images = ref?.images ?? [];
+  const index = ref?.index ?? 0;
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = document.documentElement.clientHeight || window.innerHeight;
+  const target = spotlightFrameTarget(vw, vh, source.naturalWidth || r.width, source.naturalHeight || r.height);
+  const overlay = document.createElement("div");
+  overlay.className = "o-gal-spot";
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", source.alt || "Image preview");
+  const scrim = document.createElement("div");
+  scrim.className = "o-gal-spot-scrim";
+  const frame = document.createElement("div");
+  frame.className = "o-gal-spot-frame";
+  frame.tabIndex = -1;
+  frame.style.left = `${target.left}px`;
+  frame.style.top = `${target.top}px`;
+  frame.style.width = `${target.width}px`;
+  frame.style.height = `${target.height}px`;
+  frame.style.transformOrigin = "top left";
+  frame.style.transform = `translate(${r.left - target.left}px, ${r.top - target.top}px) scale(${r.width / target.width}, ${r.height / target.height})`;
+  frame.style.opacity = "0";
+  const big = document.createElement("img");
+  big.className = "o-gal-spot-img";
+  big.src = src;
+  big.alt = source.alt ?? "";
+  big.draggable = false;
+  frame.appendChild(big);
+  if (source.naturalWidth === 0) {
+    big.addEventListener("load", () => {
+      if (spot) resizeSpotlight(spot, big.naturalWidth, big.naturalHeight);
+    }, { once: true });
+  }
+  const caption2 = document.createElement("div");
+  caption2.className = "o-gal-spot-cap";
+  caption2.hidden = true;
+  frame.appendChild(caption2);
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "o-gal-spot-close";
+  closeBtn.setAttribute("aria-label", "Close image");
+  closeBtn.textContent = "\u2715";
+  frame.appendChild(closeBtn);
+  const navBtns = [];
+  if (images.length > 1) {
+    for (const [dir, label, glyph, cls] of [
+      [-1, "Previous image", "\u2039", "o-gal-spot-prev"],
+      [1, "Next image", "\u203A", "o-gal-spot-next"]
+    ]) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `o-gal-spot-nav ${cls}`;
+      btn.setAttribute("aria-label", label);
+      btn.textContent = glyph;
+      btn.addEventListener("click", () => navigateSpotlight(dir));
+      navBtns.push(btn);
+    }
+  }
+  overlay.append(scrim, frame, ...navBtns);
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSpotlight();
+      return;
+    }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      if (images.length < 2) return;
+      e.preventDefault();
+      e.stopPropagation();
+      navigateSpotlight(e.key === "ArrowRight" ? 1 : -1);
+    }
+  };
+  const state = {
+    source,
+    mount,
+    images,
+    index,
+    overlay,
+    frame,
+    big,
+    caption: caption2,
+    target,
+    onKey,
+    prev: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+    openedAt: performance.now()
+  };
+  spot = state;
+  const opened = images[index];
+  const openedCap = opened?.caption ?? "";
+  caption2.textContent = openedCap;
+  caption2.hidden = openedCap.length === 0;
+  setTilesHidden(mount, index, true);
+  scrim.addEventListener("click", closeSpotlight);
+  closeBtn.addEventListener("click", closeSpotlight);
+  scrim.addEventListener("wheel", (e) => e.preventDefault(), { passive: false });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(overlay);
+  void frame.offsetWidth;
+  frame.focus({ preventScroll: true });
+  requestAnimationFrame(() => {
+    if (spot !== state) return;
+    overlay.classList.add("on");
+    frame.style.transition = FRAME_TRANSITION;
+    frame.style.transform = "translate(0px, 0px) scale(1, 1)";
+    frame.style.opacity = "1";
+  });
+}
+function attachSpotlight(mount) {
+  mount.addEventListener("click", (e) => {
+    if (spot) return;
+    const target = e.target;
+    const img = target?.closest("img") ?? target?.closest(".o-gal-panel, .o-gal-cell, .o-gal-drift-tile")?.querySelector("img");
+    if (img instanceof HTMLImageElement && mount.contains(img)) openSpotlight(img);
+  });
+}
+var DOME_SEGMENTS = 35;
+var DOME_MAX_VERTICAL_ROTATION_DEG = 5;
+var DOME_DRAG_SENSITIVITY = 20;
+var DOME_MIN_DRAG_SENSITIVITY = 12;
+var DOME_MAX_DRAG_SENSITIVITY = 26;
+var DOME_TILE_SCALE = 1;
+var DOME_FIT_FILL = 0.47;
+var DOME_FIT_FLOOR = 0.55;
+var DOME_MAX_RADIUS_FACTOR = 2.2;
+var DOME_DRAG_DAMPENING = 1;
+var DOME_CLAMP_MARGIN = 4;
+var DOME_RUBBER_Y = 6;
+var DOME_RUBBER_X = 2;
+function domeCentreDistance(rotY, rotX) {
+  const ry = rotY * Math.PI / 180;
+  const rx = rotX * Math.PI / 180;
+  return Math.acos(Math.cos(ry) * Math.cos(rx)) * 180 / Math.PI;
+}
+function buildDomeItems(pool, seg2) {
+  const xCols = Array.from({ length: seg2 }, (_, i) => -37 + i * 2);
+  const evenYs = [-4, -2, 0, 2, 4];
+  const oddYs = [-3, -1, 1, 3, 5];
+  const coords = xCols.flatMap((x, c) => {
+    const ys = c % 2 === 0 ? evenYs : oddYs;
+    return ys.map((y) => ({ x, y, sizeX: 2, sizeY: 2 }));
+  });
+  const slots = coords.map((c) => {
+    const rot = computeItemBaseRotation(c.x, c.y, c.sizeX, c.sizeY, seg2);
+    return { ...c, rotY: rot.rotateY, rotX: rot.rotateX, dist: domeCentreDistance(rot.rotateY, rot.rotateX) };
+  });
+  const order = slots.map((_, i) => i).sort((a, b) => {
+    const A = slots[a];
+    const B = slots[b];
+    return A.dist - B.dist || Math.abs(A.rotY) - Math.abs(B.rotY) || Math.abs(A.rotX) - Math.abs(B.rotX) || a - b;
+  });
+  const assigned = /* @__PURE__ */ new Map();
+  const n = Math.min(pool.length, order.length);
+  for (let i = 0; i < n; i++) assigned.set(order[i], i);
+  const items = slots.map((s2, i) => {
+    const imageIndex = assigned.has(i) ? assigned.get(i) : null;
+    return {
+      x: s2.x,
+      y: s2.y,
+      sizeX: s2.sizeX,
+      sizeY: s2.sizeY,
+      image: imageIndex === null ? null : pool[imageIndex],
+      imageIndex
+    };
+  });
+  const chosen = order.slice(0, n).map((i) => slots[i]);
+  if (chosen.length === 0) return { items, centre: { x: 0, y: 0 }, span: { x: 0, y: 0 } };
+  const rotXs = chosen.map((s2) => s2.rotX);
+  const rotYs = chosen.map((s2) => s2.rotY);
+  const minX = Math.min(...rotXs);
+  const maxX = Math.max(...rotXs);
+  const minY = Math.min(...rotYs);
+  const maxY = Math.max(...rotYs);
+  return {
+    items,
+    centre: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+    span: { x: (maxX - minX) / 2, y: (maxY - minY) / 2 }
+  };
+}
+function computeItemBaseRotation(offsetX, offsetY, sizeX, sizeY, segments) {
+  const unit = 360 / segments / 2;
+  const rotateY = unit * (offsetX + (sizeX - 1) / 2);
+  const rotateX = unit * (offsetY - (sizeY - 1) / 2);
+  return { rotateX, rotateY };
+}
+function wrapAngleSigned(deg) {
+  const a = ((deg + 180) % 360 + 360) % 360;
+  return a - 180;
+}
+function domeRotationBounds(layout2, margin, verticalCap) {
+  if (layout2.items.length === 0 || layout2.items.every((it) => it.imageIndex !== null)) {
+    return { full: true, yLo: -Infinity, yHi: Infinity, xLo: -verticalCap, xHi: verticalCap };
+  }
+  const restY = -layout2.centre.y;
+  const restX = -layout2.centre.x;
+  let yLo = restY - layout2.span.y - margin;
+  let yHi = restY + layout2.span.y + margin;
+  let xLo = Math.max(-verticalCap, restX - layout2.span.x - margin);
+  let xHi = Math.min(verticalCap, restX + layout2.span.x + margin);
+  yLo = Math.min(yLo, restY);
+  yHi = Math.max(yHi, restY);
+  xLo = Math.min(xLo, restX);
+  xHi = Math.max(xHi, restX);
+  if (yHi - yLo >= 360) return { full: true, yLo: -Infinity, yHi: Infinity, xLo: -verticalCap, xHi: verticalCap };
+  return { full: false, yLo, yHi, xLo, xHi };
+}
+function softLimit(value, lo2, hi2, give) {
+  if (value < lo2) {
+    const d = lo2 - value;
+    return lo2 - d * give / (d + give);
+  }
+  if (value > hi2) {
+    const d = value - hi2;
+    return hi2 + d * give / (d + give);
+  }
+  return value;
+}
+function buildDome(mount, images, interactive) {
+  const main = document.createElement("div");
+  main.className = "o-gal-dome-main";
+  const stage = document.createElement("div");
+  stage.className = "o-gal-dome-stage";
+  const sphere = document.createElement("div");
+  sphere.className = "o-gal-sphere";
+  stage.appendChild(sphere);
+  main.appendChild(stage);
+  mount.appendChild(main);
+  mount.style.setProperty("--segments-x", String(DOME_SEGMENTS));
+  mount.style.setProperty("--segments-y", String(DOME_SEGMENTS));
+  const layout2 = buildDomeItems(images, DOME_SEGMENTS);
+  mount.style.setProperty("--tile-scale", String(DOME_TILE_SCALE));
+  for (const it of layout2.items) {
+    if (!it.image || it.imageIndex === null) continue;
+    const tile = document.createElement("div");
+    tile.className = "o-gal-dome-tile";
+    tile.style.setProperty("--item-size-x", String(it.sizeX));
+    tile.style.setProperty("--item-size-y", String(it.sizeY));
+    const rot2 = computeItemBaseRotation(it.x, it.y, it.sizeX, it.sizeY, DOME_SEGMENTS);
+    tile.style.transform = `rotateY(${rot2.rotateY}deg) rotateX(${rot2.rotateX}deg) translateZ(var(--radius))`;
+    const cell = document.createElement("div");
+    cell.className = "o-gal-dome-img";
+    cell.setAttribute("role", "button");
+    cell.tabIndex = 0;
+    cell.setAttribute("aria-label", it.image.alt || it.image.caption || "Open image");
+    cell.appendChild(imgOf(it.image, it.imageIndex, images));
+    tile.appendChild(cell);
+    sphere.appendChild(tile);
+  }
+  const rot = { x: -layout2.centre.x, y: -layout2.centre.y };
+  const apply = () => {
+    sphere.style.setProperty("--rx", `${rot.x}deg`);
+    sphere.style.setProperty("--ry", `${rot.y}deg`);
+  };
+  let dragSensitivity = DOME_DRAG_SENSITIVITY;
+  const fit = () => {
+    const w = Math.max(1, mount.clientWidth);
+    const h = Math.max(1, mount.clientHeight);
+    if (mount.clientWidth < 1 || mount.clientHeight < 1) return;
+    const minDim = Math.min(w, h);
+    const rad = Math.PI / 180;
+    const tileHalf = 360 / DOME_SEGMENTS / 2 * DOME_TILE_SCALE;
+    const halfX = Math.min((layout2.span.y + tileHalf) * rad, 89 * rad);
+    const halfY = Math.min((layout2.span.x + tileHalf) * rad, 89 * rad);
+    const forHeight = h * DOME_FIT_FILL / Math.max(0.05, Math.sin(halfY));
+    const forWidth = w * DOME_FIT_FILL / Math.max(0.05, Math.sin(halfX));
+    const radius = Math.max(Math.min(forHeight, forWidth, h * DOME_MAX_RADIUS_FACTOR), minDim * DOME_FIT_FLOOR);
+    dragSensitivity = Math.min(Math.max(Math.PI * radius / 180, DOME_MIN_DRAG_SENSITIVITY), DOME_MAX_DRAG_SENSITIVITY);
+    mount.style.setProperty("--radius", `${Math.round(radius)}px`);
+    apply();
+  };
+  fit();
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(() => {
+      if (!mount.isConnected) {
+        ro.disconnect();
+        return;
+      }
+      fit();
+    });
+    ro.observe(mount);
+  }
+  if (!interactive) return;
+  const clamp3 = (v, lo2, hi2) => Math.min(Math.max(v, lo2), hi2);
+  const bounds = domeRotationBounds(layout2, DOME_CLAMP_MARGIN, DOME_MAX_VERTICAL_ROTATION_DEG);
+  const limitY = (v) => bounds.full ? wrapAngleSigned(v) : softLimit(v, bounds.yLo, bounds.yHi, DOME_RUBBER_Y);
+  const limitX = (v) => bounds.full ? clamp3(v, -DOME_MAX_VERTICAL_ROTATION_DEG, DOME_MAX_VERTICAL_ROTATION_DEG) : softLimit(v, bounds.xLo, bounds.xHi, DOME_RUBBER_X);
+  let pointerActive = false;
+  let pointerId = null;
+  let dragging = false;
+  let moved = false;
+  let lastDragEndAt = 0;
+  let downImg = null;
+  let startRot = { x: 0, y: 0 };
+  let startPos = { x: 0, y: 0 };
+  let lastMove = { x: 0, y: 0, t: 0 };
+  let velocity = [0, 0];
+  let direction = [0, 0];
+  let totalMovement = [0, 0];
+  let raf = null;
+  let moveRaf = null;
+  const stopInertia = () => {
+    if (raf !== null) {
+      cancelAnimationFrame(raf);
+      raf = null;
+    }
+  };
+  const stopMove = () => {
+    if (moveRaf !== null) {
+      cancelAnimationFrame(moveRaf);
+      moveRaf = null;
+    }
+  };
+  const applySoon = () => {
+    if (moveRaf !== null) return;
+    moveRaf = requestAnimationFrame(() => {
+      moveRaf = null;
+      apply();
+    });
+  };
+  const settleBounds = () => {
+    const ty = clamp3(rot.y, bounds.yLo, bounds.yHi);
+    const tx = clamp3(rot.x, bounds.xLo, bounds.xHi);
+    if (ty === rot.y && tx === rot.x) return;
+    stopInertia();
+    const step = () => {
+      rot.y += (ty - rot.y) * 0.22;
+      rot.x += (tx - rot.x) * 0.22;
+      if (Math.abs(ty - rot.y) < 0.02 && Math.abs(tx - rot.x) < 0.02) {
+        rot.y = ty;
+        rot.x = tx;
+        apply();
+        raf = null;
+        return;
+      }
+      apply();
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+  };
+  const startInertia = (vx, vy) => {
+    const MAX_V = 1.4;
+    let vX = clamp3(vx, -MAX_V, MAX_V) * 80;
+    let vY = clamp3(vy, -MAX_V, MAX_V) * 80;
+    let frames = 0;
+    const d = clamp3(DOME_DRAG_DAMPENING, 0, 1);
+    const frictionMul = 0.94 + 0.055 * d;
+    const stopThreshold = 0.015 - 0.01 * d;
+    const maxFrames = Math.round(90 + 270 * d);
+    const step = () => {
+      vX *= frictionMul;
+      vY *= frictionMul;
+      if (Math.abs(vX) < stopThreshold && Math.abs(vY) < stopThreshold) {
+        raf = null;
+        settleBounds();
+        return;
+      }
+      if (++frames > maxFrames) {
+        raf = null;
+        settleBounds();
+        return;
+      }
+      const rawX = rot.x - vY / 200;
+      const rawY = rot.y + vX / 200;
+      if (!bounds.full && (rawY < bounds.yLo || rawY > bounds.yHi)) vX *= 0.82;
+      if (!bounds.full && (rawX < bounds.xLo || rawX > bounds.xHi)) vY *= 0.82;
+      rot.x = limitX(rawX);
+      rot.y = limitY(rawY);
+      apply();
+      raf = requestAnimationFrame(step);
+    };
+    stopInertia();
+    raf = requestAnimationFrame(step);
+  };
+  main.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (spot) return;
+    if (pointerActive) return;
+    pointerId = e.pointerId;
+    pointerActive = true;
+    stopInertia();
+    stopMove();
+    dragging = true;
+    moved = false;
+    downImg = e.target?.closest("img") ?? null;
+    startRot = { ...rot };
+    startPos = { x: e.clientX, y: e.clientY };
+    lastMove = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+    velocity = [0, 0];
+    direction = [0, 0];
+    totalMovement = [0, 0];
+    mount.classList.add("o-gal-grabbing");
+    try {
+      main.setPointerCapture(e.pointerId);
+    } catch {
+    }
+  });
+  main.addEventListener("pointermove", (e) => {
+    if (!pointerActive || e.pointerId !== pointerId) return;
+    const dt = e.timeStamp - lastMove.t;
+    const dx = e.clientX - lastMove.x;
+    const dy = e.clientY - lastMove.y;
+    totalMovement = [e.clientX - startPos.x, e.clientY - startPos.y];
+    lastMove = { x: e.clientX, y: e.clientY, t: e.timeStamp };
+    if (dt > 0) {
+      velocity = [Math.abs(dx) / dt, Math.abs(dy) / dt];
+      direction = [Math.sign(dx), Math.sign(dy)];
+    }
+    const dxTotal = e.clientX - startPos.x;
+    const dyTotal = e.clientY - startPos.y;
+    if (!moved && dxTotal * dxTotal + dyTotal * dyTotal > 16) moved = true;
+    const nextX = limitX(startRot.x - dyTotal / dragSensitivity);
+    const nextY = limitY(startRot.y + dxTotal / dragSensitivity);
+    if (rot.x !== nextX || rot.y !== nextY) {
+      rot.x = nextX;
+      rot.y = nextY;
+      applySoon();
+    }
+  });
+  const endDrag = (e) => {
+    if (!pointerActive || e.pointerId !== pointerId) return;
+    pointerActive = false;
+    pointerId = null;
+    dragging = false;
+    stopMove();
+    apply();
+    mount.classList.remove("o-gal-grabbing");
+    const dt = e.timeStamp - lastMove.t;
+    if (dt > 32) {
+      velocity = [0, 0];
+      direction = [0, 0];
+    }
+    let vx = velocity[0] * direction[0];
+    let vy = velocity[1] * direction[1];
+    if (Math.abs(vx) < 1e-3 && Math.abs(vy) < 1e-3) {
+      vx = clamp3(totalMovement[0] / dragSensitivity * 0.02, -1.2, 1.2);
+      vy = clamp3(totalMovement[1] / dragSensitivity * 0.02, -1.2, 1.2);
+    }
+    if (Math.abs(vx) > 5e-3 || Math.abs(vy) > 5e-3) startInertia(vx, vy);
+    else settleBounds();
+    if (moved) lastDragEndAt = performance.now();
+    moved = false;
+    try {
+      if (main.hasPointerCapture(e.pointerId)) main.releasePointerCapture(e.pointerId);
+    } catch {
+    }
+  };
+  main.addEventListener("pointerup", endDrag);
+  main.addEventListener("pointercancel", endDrag);
+  main.addEventListener("click", () => {
+    if (dragging) return;
+    if (moved) return;
+    if (performance.now() - lastDragEndAt < 80) return;
+    if (spot) return;
+    if (downImg && main.contains(downImg)) openSpotlight(downImg);
+  });
+}
+function compareRevealPercent(clientX, left, width) {
+  if (width <= 0) return 50;
+  return Math.min(100, Math.max(0, (clientX - left) / width * 100));
+}
+function buildCompare(mount, images, interactive) {
+  mount.appendChild(imgOf(images[0], 0, images));
+  if (!images[1]) {
+    if (interactive) attachSpotlight(mount);
+    return;
+  }
+  const top = document.createElement("div");
+  top.className = "o-gal-cmp-top";
+  top.appendChild(imgOf(images[1], 1, images));
+  const rule = document.createElement("div");
+  rule.className = "o-gal-cmp-rule";
+  const grip = document.createElement("div");
+  grip.className = "o-gal-cmp-grip";
+  grip.tabIndex = 0;
+  grip.setAttribute("role", "slider");
+  grip.setAttribute("aria-label", "Reveal image");
+  grip.setAttribute("aria-valuemin", "0");
+  grip.setAttribute("aria-valuemax", "100");
+  mount.append(top, rule, grip);
+  let pct = 50;
+  const apply = () => {
+    mount.style.setProperty("--cmp", `${pct}%`);
+    grip.setAttribute("aria-valuenow", String(Math.round(pct)));
+  };
+  apply();
+  if (!interactive) return;
+  let dragId = null;
+  let moved = false;
+  let startX = 0;
+  const onMove = (e) => {
+    if (e.pointerId !== dragId) return;
+    if (Math.abs(e.clientX - startX) > 3) moved = true;
+    const r = mount.getBoundingClientRect();
+    pct = compareRevealPercent(e.clientX, r.left, r.width);
+    apply();
+  };
+  const onUp = (e) => {
+    if (e.pointerId !== dragId) return;
+    dragId = null;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    window.setTimeout(() => {
+      moved = false;
+    }, 0);
+  };
+  mount.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || dragId !== null || spot) return;
+    dragId = e.pointerId;
+    moved = false;
+    startX = e.clientX;
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+  mount.addEventListener("click", (e) => {
+    if (moved) {
+      e.stopPropagation();
+      moved = false;
+    }
+  }, true);
+  grip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    e.stopPropagation();
+    pct = Math.min(100, Math.max(0, pct + (e.key === "ArrowRight" ? e.shiftKey ? 10 : 2 : e.shiftKey ? -10 : -2)));
+    apply();
+  });
+  attachSpotlight(mount);
+}
+var CAROUSEL_VISIBLE = 2;
+var CAROUSEL_STEP_MS = 2e3;
+var CAROUSEL_SPREAD = 46;
+function carouselSpread(containerWidth) {
+  if (!(containerWidth > 0)) return CAROUSEL_SPREAD;
+  return Math.max(CAROUSEL_SPREAD, Math.min(150, containerWidth * 0.2));
+}
+function carouselSlots(n, front, spread = CAROUSEL_SPREAD) {
+  const half = n / 2;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    let d = ((i - front) % n + n) % n;
+    if (d > half) d -= n;
+    const ad = Math.abs(d);
+    out.push(
+      ad > CAROUSEL_VISIBLE ? { d, x: 0, y: 0, rotate: 0, scale: 0.45, z: 0, opacity: 0, hidden: true } : { d, x: d * spread, y: ad * 16, rotate: d * 10, scale: 1 - ad * 0.14, z: 100 - ad, opacity: 1 - ad * 0.1, hidden: false }
+    );
+  }
+  return out;
+}
+function buildCarousel(mount, images, interactive) {
+  const n = images.length;
+  const cards = [];
+  images.forEach((im, i) => {
+    const card = document.createElement("div");
+    card.className = "o-gal-card";
+    card.appendChild(imgOf(im, i, images));
+    const tag = (im.tag ?? "").trim();
+    if (tag) {
+      const pill = document.createElement("span");
+      pill.className = "o-gal-card-tag";
+      pill.textContent = tag;
+      card.appendChild(pill);
+    }
+    const cap2 = (im.caption ?? "").trim();
+    if (cap2) {
+      const el7 = document.createElement("div");
+      el7.className = "o-gal-card-cap";
+      el7.textContent = cap2;
+      card.appendChild(el7);
+    }
+    mount.appendChild(card);
+    cards.push(card);
+  });
+  let front = 0;
+  const place = () => {
+    const spread = carouselSpread(mount.clientWidth);
+    carouselSlots(n, front, spread).forEach((s2, i) => {
+      const card = cards[i];
+      card.style.zIndex = String(s2.z);
+      card.style.opacity = String(s2.opacity);
+      card.style.pointerEvents = s2.hidden ? "none" : "auto";
+      card.style.transform = `translate(-50%, -50%) translate(${s2.x}px, ${s2.y}px) rotate(${s2.rotate}deg) scale(${s2.scale})`;
+    });
+  };
+  place();
+  if (!interactive) return;
+  if (n > 1 && !(typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+    const timer = window.setInterval(() => {
+      if (!mount.isConnected) {
+        window.clearInterval(timer);
+        return;
+      }
+      front = (front + 1) % n;
+      place();
+    }, CAROUSEL_STEP_MS);
+  }
+  let dragId = null;
+  let moved = false;
+  let startX = 0;
+  const onMove = (e) => {
+    if (e.pointerId !== dragId) return;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) < 60) return;
+    front = ((front + (dx > 0 ? -1 : 1)) % n + n) % n;
+    startX = e.clientX;
+    moved = true;
+    place();
+  };
+  const onUp = (e) => {
+    if (e.pointerId !== dragId) return;
+    dragId = null;
+    mount.classList.remove("o-gal-grabbing");
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+    window.setTimeout(() => {
+      moved = false;
+    }, 0);
+  };
+  mount.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || dragId !== null || spot) return;
+    dragId = e.pointerId;
+    moved = false;
+    startX = e.clientX;
+    mount.classList.add("o-gal-grabbing");
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  });
+  mount.addEventListener("click", (e) => {
+    if (moved) {
+      e.stopPropagation();
+      moved = false;
+    }
+  }, true);
+  attachSpotlight(mount);
+}
+function render(fig, d, still, interactive) {
+  const mount = mountOf(fig);
+  mount.textContent = "";
+  const images = (d.images ?? []).filter((im) => im.asset);
+  const style = still ? "single" : d.style;
+  mount.className = "o-gal o-gal-" + style + (still ? " o-gal-still" : "");
+  if (images.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "o-gal-empty";
+    empty.textContent = "No images yet";
+    mount.appendChild(empty);
+    return;
+  }
+  if (style === "accordion") {
+    images.forEach((im, i) => {
+      const panel = document.createElement("div");
+      panel.className = "o-gal-panel";
+      panel.tabIndex = 0;
+      panel.setAttribute("role", "group");
+      panel.style.setProperty("--i", String(i));
+      panel.appendChild(imgOf(im, i, images));
+      const label = document.createElement("span");
+      label.className = "o-gal-panel-label";
+      label.textContent = im.caption || im.alt || "";
+      panel.appendChild(label);
+      mount.appendChild(panel);
+    });
+    if (interactive) attachSpotlight(mount);
+    return;
+  }
+  if (style === "dome") {
+    buildDome(mount, images, interactive);
+    return;
+  }
+  if (style === "compare") {
+    buildCompare(mount, images, interactive);
+    return;
+  }
+  if (style === "carousel") {
+    buildCarousel(mount, images, interactive);
+    return;
+  }
+  if (style === "drift") {
+    const columns = Math.max(2, Math.min(6, Math.round(images.length / 2) + 1));
+    for (let c = 0; c < columns; c++) {
+      const col = document.createElement("div");
+      col.className = "o-gal-col" + (c % 2 === 0 ? " o-gal-col-up" : " o-gal-col-down");
+      col.style.setProperty("--dur", `${14 + c * 2.5}s`);
+      col.style.setProperty("--delay", `${-c * 1.7}s`);
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = c; i < images.length; i += columns) {
+          const tile = document.createElement("div");
+          tile.className = "o-gal-drift-tile";
+          tile.appendChild(imgOf(images[i], i, images));
+          const cap2 = capOf(images[i]);
+          if (cap2) tile.appendChild(cap2);
+          col.appendChild(tile);
+        }
+        if (images.length <= columns) break;
+      }
+      mount.appendChild(col);
+    }
+    if (interactive) attachSpotlight(mount);
+    return;
+  }
+  images.forEach((im, i) => {
+    const cell = document.createElement("div");
+    cell.className = "o-gal-cell";
+    cell.appendChild(imgOf(im, i, images));
+    const cap2 = capOf(im);
+    if (cap2) cell.appendChild(cap2);
+    mount.appendChild(cell);
+  });
+  if (interactive) attachSpotlight(mount);
+}
+function mountGalleries(slide, opts = {}) {
+  const interactive = opts.interactive !== false;
+  dismissSpotlight();
+  slide.querySelectorAll("figure.o-galleryfig").forEach((fig) => {
+    if (fig.hasAttribute("data-ogready")) return;
+    const d = parseGalleryData(fig);
+    if (!d) return;
+    fig.setAttribute("data-ogready", "");
+    render(fig, d, false, interactive);
+  });
+}
+function finalizeGalleries(slide) {
+  dismissSpotlight();
+  slide.querySelectorAll("figure.o-galleryfig").forEach((fig) => {
+    const d = parseGalleryData(fig);
+    if (d) render(fig, d, true, false);
+  });
+}
+
+// src/timeline.ts
+function normalizeTimelineData(raw) {
+  const d = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const orientation = d.orientation === "horizontal" ? "horizontal" : void 0;
+  const events = [];
+  if (Array.isArray(d.events)) {
+    for (const item of d.events) {
+      if (events.length >= TIMELINE_MAX_EVENTS) break;
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const e = item;
+      if (typeof e.title !== "string" || e.title.length < 1) continue;
+      const event = { title: e.title.slice(0, TIMELINE_TITLE_MAX) };
+      if (typeof e.date === "string" && e.date.length > 0) event.date = e.date.slice(0, TIMELINE_DATE_MAX);
+      if (typeof e.body === "string" && e.body.length > 0) event.body = e.body.slice(0, TIMELINE_BODY_MAX);
+      events.push(event);
+    }
+  }
+  return { ...orientation ? { orientation } : {}, events };
+}
+var el6 = (tag, className, parent) => {
+  const e = document.createElement(tag);
+  e.className = className;
+  parent?.appendChild(e);
+  return e;
+};
+function renderTimeline(figure, data) {
+  const mount = figure.querySelector("[data-timeline-mount]");
+  if (!mount) return;
+  const d = normalizeTimelineData(data);
+  mount.textContent = "";
+  mount.classList.add("o-timeline");
+  mount.classList.toggle("is-horizontal", d.orientation === "horizontal");
+  mount.classList.toggle("is-vertical", d.orientation !== "horizontal");
+  const wrap = el6("div", "o-timeline-wrap", mount);
+  const track = el6("div", "o-timeline-track", wrap);
+  if (d.events.length > 0) el6("div", "o-timeline-rail", track);
+  d.events.forEach((event, i) => {
+    const item = el6("div", "o-timeline-event", track);
+    el6("div", "o-timeline-marker", item).textContent = String(i + 1);
+    const card = el6("div", "o-timeline-card", item);
+    if (event.date) el6("div", "o-timeline-date", card).textContent = event.date;
+    el6("div", "o-timeline-title", card).textContent = event.title;
+    if (event.body) el6("div", "o-timeline-body", card).textContent = event.body;
+  });
+}
+function timelineContainerOf(block) {
+  return block.closest("figure, .o-timeline-shell") ?? block.parentElement;
+}
+function mountTimelines(slide) {
+  slide.querySelectorAll('script[data-odata="timeline"]').forEach((script) => {
+    const root = timelineContainerOf(script);
+    if (!root) return;
+    let current;
+    try {
+      current = normalizeTimelineData(JSON.parse(script.textContent || "{}"));
+    } catch {
+      current = { events: [] };
+    }
+    renderTimeline(root, current);
+  });
+}
+var finalizeTimelines = mountTimelines;
+
 // src/blocks/registry.ts
 var RUNTIME_BLOCKS = [
   // slide-kind dispatch (conditional on slide.kind), in KIND_BEHAVIOURS order
@@ -10807,7 +12815,10 @@ var RUNTIME_BLOCKS = [
   { key: "flow", sweep: { phase: "stage", mount: (s2) => mountFlows(s2), finalize: (s2) => finalizeFlows(s2) } },
   { key: "graph", sweep: { phase: "stage", mount: (s2) => mountGraphs(s2), finalize: (s2) => finalizeGraphs(s2) } },
   { key: "draw", sweep: { phase: "stage", mount: (s2) => mountDraws(s2), finalize: (s2) => finalizeDraws(s2) } },
-  { key: "venn", sweep: { phase: "stage", mount: (s2) => mountVenns(s2), finalize: (s2) => finalizeVenns(s2) } }
+  { key: "venn", sweep: { phase: "stage", mount: (s2) => mountVenns(s2), finalize: (s2) => finalizeVenns(s2) } },
+  { key: "calendar", sweep: { phase: "stage", mount: (s2) => mountCalendars(s2), finalize: (s2) => finalizeCalendars(s2) } },
+  { key: "gallery", sweep: { phase: "stage", mount: (s2) => mountGalleries(s2), finalize: (s2) => finalizeGalleries(s2) } },
+  { key: "timeline", sweep: { phase: "stage", mount: (s2) => mountTimelines(s2), finalize: (s2) => finalizeTimelines(s2) } }
 ];
 var KIND_BEHAVIOURS = Object.fromEntries(
   RUNTIME_BLOCKS.filter((b) => b.slide).map((b) => [b.key, b.slide])
@@ -10847,29 +12858,29 @@ function formatCount(t, v) {
   return t.prefix + n + t.suffix;
 }
 function mountCountUps(slide) {
-  slide.querySelectorAll("[data-count-to]").forEach((el6) => {
-    const raw = el6.getAttribute("data-count-to") ?? "";
+  slide.querySelectorAll("[data-count-to]").forEach((el7) => {
+    const raw = el7.getAttribute("data-count-to") ?? "";
     const target = parseCountTo(raw);
     if (!target) {
-      el6.textContent = raw;
+      el7.textContent = raw;
       return;
     }
     const t0 = performance.now();
     const tick = (t) => {
       const p = Math.min(1, (t - t0) / 800);
-      el6.textContent = p < 1 ? formatCount(target, target.value * p) : raw;
+      el7.textContent = p < 1 ? formatCount(target, target.value * p) : raw;
       if (p < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
 }
 function finalizeCountUps(slide) {
-  slide.querySelectorAll("[data-count-to]").forEach((el6) => {
-    el6.textContent = el6.getAttribute("data-count-to") ?? el6.textContent;
+  slide.querySelectorAll("[data-count-to]").forEach((el7) => {
+    el7.textContent = el7.getAttribute("data-count-to") ?? el7.textContent;
   });
 }
-function readSpark(el6) {
-  return (el6.getAttribute("data-spark") ?? "").split(",").map((s2) => Number(s2.trim())).filter((n) => Number.isFinite(n));
+function readSpark(el7) {
+  return (el7.getAttribute("data-spark") ?? "").split(",").map((s2) => Number(s2.trim())).filter((n) => Number.isFinite(n));
 }
 var SPARK_TONE = {
   accent: "var(--accent, #3F7268)",
@@ -10877,13 +12888,13 @@ var SPARK_TONE = {
   amber: "#B07D2B",
   red: "#B3402A"
 };
-function drawSpark(el6, animate) {
-  const vals = readSpark(el6);
+function drawSpark(el7, animate) {
+  const vals = readSpark(el7);
   if (vals.length < 2) {
-    el6.textContent = "";
+    el7.textContent = "";
     return;
   }
-  const W = 100, H = 30, color = SPARK_TONE[el6.getAttribute("data-spark-tone") ?? "accent"] ?? SPARK_TONE.accent;
+  const W = 100, H = 30, color = SPARK_TONE[el7.getAttribute("data-spark-tone") ?? "accent"] ?? SPARK_TONE.accent;
   const min = Math.min(...vals), max = Math.max(...vals), span2 = max - min || 1;
   const step = W / (vals.length - 1);
   const pts = vals.map((v, i) => `${Math.round(i * step * 100) / 100},${Math.round((H - 3 - (v - min) / span2 * (H - 6)) * 100) / 100}`);
@@ -10920,14 +12931,14 @@ function drawSpark(el6, animate) {
       line.style.strokeDashoffset = "0";
     });
   }
-  el6.textContent = "";
-  el6.appendChild(svg);
+  el7.textContent = "";
+  el7.appendChild(svg);
 }
 function mountSparklines(slide) {
-  slide.querySelectorAll(".o-spark[data-spark]").forEach((el6) => drawSpark(el6, true));
+  slide.querySelectorAll(".o-spark[data-spark]").forEach((el7) => drawSpark(el7, true));
 }
 function finalizeSparklines(slide) {
-  slide.querySelectorAll(".o-spark[data-spark]").forEach((el6) => drawSpark(el6, false));
+  slide.querySelectorAll(".o-spark[data-spark]").forEach((el7) => drawSpark(el7, false));
 }
 function mountKind(kind, slide) {
   KIND_BEHAVIOURS[kind]?.mount?.(slide);
@@ -10963,8 +12974,8 @@ var INLINE_OK = /* @__PURE__ */ new Set([
   "VAR",
   "SAMP"
 ]);
-function isInlineEditable(el6) {
-  for (const d of el6.querySelectorAll("*")) if (!INLINE_OK.has(d.tagName)) return false;
+function isInlineEditable(el7) {
+  for (const d of el7.querySelectorAll("*")) if (!INLINE_OK.has(d.tagName)) return false;
   return true;
 }
 function liteEditNodes(scope) {
@@ -11002,19 +13013,19 @@ var DROP = /* @__PURE__ */ new Set([
 function sanitizeInline(html) {
   const t = document.createElement("template");
   t.innerHTML = html;
-  for (const el6 of Array.from(t.content.querySelectorAll("*"))) {
-    if (DROP.has(el6.tagName)) {
-      el6.remove();
+  for (const el7 of Array.from(t.content.querySelectorAll("*"))) {
+    if (DROP.has(el7.tagName)) {
+      el7.remove();
       continue;
     }
-    if (!INLINE_OK.has(el6.tagName)) {
-      el6.replaceWith(...Array.from(el6.childNodes));
+    if (!INLINE_OK.has(el7.tagName)) {
+      el7.replaceWith(...Array.from(el7.childNodes));
       continue;
     }
-    for (const attr of Array.from(el6.attributes)) {
+    for (const attr of Array.from(el7.attributes)) {
       const name = attr.name.toLowerCase();
-      const keep = name === "class" || el6.tagName === "A" && name === "href" && !HREF_BAD.test(attr.value) || name === "style" && SAFE_COLOR_STYLE.test(attr.value);
-      if (!keep) el6.removeAttribute(attr.name);
+      const keep = name === "class" || el7.tagName === "A" && name === "href" && !HREF_BAD.test(attr.value) || name === "style" && SAFE_COLOR_STYLE.test(attr.value);
+      if (!keep) el7.removeAttribute(attr.name);
     }
   }
   return t.innerHTML;
@@ -11110,7 +13121,10 @@ svg { text-rendering: geometricPrecision; }
    data figure consumes --obw itself, below), not the whole fold \u2014 a narrow block must not drag the
    fold's title and prose in with it. A --obw WIDER than the default still grows the fold, exactly
    as before; 90vw stays the viewport guard. */
-.slide-inner { width: min(max(var(--obw, 2600px), 2600px), 90vw); margin: 0 auto; padding: clamp(72px, 12vh, 128px) 0; position: relative; }
+/* 0.4.5: the masthead air gap \u2014 the 72\u2013128px top pad read as dead space between the masthead and
+   the first block at every size. Clamped to a fraction of that so the fold's content starts where
+   the eye expects it, and the bottom keeps the old breathing room. */
+.slide-inner { width: min(max(var(--obw, 2600px), 2600px), 90vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 clamp(64px, 11vh, 120px); position: relative; }
 /* blocks inserted beside a kind component (roadmap/tracker/flow/graph folds
    have no .slide-inner) get the standard column gutter instead of full-bleed */
 .k-gantt > :not(.o-gantt-shell), .k-tracker > :not(.o-tracker-shell),
@@ -11120,19 +13134,31 @@ svg { text-rendering: geometricPrecision; }
 }
 .eyebrow {
   font-size: calc(13px * var(--osz, 1)); font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.2em; color: var(--accent); margin: 0 0 22px;
+  letter-spacing: 0.2em; color: var(--accent); margin: 0 0 14px;
 }
 h1 {
   font-family: var(--font-display); font-weight: 600;
-  font-size: calc(clamp(48px, 7.5vw, 96px) * var(--osz, 1)); line-height: 1.02;
+  /* 0.4.5: the browser-scaling change made these clamps run ~20% larger on screen than they used
+     to, so the DEFAULTS come down by the same amount \u2014 text and titles surrender the room to the
+     visuals instead of pushing them off the fold. --osz presets and per-block overrides sit on top
+     of these and are untouched.
+     0.4.5 UAT, SECOND STEP: still "overly large at their default layout, dominating the screen".
+     The reference is the one every author already knows \u2014 PowerPoint's default 44pt title on a
+     13.333in slide, which is 4.6% of the slide WIDTH. A card is 1280 logical px wide, so the vw
+     term is what has to match that fraction: 6vw = 76.8px was 6% of the card, 4.5vw = 57.6px is
+     4.5%. Every other default here is scaled by the same move, so the type keeps its own hierarchy
+     and only the whole stack comes down. The FLOORS come down less than the ceilings on purpose \u2014
+     a floor only ever binds on a card drawn far below 1280, where legibility, not proportion, is
+     the constraint. */
+  font-size: calc(clamp(32px, 4.5vw, 58px) * var(--osz, 1)); line-height: 1.02;
   letter-spacing: -0.022em; margin: 0 0 28px;
 }
 h2 {
   font-family: var(--font-display); font-weight: 600;
-  font-size: calc(clamp(36px, 4.8vw, 60px) * var(--osz, 1)); line-height: 1.06;
+  font-size: calc(clamp(24px, 3vw, 38px) * var(--osz, 1)); line-height: 1.06;
   letter-spacing: -0.018em; margin: 0 0 26px;
 }
-.lede { font-size: calc(clamp(19px, 2.1vw, 26px) * var(--osz, 1)); color: var(--ink-soft); max-width: 56ch; line-height: 1.55; }
+.lede { font-size: calc(clamp(14px, 1.4vw, 18px) * var(--osz, 1)); color: var(--ink-soft); max-width: 56ch; line-height: 1.55; }
 p { margin: 0 0 14px; font-size: calc(1em * var(--osz, 1)); }
 /* divider: tone dots colour it; a dedicated thickness control sets data-othick (1\u20138px) */
 .rule { border: none; border-top: calc(var(--othk, 1) * 1px) solid var(--rule); margin: 28px 0; }
@@ -11164,8 +13190,14 @@ p { margin: 0 0 14px; font-size: calc(1em * var(--osz, 1)); }
 .card-grid[data-ocols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .card-grid[data-ocols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .card-grid[data-ocols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.stat-card { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: clamp(24px, 3vw, 40px); box-shadow: 0 1px 2px rgba(26,26,26,0.04), 0 6px 24px rgba(26,26,26,0.05); }
-.stat-card .big { font-family: var(--font-display); font-size: calc(clamp(48px, 5.5vw, 84px) * var(--osz, 1)); font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
+.stat-card { background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; padding: clamp(24px, 3vw, 40px); box-shadow: 0 1px 2px rgba(26,26,26,0.04), 0 6px 24px rgba(26,26,26,0.05); min-width: 0; }
+/* 0.4.5: a card's own text scales to its track instead of running off it. minmax(0,1fr) tracks
+   (above) let the card shrink; these let the WORDS wrap inside it \u2014 a long number or label breaks
+   rather than overflowing the card edge (the UAT "38/WWEBCMCP TOOLS" overflow). */
+.stat-card { overflow-wrap: anywhere; }
+.stat-card .big { overflow-wrap: anywhere; hyphens: none; }
+.stat-card .lbl { overflow-wrap: anywhere; }
+.stat-card .big { font-family: var(--font-display); font-size: calc(clamp(32px, 3.6vw, 52px) * var(--osz, 1)); font-weight: 600; line-height: 1; letter-spacing: -0.02em; }
 .stat-card .lbl { font-size: calc(14px * var(--osz, 1)); font-weight: 600; color: var(--ink-soft); margin-top: 14px; text-transform: uppercase; letter-spacing: 0.08em; }
 /* CARD BACKGROUND FILL \u2014 the same soft-tint recipe as a text block's fill (data-ofill on .o-text,
    below) and a table cell's (data-ofill on td/th, further down) \u2014 one mental model for "fill" across
@@ -11184,7 +13216,7 @@ p { margin: 0 0 14px; font-size: calc(1em * var(--osz, 1)); }
    (round H's auto inline-block "lockup" hijacked the next block onto the
    stamp's line, which misplaced inserts and broke the gap dots \u2014 dropped.) */
 /* --sw (continuous, from the drag handle) wins over --osz (the discrete A\u2212/A+ enum) when set */
-.o-cover-mark { display: block; height: calc(72px * var(--sw, var(--osz, 1))); width: auto; max-width: calc(300px * var(--sw, var(--osz, 1))); object-fit: contain; object-position: left; margin-bottom: 28px; }
+.o-cover-mark { display: block; height: calc(56px * var(--sw, var(--osz, 1))); width: auto; max-width: calc(300px * var(--sw, var(--osz, 1))); object-fit: contain; object-position: left; margin-bottom: 16px; }
 .o-text { margin: 14px 0; font-size: calc(1em * var(--osz, 1)); }
 /* paragraphs inside a text block read as one flowing box, not stacked blocks */
 .o-text p { margin: 0 0 8px; }
@@ -11296,6 +13328,10 @@ figure.o-img[data-owidth]:has(+ figure.o-img[data-owidth]) + figure.o-img[data-o
 [data-ofont="inter"] { font-family: 'Inter', "Segoe UI", Arial, sans-serif; }
 [data-ofont="source-serif"] { font-family: 'Source Serif 4', Georgia, serif; }
 [data-ofont="caveat"] { font-family: 'Caveat', "Segoe Script", cursive; }
+[data-ofont="dm-serif"] { font-family: 'DM Serif Display', Georgia, serif; }
+[data-ofont="bitter"] { font-family: 'Bitter', Georgia, serif; }
+[data-ofont="space-grotesk"] { font-family: 'Space Grotesk', "Segoe UI", Arial, sans-serif; }
+[data-ofont="nunito"] { font-family: 'Nunito', "Segoe UI", Arial, sans-serif; }
 /* header-row / first-column fill \u2014 the colour is a settable var (data-ohead-tone),
    defaulting to accent; 14% mix so a chosen colour actually reads */
 table.o-table[data-ohead="row"] th, table.o-table[data-ohead="both"] th {
@@ -11336,18 +13372,32 @@ table.o-table[data-ocolsized] { table-layout: fixed; }
 .o-quote {
   border-left: 3px solid var(--accent); margin: 28px 0; padding: 6px 0 6px 28px;
   font-family: var(--font-display); font-style: italic;
-  font-size: calc(clamp(24px, 2.7vw, 36px) * var(--osz, 1)); line-height: 1.45; color: var(--ink);
+  font-size: calc(clamp(17px, 1.9vw, 24px) * var(--osz, 1)); line-height: 1.45; color: var(--ink);
 }
 .o-quote footer {
   margin-top: 14px; font-family: var(--font-body); font-style: normal;
   font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-soft);
 }
-table.o-table { width: 100%; border-collapse: collapse; margin: 24px 0; font-size: calc(clamp(15px, 1.6vw, 19px) * var(--osz, 1)); }
-.o-table th {
-  text-align: left; font-size: calc(12.5px * var(--osz, 1)); font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--ink-soft); border-bottom: 2px solid var(--ink); padding: 10px 18px 10px 0;
+table.o-table {
+  width: 100%; border-collapse: separate; border-spacing: 0; margin: 24px 0;
+  font-size: calc(clamp(14px, 1.45vw, 17px) * var(--osz, 1));
+  background: color-mix(in srgb, var(--ink) 3.5%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--ink) 12%, var(--paper));
+  border-radius: 16px; overflow: hidden;
 }
-.o-table td { border-bottom: 1px solid var(--rule); padding: 13px 18px 13px 0; vertical-align: top; }
+.o-table th {
+  text-align: left; font-size: calc(12px * var(--osz, 1)); font-weight: 600; text-transform: none;
+  letter-spacing: 0.02em; color: var(--ink-soft);
+  background: color-mix(in srgb, var(--ink) 5%, var(--paper));
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, var(--paper));
+  padding: 12px 16px; vertical-align: middle;
+}
+.o-table td {
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 8%, var(--paper));
+  padding: 13px 16px; vertical-align: middle; color: var(--ink);
+}
+.o-table tbody tr:last-child td { border-bottom: none; }
+.o-table tbody tr:hover td { background: color-mix(in srgb, var(--ink) 3.5%, transparent); }
 .o-btn {
   display: inline-block; background: var(--accent); color: #fff; border-radius: 8px;
   padding: 13px 28px; font-weight: 600; font-size: calc(15px * var(--osz, 1)); text-decoration: none; margin: 10px 0;
@@ -11446,7 +13496,7 @@ figure.o-img[data-owidth]:has(+ figure.o-img[data-ograd][data-owidth]) + figure.
    :where()-zeroed [data-opos] margin-left above, so they keep the translate but drop the
    margin and lurch LEFT (the image-inversion bug \u2014 o-img was missing here entirely).
    Re-assert the positional margin for every media figure at matching specificity. */
-figure.o-img[data-opos], figure.o-videofig[data-opos], figure.o-chartfig[data-opos] {
+figure.o-img[data-opos], figure.o-videofig[data-opos], figure.o-chartfig[data-opos], figure.o-calendarfig[data-opos] {
   margin-left: calc(var(--op, 0) * 10%);
 }
 
@@ -11465,6 +13515,14 @@ figure.o-img[data-opos], figure.o-videofig[data-opos], figure.o-chartfig[data-op
    width:max-content shrinks a layer to its content (a title-sized box that moves cleanly);
    max-width:100% caps a paragraph at the frame; the block-width grip still overrides. */
 [data-ofloat] { position: absolute; margin: 0; z-index: 1; translate: -50% -50%; width: max-content; max-width: 100%; }
+/* A QUADRANT LAYER IS ANCHORED BY ITS TOP-LEFT CORNER, not its centre. The auto-placed chart grid
+   writes each slot as a top-left rect (left/top px, width 582px \u2014 palette.ts CHART_QUADRANTS), so the
+   centre anchor above drew every quadrant half its size up and to the left of its slot. The rect is
+   the intent, so it positions the corner. Height-independent: the chart's own height never enters, so
+   the corner agrees on the editor and the viewer even though their frame widths differ. The alias
+   dissolves the moment the author moves the layer (startFloatDrag converts it to the centre model and
+   drops data-oquad), so a moved chart is an ordinary centre-anchored float. */
+[data-oquad] { translate: none; }
 /* A LAYER HAS NO MARGINS, said again at a weight that actually wins. The top property positions the
    MARGIN edge of an absolutely positioned box, so any vertical margin a kind's own sheet leaves on
    the block moves the layer off the point the author dropped it \u2014 and the rule above is (0,1,0),
@@ -11644,7 +13702,7 @@ var LEDGER_EDITOR_CSS = `
    whole-slide fold, which the runtime still renders for older decks. .o-shell.open .viewport
    (4 classes) still outranks both, so Expand is unaffected. */
 .o-table-shell .o-ledger .viewport,
-.slide-inner > figure.o-tablefig:only-of-type .o-ledger .viewport { max-height:min(var(--obh, var(--ofit, 72vh)), 90vh); }
+.slide-inner > figure.o-tablefig[data-o-ledger-fold-seed] .o-ledger .viewport { height:min(var(--obh, var(--ofit, 72vh)), 90vh);max-height:min(var(--obh, var(--ofit, 72vh)), 90vh); }
 /* NB: no min-width:100% \u2014 with table-layout:fixed, forcing the table wider than its natural (sum-of-
    columns) width makes the fixed-layout algorithm redistribute the surplus across every column, which
    silently re-inflates a column dragged down to a sliver width (it no longer renders at the width the
@@ -11817,7 +13875,7 @@ var LEDGER_EDITOR_CSS = `
 .o-ledger .swatches .chip.fill-plum { background:#ebdcec; } .o-ledger .swatches .chip.fill-mist { background:#e6e3da; } .o-ledger .swatches .chip.fill-forest2 { background:#cfe3da; }
 .o-ledger .swatches .chip.fill-highlight { background:#fbf0c9; } .o-ledger .swatches .chip.fill-inkwash { background:#dcd7cc; }
 .o-ledger .pop .fill-custom { display:flex; align-items:center; gap:8px; margin-top:11px; font-size:11.5px; color:var(--lg-ink-soft); cursor:pointer; }
-.o-ledger .pop .fill-custom input[type=color] { width:28px; height:22px; padding:0; border:1px solid var(--lg-rule-strong); border-radius:6px; background:none; cursor:pointer; }
+.o-ledger .pop .fill-custom button { width:28px; height:22px; padding:0; border:1px solid var(--lg-rule-strong); border-radius:6px; background:none; cursor:pointer; }
 .o-ledger .fmtmenu { display:flex; flex-direction:column; gap:2px; }
 .o-ledger .fmtmenu .fitem { display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:7px; cursor:pointer; font-size:12.5px; color:var(--lg-ink); }
 .o-ledger .fmtmenu .fitem:hover { background:var(--lg-forest-soft); color:var(--lg-forest-deep); }
@@ -11975,14 +14033,14 @@ var RUNTIME_CSS = `
    true with a ResizeObserver. Only padding-top is restated; the bottom keeps its clamp.
    NO EXTRA GAP ON TOP OF THE MEASURED HEIGHT \u2014 a decision, not an omission. n px of gap is n px of
    movement for every deck whose band lands within n px of the constant, and the default band is
-   66px against a 72px floor. A small band already has the constant's 72-128px of air; a large one
-   gets what the editor draws, where #masthead is position:static and #mount starts where it ends.
+   66px against a 24px floor. A small band already has the fold's own top pad; a large one
+    gets what the editor draws, where #masthead is position:static and #mount starts where it ends.
    SCOPED TO .o-stage, load-bearing twice. PRINT: the print block hides .o-top and prints the
    .o-print clones, a SIBLING of the stage \u2014 unscoped, they would carry a blank strip for a band
    that is not on the paper. BYTES: .slide-inner lives in BASE_CSS, embedded in every saved file and
    byte-frozen by a golden test; this lives in RUNTIME_CSS, so the fix costs no deck bytes and still
    reaches decks written before it existed. */
-.o-stage .slide-inner { padding-top: max(clamp(72px, 12vh, 128px), var(--mast-h, 0px)); }
+.o-stage .slide-inner { padding-top: max(clamp(24px, 5vh, 48px), var(--mast-h, 0px)); }
 .o-scroll .o-stage .slide:not(.k-document) .slide-inner { padding-top: max(clamp(28px, 5vh, 56px), var(--mast-h, 0px)); }
 /* THE KIND-COMPONENT FOLDS NEED THE SAME OFFSET, AND HAVE NO .slide-inner TO PUT IT ON.
    A roadmap / flowchart / node-graph / grid / ledger / tracker fold is its kind's SHELL \u2014 the shell
@@ -11996,7 +14054,7 @@ var RUNTIME_CSS = `
    for living in RUNTIME_CSS: it costs no deck bytes and reaches decks written before it existed. */
 .o-stage .o-flow-shell, .o-stage .o-graph-shell, .o-stage .o-gantt-shell,
 .o-stage .o-grid-shell, .o-stage .o-table-shell, .o-stage .o-tracker-shell {
-  padding-top: max(clamp(56px, 9vh, 96px), var(--mast-h, 0px));
+  padding-top: max(clamp(24px, 5vh, 48px), var(--mast-h, 0px));
 }
 /* A DOCUMENT MOVES BY ITS MARGIN, NEVER ITS PADDING. The paginator READS .o-doc's computed padding
    to decide where a page's text must stop (see document-css.ts), so inflating it here would push
@@ -12033,6 +14091,43 @@ var RUNTIME_CSS = `
 }
 .o-tab:hover { color: var(--accent); }
 .o-tab.o-active { color: var(--mast-ink, var(--chrome-ink, var(--ink))); border-bottom-color: var(--accent); }
+/* PRESENT CAROUSEL. On a large deck the plain tab list is busy; in Present only, the strip
+   becomes a carousel \u2014 the selected card sits centred at full strength, its neighbours step
+   down in scale and opacity, and the rest drop out. How many neighbours show is DYNAMIC: the
+   strip's measured width decides, so a phone shows a few and a wide browser shows as many as
+   fit. viewer.ts writes --o-carousel-room (the free span between the title block and the
+   actions) and the per-card --o-tab-op / --o-tab-sc fade steps; the strip is scrolled so the
+   active card stays centred. Clicking a neighbour still navigates. */
+.o-present .o-tabs {
+  /* CENTRED ON THE VIEWPORT, not on whatever is left after the title and actions: the strip is
+     lifted out of the header's flex row and pinned to the header's own centre. Its width is the
+     measured room between the title and the buttons (clamped to a floor and a ceiling), so it
+     never runs under either, and the ::before/::after spacers (half the strip each) let the
+     ACTIVE card sit dead-centre even when it is the first or last one. */
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  flex: none; width: clamp(220px, var(--o-carousel-room, 780px), 1800px);
+  justify-content: flex-start; gap: 8px; overflow: hidden; scroll-behavior: smooth;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 7%, #000 93%, transparent 100%);
+}
+.o-present .o-tabs::before, .o-present .o-tabs::after { content: ""; flex: 0 0 50%; }
+/* Edit / Present stay top-right, clear of the centred carousel */
+.o-present .o-actions { margin-left: auto; position: relative; z-index: 2; }
+.o-present .o-tab {
+  flex: 0 0 auto; border-bottom: none; transform-origin: center bottom;
+  /* the fade steps are per-card custom properties, so any distance works \u2014 not just 0..4 */
+  opacity: var(--o-tab-op, 1); transform: scale(var(--o-tab-sc, 1));
+  transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), color 0.3s ease;
+}
+.o-present .o-tab.o-active { color: var(--mast-ink, var(--chrome-ink, var(--ink))); }
+.o-present .o-tab.o-active::after { content: ""; display: block; height: 2px; margin-top: 5px; border-radius: 2px; background: var(--accent); }
+/* viewer.ts hides the cards that do not fit, by attribute: the count is derived at runtime from
+   the measured width, so no fixed distance rule can express it */
+.o-present .o-tab[data-off] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .o-present .o-tabs { scroll-behavior: auto; }
+  .o-present .o-tab { transition: none; }
+}
 .o-actions { display: flex; gap: 8px; }
 .o-actions button {
   border: 1px solid var(--rule); background: rgba(255,255,255,0.6); color: var(--ink-soft);
@@ -12347,31 +14442,34 @@ function createViewer(manifest, hooks, assets = {}) {
   const progress = root.querySelector(".o-progress");
   const overlay = root.querySelector(".o-overlay");
   const printHost = root.querySelector(".o-print");
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(() => layoutCarousel()).observe(tabs, { box: "border-box" });
+  }
   function cloneSlide(id, forPrint = false) {
     const t = tpl(id);
     const meta = manifest.slides[id];
-    const el6 = document.createElement("section");
-    el6.className = "slide k-" + (meta?.kind ?? "unknown");
-    el6.setAttribute("data-slide-id", id);
-    if (meta?.bg) el6.style.setProperty(meta.kind === "document" ? "--fold-paper" : "--fold-bg", meta.bg);
-    el6.appendChild(t.content.cloneNode(true));
-    el6.querySelectorAll('script:not([type="application/json"])').forEach((s2) => {
+    const el7 = document.createElement("section");
+    el7.className = "slide k-" + (meta?.kind ?? "unknown");
+    el7.setAttribute("data-slide-id", id);
+    if (meta?.bg) el7.style.setProperty(meta.kind === "document" ? "--fold-paper" : "--fold-bg", meta.bg);
+    el7.appendChild(t.content.cloneNode(true));
+    el7.querySelectorAll('script:not([type="application/json"])').forEach((s2) => {
       if (forPrint) {
         s2.remove();
         return;
       }
       if (!s2.src) s2.textContent = "(function(){\n" + (s2.textContent ?? "") + "\n})();";
     });
-    resolveAssetRefs(el6, assets);
-    mountCloneBlocks(el6, {
+    resolveAssetRefs(el7, assets);
+    mountCloneBlocks(el7, {
       assets,
       capabilities: manifest.capabilities ?? [],
       forPrint,
       referrerless: location.protocol === "file:" || window.origin === "null"
     });
     const stored = edits.get(id);
-    if (stored) applyEdits(el6, stored);
-    return el6;
+    if (stored) applyEdits(el7, stored);
+    return el7;
   }
   function applyEdits(slide, values) {
     liteEditNodes(slide).forEach((n, i) => {
@@ -12448,13 +14546,98 @@ function createViewer(manifest, hooks, assets = {}) {
       else n.removeAttribute("contenteditable");
     });
   }
+  const OPACITY_BY_DIST = [1, 0.72, 0.5, 0.34, 0.18, 0.12, 0.09, 0.07, 0.05, 0.04, 0.03];
+  const SCALE_BY_DIST = [1.12, 0.95, 0.87, 0.81, 0.76, 0.72, 0.69, 0.66, 0.64, 0.62, 0.6];
+  const stepAt = (steps2, dist) => steps2[Math.min(dist, steps2.length - 1)];
+  const tabWidths = [];
+  function publishCarouselRoom() {
+    const header = topEl.getBoundingClientRect();
+    if (header.width <= 0) return;
+    const cx = header.left + header.width / 2;
+    let left = header.left;
+    let right = header.right;
+    for (const child of Array.from(topEl.children)) {
+      if (child === tabs) continue;
+      const r = child.getBoundingClientRect();
+      if (r.width <= 0) continue;
+      if (r.right <= cx && r.right > left) left = r.right;
+      else if (r.left >= cx && r.left < right) right = r.left;
+    }
+    const room = Math.max(0, 2 * Math.min(cx - left, right - cx) - 16);
+    const next = `${Math.round(room)}px`;
+    if (document.documentElement.style.getPropertyValue("--o-carousel-room") !== next) {
+      document.documentElement.style.setProperty("--o-carousel-room", next);
+    }
+  }
+  function layoutCarousel() {
+    const tabEls = Array.from(tabs.querySelectorAll(".o-tab"));
+    const activeAt = tabEls.findIndex((t) => t.classList.contains("o-active"));
+    if (activeAt < 0) return;
+    if (document.documentElement.classList.contains("o-present")) {
+      const widths = tabEls.map((t, k) => {
+        const w = t.offsetWidth;
+        if (w > 0) tabWidths[k] = w;
+        return w || tabWidths[k] || 0;
+      });
+      const style2 = getComputedStyle(tabs);
+      const gap = parseFloat(style2.columnGap || style2.gap) || 0;
+      const budget = tabs.clientWidth / 2 - widths[activeAt] / 2;
+      const fit = (dir) => {
+        let acc = budget;
+        let n = 0;
+        for (let k = activeAt + dir; k >= 0 && k < tabEls.length; k += dir) {
+          const need = gap + widths[k];
+          if (need > acc) break;
+          acc -= need;
+          n++;
+        }
+        return n;
+      };
+      const leftFit = fit(-1);
+      const rightFit = fit(1);
+      tabEls.forEach((t, k) => {
+        const dist = Math.abs(k - activeAt);
+        const shown = k < activeAt ? activeAt - k <= leftFit : k - activeAt <= rightFit;
+        const off = !shown;
+        if (off !== t.hasAttribute("data-off")) {
+          if (off) t.setAttribute("data-off", "");
+          else t.removeAttribute("data-off");
+        }
+        t.style.setProperty("--o-tab-op", String(stepAt(OPACITY_BY_DIST, dist)));
+        t.style.setProperty("--o-tab-sc", String(stepAt(SCALE_BY_DIST, dist)));
+      });
+    } else {
+      tabEls.forEach((t, k) => {
+        tabWidths[k] = t.offsetWidth;
+        t.removeAttribute("data-off");
+        t.style.removeProperty("--o-tab-op");
+        t.style.removeProperty("--o-tab-sc");
+      });
+    }
+    centreActive();
+  }
+  let centreRaf = 0;
+  function centreActive() {
+    if (centreRaf) cancelAnimationFrame(centreRaf);
+    centreRaf = requestAnimationFrame(() => {
+      centreRaf = 0;
+      const active = tabs.querySelector(".o-tab.o-active");
+      if (!active) return;
+      const tr = tabs.getBoundingClientRect();
+      const ar = active.getBoundingClientRect();
+      tabs.scrollLeft += ar.left + ar.width / 2 - (tr.left + tr.width / 2);
+    });
+  }
   function markActive(i) {
     progress.textContent = `${i + 1} / ${visibleOrder.length}`;
     const head = String(headOf(i));
-    tabs.querySelectorAll(".o-tab").forEach(
-      (t) => t.classList.toggle("o-active", t.getAttribute("data-head") === head)
-    );
-    tabs.querySelector(".o-tab.o-active")?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    const tabEls = Array.from(tabs.querySelectorAll(".o-tab"));
+    const activeAt = tabEls.findIndex((t) => t.getAttribute("data-head") === head);
+    tabEls.forEach((t, k) => {
+      t.classList.toggle("o-active", k === activeAt);
+      t.setAttribute("data-dist", String(Math.abs(k - activeAt)));
+    });
+    layoutCarousel();
     pips.querySelectorAll(".o-pip").forEach(
       (p) => p.classList.toggle("o-active", p.getAttribute("data-head") === head)
     );
@@ -12478,6 +14661,7 @@ function createViewer(manifest, hooks, assets = {}) {
     reserveCardBandsWhenSettled(slide);
     requestAnimationFrame(() => slide.classList.add("is-shown"));
     window.scrollTo(0, 0);
+    stage.scrollTop = 0;
     markActive(idx);
   }
   function mountContinuous() {
@@ -12569,6 +14753,10 @@ function createViewer(manifest, hooks, assets = {}) {
     document.documentElement.classList.add("o-present");
     document.documentElement.classList.remove("o-chrome-hidden");
     document.documentElement.requestFullscreen?.().catch(() => void 0);
+    requestAnimationFrame(() => {
+      publishCarouselRoom();
+      layoutCarousel();
+    });
   }
   function exitModes() {
     setOverlay("");
@@ -12675,12 +14863,29 @@ function createViewer(manifest, hooks, assets = {}) {
       });
     });
   });
+  let carouselRaf = 0;
+  window.addEventListener("resize", () => {
+    if (carouselRaf) return;
+    carouselRaf = requestAnimationFrame(() => {
+      carouselRaf = 0;
+      if (!document.documentElement.classList.contains("o-present")) return;
+      publishCarouselRoom();
+      layoutCarousel();
+    });
+  });
   window.addEventListener("beforeprint", () => {
     captureEdits();
     refreshPrint();
   });
   document.addEventListener("fullscreenchange", () => {
-    if (!document.fullscreenElement) document.documentElement.classList.remove("o-present");
+    if (!document.fullscreenElement) {
+      document.documentElement.classList.remove("o-present");
+      return;
+    }
+    if (document.documentElement.classList.contains("o-present")) {
+      publishCarouselRoom();
+      layoutCarousel();
+    }
   });
   renderNav();
   if (isScroll) mountContinuous();
@@ -12708,12 +14913,24 @@ var coverCss = `/* @kind:cover */
   content: ""; display: block; width: 64px; height: 3px;
   background: var(--accent); margin-top: 44px; border-radius: 2px;
 }
+.k-cover .slide-inner.o-cover-centered {
+  box-sizing: border-box; height: 100%; padding: 180px 0;
+  display: flex; flex-direction: column; justify-content: center; justify-content: safe center;
+}
+.k-cover .slide-inner.o-cover-centered > .o-cover-mark {
+  position: absolute; top: 48px; left: 0;
+}
+.k-cover .slide-inner.o-cover-centered > .eyebrow {
+  position: absolute; top: 120px; left: 0;
+}
+.k-cover .slide-inner.o-cover-centered > .lede { margin-bottom: 0; }
+.k-cover .slide-inner.o-cover-centered::after { content: none; }
 /* @endkind */
 `;
 
 // src/blocks/bullets-css.ts
 var bulletsCss = `/* @kind:bullets */
-.k-bullets ul { list-style: none; padding: 0; margin: 10px 0 0; font-size: calc(clamp(20px, 2.2vw, 27px) * var(--osz, 1)); line-height: 1.6; }
+.k-bullets ul { list-style: none; padding: 0; margin: 10px 0 0; font-size: calc(clamp(15px, 1.5vw, 19px) * var(--osz, 1)); line-height: 1.6; }
 .k-bullets li { padding: 16px 0 16px 36px; position: relative; border-bottom: 1px solid var(--rule-soft); font-size: calc(1em * var(--osz, 1)); }
 .k-bullets li::before { content: "\u2014"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
 .k-bullets li:last-child { border-bottom: none; }
@@ -12752,7 +14969,7 @@ var ganttCss = `/* @kind:gantt */
 .k-gantt { justify-content: flex-start; }
 /* --obw is FLOORED at the kind default: a narrow block never drags the fold's title in with it
    (the .o-gantt-wrap below consumes --obw itself); a wider --obw still grows the whole fold. */
-.o-gantt-shell { width: min(max(var(--obw, 1480px), 1480px), 96vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 32px; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.o-gantt-shell { width: min(max(var(--obw, 1480px), 1480px), 96vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 32px; display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .o-gantt-head .eyebrow { margin-bottom: 12px; }
 .o-gantt-head h2 { margin-bottom: 18px; }
 /* roadmap as an in-slide block (insertable on any fold, like a chart) */
@@ -12770,8 +14987,14 @@ figure.o-ganttfig figcaption { margin-top: 12px; font-size: 13px; color: var(--i
 .o-gantt-chip:hover { border-color: var(--accent); color: var(--accent); }
 .o-gantt-chip.active { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 /* the chart body IS the resizable block: it consumes --obw (width grip) and --obh (height grip),
-   centred in the shell so the fold's own measure and title stay put around it */
-.o-gantt-wrap { overflow: auto; position: relative; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; max-height: min(var(--obh, 62vh), 90vh); }
+   centred in the shell so the fold's own measure and title stay put around it.
+
+   0.4.7: --obh is an EXPLICIT height here, not only a cap. A roadmap's lanes are fixed-height by
+   construction, so a cap alone could only ever scroll the same picture \u2014 dragging down on a roadmap
+   that already fitted did nothing. The height now feeds ganttRowScale (gantt.ts), which turns it
+   into --gantt-rowk and grows every lane evenly, and the box itself takes the height so the grown
+   lanes have somewhere to be. Unset, both fall back and a roadmap nobody dragged is unchanged. */
+.o-gantt-wrap { overflow: auto; position: relative; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; height: var(--obh, auto); max-height: var(--obh, 62vh); }
 .o-gantt-grid { position: relative; min-width: 100%; width: max-content; padding-bottom: 10px; }
 .o-gantt-axis { position: sticky; top: 0; z-index: 30; background: var(--paper); border-bottom: 2px solid var(--rule); height: 52px; display: flex; box-shadow: 0 2px 4px rgba(26,26,26,0.04); }
 .o-gantt-corner { width: 230px; flex-shrink: 0; border-right: 2px solid var(--rule); background: var(--paper); position: sticky; left: 0; z-index: 40; padding: 8px 14px; font-size: 11px; color: var(--ink-soft); letter-spacing: 0.08em; text-transform: uppercase; box-sizing: border-box; }
@@ -12802,7 +15025,7 @@ figure.o-ganttfig figcaption { margin-top: 12px; font-size: 13px; color: var(--i
 .o-gantt-lane-count { font-size: 11px; color: var(--ink-soft); margin-top: 4px; font-weight: 600; }
 .o-gantt-tracks { position: relative; flex: 1; min-width: var(--gantt-w); background: var(--paper); }
 .o-gantt-card {
-  position: absolute; min-width: 24px; height: 36px; border-radius: 4px;
+  position: absolute; min-width: 24px; height: calc(36px * var(--gantt-rowk, 1)); border-radius: 4px;
   padding: 4px 14px 4px 12px; color: #fff; font-size: 11px; font-weight: 600;
   overflow: hidden; display: flex; align-items: center; box-sizing: border-box;
   transition: opacity 0.25s, transform 0.15s, box-shadow 0.2s;
@@ -12836,7 +15059,7 @@ var flowCss = `/* @kind:flow */
 .k-flow { justify-content: flex-start; }
 /* --obw is FLOORED at the kind default: a narrow block never drags the fold's title in with it
    (the .o-flow-svg below consumes --obw itself); a wider --obw still grows the whole fold. */
-.o-flow-shell { width: min(max(var(--obw, 1280px), 1280px), 94vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-flow-shell { width: min(max(var(--obw, 1280px), 1280px), 94vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 40px; }
 .o-flow-head .eyebrow { margin-bottom: 12px; }
 .o-flow-head h2 { margin-bottom: 18px; }
 /* flowchart as an in-slide block (insertable on any fold, like a chart) */
@@ -12850,8 +15073,15 @@ figure.o-flowfig figcaption { margin-top: 12px; font-size: 13px; color: var(--in
    which is what made the height grip look dead. With an explicit height the grip works both ways:
    growing adds canvas room (the svg letterboxes under the default preserveAspectRatio), shrinking
    scales the drawing down. Unset, height falls back to auto and the cap back to the kind's 72vh,
-   so a drawing that was never dragged renders exactly as before. */
-.o-flow-svg { display: block; width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; height: var(--obh, auto); max-height: min(var(--obh, 72vh), 90vh); }
+   so a drawing that was never dragged renders exactly as before.
+
+   THE 90vh CLAMP IS GONE ON PURPOSE (0.4.7). The cap used to read min(var(--obh), 90vh), so an
+   author dragging the grip down hit an invisible wall at the window's height: the number kept
+   rising and the drawing stopped growing. A diagram is exactly as long as it is drawn, and a Card
+   scrolls to hold a block that crosses its fold line, so the author's own height now wins outright
+   and the cap only governs a drawing that was never dragged. See CANVAS_H_MAX in lib/blocks.ts for
+   the ceiling the gesture still keeps. */
+.o-flow-svg { display: block; width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; height: var(--obh, auto); max-height: var(--obh, 72vh); }
 /* BLOCK BACKGROUND \u2014 the same soft-tint recipe as a text block's fill (data-ofill on .o-text,
    css.ts). This is the whole BLOCK's own background, distinct from a flowchart's per-NODE fill
    (each node's own box colour, set in its own inline popup, canvas-diagram.ts) \u2014 the toolbar
@@ -12880,7 +15110,7 @@ var graphCss = `/* @kind:graph */
 .k-graph { justify-content: flex-start; }
 /* --obw is FLOORED at the kind default: a narrow block never drags the fold's title in with it
    (the .o-graph-svg below consumes --obw itself); a wider --obw still grows the whole fold. */
-.o-graph-shell { width: min(max(var(--obw, 1280px), 1280px), 94vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-graph-shell { width: min(max(var(--obw, 1280px), 1280px), 94vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 40px; }
 .o-graph-head .eyebrow { margin-bottom: 12px; }
 .o-graph-head h2 { margin-bottom: 18px; }
 /* node graph as an in-slide block (insertable on any fold, like a chart) */
@@ -12894,8 +15124,15 @@ figure.o-graphfig figcaption { margin-top: 12px; font-size: 13px; color: var(--i
    which is what made the height grip look dead. With an explicit height the grip works both ways:
    growing adds canvas room (the svg letterboxes under the default preserveAspectRatio), shrinking
    scales the drawing down. Unset, height falls back to auto and the cap back to the kind's 72vh,
-   so a drawing that was never dragged renders exactly as before. */
-.o-graph-svg { display: block; width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; height: var(--obh, auto); max-height: min(var(--obh, 72vh), 90vh); }
+   so a drawing that was never dragged renders exactly as before.
+
+   THE 90vh CLAMP IS GONE ON PURPOSE (0.4.7). The cap used to read min(var(--obh), 90vh), so an
+   author dragging the grip down hit an invisible wall at the window's height: the number kept
+   rising and the drawing stopped growing. A diagram is exactly as long as it is drawn, and a Card
+   scrolls to hold a block that crosses its fold line, so the author's own height now wins outright
+   and the cap only governs a drawing that was never dragged. See CANVAS_H_MAX in lib/blocks.ts for
+   the ceiling the gesture still keeps. */
+.o-graph-svg { display: block; width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; height: var(--obh, auto); max-height: var(--obh, 72vh); }
 /* BLOCK BACKGROUND \u2014 the same soft-tint recipe as a text block's fill (data-ofill on .o-text,
    css.ts). This is the whole BLOCK's own background, distinct from a node graph's per-NODE fill
    (each node's own box colour, set in its own inline popup, canvas-diagram.ts) \u2014 the toolbar
@@ -12917,6 +15154,10 @@ figure.o-graphfig[data-ofill="amber"], .o-graph-shell[data-ofill="amber"] { --o-
 figure.o-graphfig[data-ofill="red"], .o-graph-shell[data-ofill="red"] { --o-fill: #B3402A; }
 figure.o-graphfig[data-ofill="ink"], .o-graph-shell[data-ofill="ink"] { --o-fill: var(--ink); }
 
+/* The selected node's size grip. Its own pointer-events, because the halo it rides beside is a
+   dashed decoration and the node under it owns a move drag \u2014 the grip has to be the one thing the
+   press lands on, or resizing would move the node instead. */
+.o-dgrip { pointer-events: all; cursor: nwse-resize; }
 `;
 
 // src/blocks/tracker-css.ts
@@ -12926,43 +15167,49 @@ var trackerCss = `/* @kind:tracker */
    (.o-tracker-wrap below consumes --obw itself); a wider --obw still grows the whole fold.
    The tracker FOLD holds no figure \u2014 only the shell, its header and the mount \u2014 so the wrap, not
    figure.o-trackerfig, is the element that has to read the var on this kind. */
-.o-tracker-shell { width: min(max(var(--obw, 1200px), 1200px), 92vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-tracker-shell { width: min(max(var(--obw, 1200px), 1200px), 92vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 40px; font-size: calc(14px * var(--osz, 1)); }
 .o-tracker-head .eyebrow { margin-bottom: 12px; }
 .o-tracker-head h2 { margin-bottom: 18px; }
 /* tracker as an in-slide block (insertable on any fold, like a chart) */
 /* the data figure IS the resizable block on a CARD fold: it consumes --obw, centred so the fold
    keeps its measure. The wrap inside re-reads --obw capped at 100% of this figure, so the two
    rules agree instead of narrowing twice. */
-figure.o-trackerfig { margin: 26px auto; width: min(var(--obw, 100%), 100%); }
+figure.o-trackerfig { margin: 10px 0; width: min(var(--obw, 100%), 100%); overflow: visible; font-size: calc(14px * var(--osz, 1)); }
 figure.o-trackerfig[data-opos] { margin-left: calc(var(--op, 0) * 10%); }
+figure.o-trackerfig[data-ofloat] { translate: -50% 0; }
 figure.o-trackerfig figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
-.o-tracker-filterbar {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 8px;
-  padding: 12px 14px; background: var(--paper); border: 1px solid var(--rule);
-  border-radius: 12px; box-shadow: 0 2px 12px rgba(26,26,26,0.05);
+.o-tracker-chrome {
+  display: flex; flex-direction: column; gap: 10px; margin: 0 0 10px;
+  padding: 12px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--ink) 3.5%, var(--paper));
+  border: 1px solid color-mix(in srgb, var(--ink) 10%, var(--paper));
 }
-.o-tracker-search { flex: 1; min-width: 200px; font: inherit; font-size: 14px; border: 1.5px solid var(--rule); border-radius: 8px; padding: 8px 12px; background: var(--paper); color: var(--ink); }
-.o-tracker-search:focus { border-color: var(--accent); outline: none; }
-.o-tracker-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; user-select: none; white-space: nowrap; }
-.o-tracker-toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
-.o-tracker-clear { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 8px; padding: 7px 12px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
-.o-tracker-clear:hover { border-color: var(--accent); color: var(--accent); }
-/* status chips \u2014 a view-only filter row under the search bar; empty selection = every status */
-.o-tracker-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 8px; }
+
+.o-tracker-filterbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0; padding: 0;
+  background: none; border: 0; box-shadow: none;
+}
+.o-tracker-search { flex: 1; min-width: 8em; font: inherit; font-size: 1em; border: 0; border-radius: 8px; padding: 0.55em 0.85em; background: color-mix(in srgb, var(--ink) 5.5%, var(--paper)); color: var(--ink); }
+.o-tracker-search:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 0; }
+.o-tracker-toggle { display: inline-flex; align-items: center; gap: 0.5em; font-size: 0.93em; color: var(--ink-soft); cursor: pointer; user-select: none; white-space: nowrap; }
+.o-tracker-toggle input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+.o-tracker-clear { font: inherit; font-size: 13px; border: 0; border-radius: 8px; padding: 7px 10px; background: transparent; color: var(--ink-soft); cursor: pointer; }
+.o-tracker-clear:hover { color: var(--accent); }
+.o-tracker-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
 .o-tracker-chips:empty { display: none; }
-.o-tracker-chip { font: 600 12.5px var(--font-body); border: 1.5px solid var(--rule); border-radius: 999px; padding: 5px 13px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
-.o-tracker-chip:hover { border-color: var(--accent); color: var(--accent); }
-.o-tracker-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.o-tracker-toolbar { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; flex-wrap: wrap; position: relative; }
-.o-tracker-add { font: 600 13px var(--font-body); border: none; border-radius: 8px; padding: 8px 14px; background: #3D8B5A; color: #fff; cursor: pointer; }
+.o-tracker-chip { font: 600 0.86em var(--font-body); border: 0; border-radius: 7px; padding: 0.35em 0.8em; background: color-mix(in srgb, var(--ink) 6%, var(--paper)); color: var(--ink-soft); cursor: pointer; }
+.o-tracker-chip:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 9%, var(--paper)); }
+.o-tracker-chip.on { background: color-mix(in srgb, var(--accent) 16%, var(--paper)); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.o-tracker-toolbar { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; position: relative; }
+.o-tracker-add { font: 600 0.93em var(--font-body); border: none; border-radius: 8px; padding: 0.55em 1em; background: #3D8B5A; color: #fff; cursor: pointer; }
 .o-tracker-add:hover { background: #2d6c45; }
-.o-tracker-editstatuses { font: 600 13px var(--font-body); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 14px; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
+.o-tracker-editstatuses { font: 600 0.93em var(--font-body); border: 1px solid var(--rule); border-radius: 8px; padding: 0.55em 1em; background: var(--paper); color: var(--ink-soft); cursor: pointer; }
 .o-tracker-editstatuses:hover { border-color: var(--accent); color: var(--accent); }
 /* \u2699 Tracker \u2014 ONE settings card, hung under its own button. Reads as settings, not a form: one
    line per column (grip, heading, type, show, remove), and the card never stretches past 560px. */
 .o-tracker-setwrap { position: relative; }
 .o-tracker-settings {
-  position: absolute; z-index: 6; top: calc(100% + 6px); left: 0; width: min(560px, calc(100vw - 32px));
+  position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; width: min(560px, calc(100vw - 32px));
   /* every select column keeps its options open, so a wide tracker makes a tall card. It is bounded
      to roughly half the fold and scrolls INSIDE itself, and the footer is pinned to the bottom of
      that scroll box \u2014 so "+ column" and Reset are reachable however many columns there are. */
@@ -13049,21 +15296,21 @@ figure.o-trackerfig figcaption { margin-top: 12px; font-size: 13px; color: var(-
    max-height has no vh guard because there is no kind default to fall back to: min() around an
    unset var needs an invented cap, and any cap would shorten tall trackers at rest. The editor's
    BLOCK_H_MIN/MAX clamp (220..1600) is this grip's guard instead. */
-.o-tracker-wrap { border: 1px solid var(--rule); border-radius: 12px; overflow: auto; width: min(var(--obw, 100%), 100%); margin-left: auto; margin-right: auto; max-height: var(--obh, none); box-shadow: 0 2px 12px rgba(26,26,26,0.05); }
-table.o-tracker-table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--paper); }
-table.o-tracker-table th { background: var(--accent); color: #fff; text-align: left; padding: 11px 14px; font-weight: 600; font-size: 12.5px; letter-spacing: 0.02em; }
+.o-tracker-wrap { border: 1px solid var(--rule); border-radius: 12px; overflow: auto; width: 100%; margin: 0; min-height: var(--obh, 0px); max-height: var(--obh, none); box-shadow: 0 2px 12px rgba(26,26,26,0.05); }
+table.o-tracker-table { width: 100%; border-collapse: collapse; font-size: 1em; background: var(--paper); }
+table.o-tracker-table th { background: var(--accent); color: #fff; text-align: left; padding: 0.75em 1em; font-weight: 600; font-size: 0.89em; letter-spacing: 0.02em; }
 /* header-click sort \u2014 a VIEW affordance (F31: nothing about it is stored) */
 th.o-tracker-th { cursor: pointer; user-select: none; }
 th.o-tracker-th:hover { background: color-mix(in srgb, #000 12%, var(--accent)); }
 .o-tracker-sortmark { margin-left: 5px; font-size: 9px; opacity: 0.85; }
-table.o-tracker-table td { padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+table.o-tracker-table td { padding: 0.4em 0.7em; border-bottom: 1px solid var(--rule); vertical-align: top; }
 table.o-tracker-table tr:last-child td { border-bottom: none; }
 table.o-tracker-table tr.done td { background: #f3faf5; }
 table.o-tracker-table tr.done .o-tracker-cell[data-f="action"] { text-decoration: line-through; color: var(--ink-soft); }
 table.o-tracker-table tr.blocked td { background: #fdeeee; }
 /* the red belongs to the MARKED status column only: another select on a blocked row is not blocked */
 table.o-tracker-table tr.blocked .o-tracker-statuscol { border-color: #B3402A; color: #B3402A; font-weight: 700; }
-.o-tracker-cell { min-height: 22px; padding: 6px 8px; border-radius: 5px; outline: none; line-height: 1.45; }
+.o-tracker-cell { min-height: 1.5em; padding: 0.4em 0.55em; border-radius: 5px; outline: none; line-height: 1.45; }
 /* typed cells. The glyph is a ::before on a non-empty person cell, so it can never be selected,
    edited or committed back into the data. */
 .o-tracker-cell[data-t="person"]:not(:empty)::before { content: "\u25CD"; margin-right: 6px; opacity: 0.4; font-size: 0.9em; }
@@ -13075,9 +15322,9 @@ table.o-tracker-table tr.blocked .o-tracker-statuscol { border-color: #B3402A; c
 /* the row's Choice cell: a button standing where a <select> did (see the cell-menu note in
    tracker.ts) \u2014 its own wrapper is the positioning context its attached listbox hangs under */
 .o-tracker-cellwrap { position: relative; display: block; }
-.o-tracker-status { font: inherit; font-size: 13px; border: 1.5px solid var(--rule); border-radius: 6px; padding: 6px; background: var(--paper); color: var(--ink); width: 100%; text-align: left; cursor: pointer; }
+.o-tracker-status { font: inherit; font-size: 0.93em; border: 1.5px solid var(--rule); border-radius: 6px; padding: 0.4em; background: var(--paper); color: var(--ink); width: 100%; text-align: left; cursor: pointer; }
 .o-tracker-status:focus { border-color: var(--accent); outline: none; }
-.o-tracker-status-text { font-size: 13px; }
+.o-tracker-status-text { font-size: 0.93em; }
 .o-tracker-cellmenu {
   position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content;
   display: flex; flex-direction: column; gap: 1px; padding: 4px;
@@ -13157,7 +15404,7 @@ var gridCss = `/* @kind:grid */
    (.o-grid-wrap below consumes --obw itself); a wider --obw still grows the whole fold.
    A grid SHELL fold holds no figure \u2014 only the shell, its header and the mount \u2014 so the wrap, not
    figure.o-gridfig, is the element that has to read the var on this kind. */
-.o-grid-shell { width: min(max(var(--obw, 1240px), 1240px), 94vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-grid-shell { width: min(max(var(--obw, 1240px), 1240px), 94vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 40px; }
 .o-grid-head .eyebrow { margin-bottom: 12px; }
 .o-grid-head h2 { margin-bottom: 18px; }
 /* data grid as an in-slide block (insertable on any fold, like a chart) */
@@ -13240,7 +15487,7 @@ figure.o-tablefig figcaption { margin-top: 12px; font-size: 13px; color: var(--i
    so .o-ledger, not figure.o-tablefig, is the element that has to read the var on this kind.
    (.o-table-wrap further down is dead CSS: no code path renders that class any more, both mounts
    build .o-ledger. Left in place for old decks that carry it inline.) */
-.o-table-shell { width: min(max(var(--obw, 1240px), 1240px), 94vw); margin: 0 auto; padding: clamp(56px, 9vh, 96px) 0 40px; }
+.o-table-shell { width: min(max(var(--obw, 1240px), 1240px), 94vw); margin: 0 auto; padding: clamp(24px, 5vh, 48px) 0 40px; }
 .o-table-head .eyebrow { margin-bottom: 12px; }
 .o-table-head h2 { margin-bottom: 18px; }
 .o-table-filterbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 6px 0 12px; padding: 12px 14px; background: var(--paper); border: 1px solid var(--rule); border-radius: 12px; box-shadow: 0 2px 12px rgba(26,26,26,0.05); }
@@ -13511,7 +15758,7 @@ figure.o-chartfig figcaption { margin-top: 12px; font-size: 13px; font-family: v
 // src/blocks/video-css.ts
 var videoCss = `/* @kind:video */
 figure.o-videofig { margin: 26px 0; }
-.o-video { max-width: 760px; }
+.o-video { max-width: 760px; position: relative; }
 .o-vd { box-sizing: border-box; }
 .o-vd-play { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; aspect-ratio: 16 / 9; width: 100%; border-radius: 14px; background: linear-gradient(145deg, #23211d, #3a362e); color: #faf7f2; cursor: pointer; }
 .o-vd-play .o-vd-badge { position: absolute; top: 14px; right: 16px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(250, 247, 242, 0.65); }
@@ -13520,6 +15767,22 @@ figure.o-videofig { margin: 26px 0; }
 .o-vd-play .o-vd-title { font-family: var(--font-display); font-size: 22px; max-width: 80%; text-align: center; }
 .o-vd-play .o-vd-hint { font-size: 12px; color: rgba(250, 247, 242, 0.55); }
 .o-vd-frame { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 14px; background: #000; }
+video.o-vd-local { display: block; width: 100%; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; background: #000; }
+/* THE ONE FULLSCREEN CONTROL. Sized to match the native controls it sits beside, not a big button.
+   The native button is suppressed two ways: controlsList (set in video.ts) and, in WebKit/Blink,
+   the pseudo-element below. Together they leave exactly one fullscreen affordance. */
+.o-vd-fs-btn { position: absolute; right: 8px; bottom: 8px; z-index: 2; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #fff; cursor: pointer; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7)); }
+.o-vd-fs-btn:hover, .o-vd-fs-btn:focus-visible { background: rgba(20, 20, 20, 0.6); outline: none; }
+.o-vd-fs-btn svg { display: block; width: 16px; height: 16px; }
+video.o-vd-local::-webkit-media-controls-fullscreen-button { display: none; }
+/* IN-FRAME SPOTLIGHT: a body-level fixed backdrop with the player centred at 90% of the smaller
+   viewport dimension. Built by video.ts inside THIS document, so the sandbox cannot block it. */
+.o-vd-spot { position: fixed; inset: 0; z-index: 2147483600; display: grid; place-items: center; }
+.o-vd-spot-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.82); opacity: 0; transition: opacity 200ms ease; }
+.o-vd-spot.on .o-vd-spot-scrim { opacity: 1; }
+.o-vd-spot-frame { position: relative; z-index: 1; width: 90vmin; height: 90vmin; }
+.o-vd-spot-frame video.o-vd-local { width: 100%; height: 100%; max-width: none; aspect-ratio: auto; object-fit: contain; border-radius: 10px; }
+@media print { .o-vd-fs-btn { display: none !important; } .o-vd-spot { display: none !important; } }
 .o-vd-link, .o-vd-empty { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 1.5px solid var(--rule); border-radius: 14px; background: var(--paper); color: inherit; text-decoration: none; }
 .o-vd-link .o-vd-btn, .o-vd-empty .o-vd-btn { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 15px; padding-left: 3px; }
 .o-vd-meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -13530,6 +15793,15 @@ figure.o-videofig { margin: 26px 0; }
 a.o-vd-link:hover { border-color: var(--accent); }
 .o-vd-empty { border-style: dashed; color: var(--ink-soft); }
 .o-vd-empty .o-vd-btn { background: var(--rule); color: var(--ink-soft); }
+/* The honest offline placeholder STACKS \u2014 glyph, then title, then the ref, then the reason or
+   the action. A long permission or read-error message WRAPS under the title; it must not be
+   squeezed beside it (where a shrinking meta box let the title print over the message) or run
+   under the glyph. */
+.o-vd-local-off { flex-direction: column; align-items: stretch; gap: 12px; }
+.o-vd-local-off .o-vd-meta { gap: 4px; }
+.o-vd-local-off .o-vd-title { font-weight: 600; font-size: 16px; white-space: normal; overflow-wrap: anywhere; }
+.o-vd-local-off .o-vd-url { white-space: normal; overflow-wrap: anywhere; }
+.o-vd-local-off .o-vd-hint { margin-left: 0; flex: none; white-space: normal; overflow-wrap: anywhere; }
 figure.o-videofig figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
 .o-video-error { padding: 18px 0; color: #a13d2d; font-size: 14px; }
 `;
@@ -13877,6 +16149,15 @@ nav.o-toc .o-toc-grp > .o-toc-row:not(:has(.o-toc-tw)) { padding-left: 17px; }
    and bury it under .slide-inner. Centre it on the column and size it to the viewport so it covers
    the whole stage and stays reachable in the side margins. A document keeps inset:0 of its paper. */
 .slide:not(.k-document) .o-doc-bg { inset: auto; top: 50%; left: 50%; width: 100vw; height: 100vh; transform: translate(-50%, -50%); }
+/* 0.4.5 UAT: that rule leaned on the column being VERTICALLY CENTRED in the card canvas (its
+   middle === the slide's middle), so top:50% of the column landed on the slide's centre. The
+   column is now top-anchored (card-canvas.ts), so on a short fold the backdrop's box pokes half
+   its height ABOVE the canvas \u2014 out of the letterbox clip, and its top-left corner (the click
+   target the Studio selects it with) leaves the canvas entirely. In the cardfit canvas the column's
+   border-box top IS the slide's top, so anchor there: the frozen sheet rewrites this rule's
+   100vw/100vh to the card's own 1280x720, and width/height ride down from the rule above. A scroll
+   section and the print clones take neither .o-cardfit nor this rule \u2014 they keep the centred rule. */
+.o-cardfit .slide:not(.k-document) .o-doc-bg { top: 0; left: 0; transform: none; }
 /* @endkind */
 `;
 
@@ -14016,6 +16297,270 @@ figure.o-vennfig[data-ofill="ink"] { --o-fill: var(--ink); }
 
 `;
 
+// src/blocks/calendar-css.ts
+var calendarCss = `/* @kind:calendar */
+figure.o-calendarfig { width:min(var(--obw,100%),100%);max-width:100%;box-sizing:border-box;margin:10px 0;overflow:hidden;pointer-events:none }
+figure.o-calendarfig[data-opos] { margin-left:calc(var(--op, 0) * 10%) }
+figure.o-calendarfig > * { pointer-events:auto }
+.o-calendar { height:var(--obh,420px);min-height:0;max-width:100%;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden }
+.o-calendar-shell { flex:1;min-width:0;min-height:0;max-width:100%;display:flex;gap:0;border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);border-radius:16px;overflow:hidden;background:color-mix(in srgb,var(--ink) 3%,var(--paper,#fff)) }
+.o-calendar-presets { display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:2px;padding:12px 4px;flex:0 1 96px;min-width:0;max-width:108px;border-right:1px solid color-mix(in srgb,var(--ink) 12%,transparent) }
+.o-calendar-preset { appearance:none;border:0;background:transparent;color:var(--ink);text-align:center;font:600 11px/1.25 system-ui,sans-serif;padding:6px 4px;border-radius:8px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+.o-calendar-preset:hover { background:color-mix(in srgb,var(--ink) 7%,transparent) }
+.o-calendar-preset[data-calendar-preset-on] { background:color-mix(in srgb,var(--ink) 9%,transparent) }
+.o-calendar-main { flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;padding:12px 14px 14px }
+.o-calendar-head { display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:10px }
+.o-calendar-title { font-weight:700;padding:3px 6px;border-radius:5px }
+.o-calendar-title[role="button"] { cursor:pointer }
+.o-calendar-title[role="button"]:hover { background:color-mix(in srgb,var(--ink) 7%,transparent) }
+.o-calendar-nav { border:0;background:transparent;color:inherit;font:700 22px/1 system-ui;cursor:pointer;padding:2px 8px }
+.o-calendar-grid { display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-template-rows:auto repeat(6,minmax(0,1fr));flex:1;min-height:0;gap:1px }
+.o-calendar-weekday { padding:4px 0;text-align:center;font-size:11px;font-weight:700;color:var(--ink-soft);text-transform:uppercase }
+.o-calendar-day { min-height:0;overflow:hidden;padding:4px 2px 5px;border-radius:10px;display:grid;grid-template-rows:1.35em minmax(0,1fr);justify-items:center;isolation:isolate }
+.o-calendar-day.is-outside { opacity:0.38 }
+.o-calendar-day.is-weekend { background:color-mix(in srgb,var(--ink) 6%,transparent) }
+.o-calendar-day[style*="--ocal-cell"] { background:var(--ocal-cell) }
+.o-calendar-day.is-today .o-calendar-number { display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:999px;background:var(--paper,#fff);color:var(--ink);box-shadow:0 0 0 1px color-mix(in srgb,var(--ink) 18%,transparent) }
+.o-calendar-day[data-calendar-selected] { box-shadow:inset 0 0 0 2px var(--accent,#557a4e) }
+.o-calendar-number { display:block;z-index:1;height:1.35em;font-size:11px;font-weight:700;color:var(--ink-soft);line-height:1.35em;text-align:center;overflow:hidden }
+.o-calendar-heading { z-index:0;min-height:0;max-height:100%;width:100%;padding:0 3px;text-align:center;font:600 10.5px/1.2 system-ui,sans-serif;color:var(--ink);overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow-wrap:anywhere;word-break:break-word }
+.o-calendar-mark { width:6px;height:6px;border-radius:999px;background:color-mix(in srgb,var(--ink) 42%,transparent);align-self:center }
+.o-caltip { position:fixed;z-index:2147483647;max-width:280px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,#e4c9a0 28%,var(--paper,#fff8ee));color:var(--ink,#2b261f);font:500 13px/1.4 var(--font-body,system-ui,sans-serif);pointer-events:none;opacity:0;transition:opacity .12s;box-shadow:0 8px 24px rgba(60,40,16,.18);border:1px solid color-mix(in srgb,#c4a574 35%,var(--ink) 12%) }
+.o-caltip.on { opacity:1 }
+.o-caltip-h { font-weight:700;margin:0 0 4px }
+.o-caltip-t { white-space:pre-wrap;overflow-wrap:anywhere }
+/* @endkind */
+
+`;
+
+// src/blocks/gallery-css.ts
+var galleryCss = `
+.o-galleryfig { margin: 26px 0; }
+.o-galleryfig .o-gal { position: relative; }
+.o-galleryfig .o-gal img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.o-galleryfig .o-gal-empty {
+  display: grid; place-items: center; min-height: 160px; border: 1px dashed var(--rule); border-radius: 10px;
+  color: var(--ink-soft); font: 500 13px var(--font-body);
+}
+/* single / still: a plain column of pictures */
+.o-galleryfig .o-gal-single { display: grid; gap: 10px; }
+.o-galleryfig .o-gal-cell { border-radius: 10px; overflow: hidden; }
+/* caption: under the picture in single, over it in drift. Built only when one is present. */
+.o-galleryfig .o-gal-cap { margin: 6px 2px 0; color: var(--ink-soft); font: 500 12px var(--font-body); line-height: 1.4; }
+/* accordion: equal panels that open on hover or keyboard focus */
+.o-galleryfig .o-gal-accordion { display: flex; gap: 8px; height: 380px; overflow: hidden; }
+.o-galleryfig .o-gal-accordion .o-gal-panel {
+  position: relative; flex: 1 1 0; min-width: 0; border-radius: 10px; overflow: hidden; cursor: pointer;
+  outline: none; background: var(--rule);
+  transition: flex-grow 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.o-galleryfig .o-gal-accordion .o-gal-panel:hover,
+.o-galleryfig .o-gal-accordion .o-gal-panel:focus-visible { flex-grow: 2.6; }
+.o-galleryfig .o-gal-accordion .o-gal-panel img { filter: saturate(0.85) brightness(0.85); transition: filter 0.45s ease; }
+.o-galleryfig .o-gal-accordion .o-gal-panel:hover img,
+.o-galleryfig .o-gal-accordion .o-gal-panel:focus-visible img { filter: none; }
+.o-galleryfig .o-gal-accordion .o-gal-panel-label {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; color: #fff; font: 600 13px var(--font-body);
+  text-shadow: 0 2px 10px rgba(0,0,0,0.55); opacity: 0; transition: opacity 0.35s ease;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.o-galleryfig .o-gal-accordion .o-gal-panel:hover .o-gal-panel-label,
+.o-galleryfig .o-gal-accordion .o-gal-panel:focus-visible .o-gal-panel-label { opacity: 1; }
+/* dome: a React Bits DomeGallery sphere \u2014 35 columns of 2x2 tiles on a radius fitted to the block;
+   drag to turn it, click a tile for the spotlight. Geometry lives in gallery.ts (buildDome). The
+   dome paints NO backdrop of its own: the fold's background and theme tokens show through, so the
+   block blends into the page (only the spotlight scrim is dark, and that is an overlay). */
+.o-galleryfig .o-gal-dome {
+  position: relative; width: 100%; max-width: 560px; height: 460px;
+  margin-left: auto; margin-right: auto; overflow: hidden; border-radius: 10px;
+  touch-action: none; cursor: grab;
+  --radius: 300px; --segments-x: 35; --segments-y: 35;
+  --circ: calc(var(--radius) * 3.14);
+  --item-width: calc(var(--circ) / var(--segments-x));
+  --item-height: calc(var(--circ) / var(--segments-y));
+  --tile-radius: 12px; --tile-scale: 1;
+}
+.o-galleryfig .o-gal-dome.o-gal-grabbing { cursor: grabbing; }
+.o-galleryfig .o-gal-dome-main {
+  position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden;
+}
+.o-galleryfig .o-gal-dome-stage {
+  width: 100%; height: 100%; display: grid; place-items: center;
+  perspective: calc(var(--radius) * 2); perspective-origin: 50% 50%; contain: layout paint size;
+}
+.o-galleryfig .o-gal-sphere {
+  transform-style: preserve-3d; will-change: transform; backface-visibility: hidden;
+  transform: translateZ(calc(var(--radius) * -1)) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+}
+.o-galleryfig .o-gal-dome-tile {
+  position: absolute; top: -999px; bottom: -999px; left: -999px; right: -999px; margin: auto;
+  width: calc(var(--item-width) * var(--item-size-x));
+  height: calc(var(--item-height) * var(--item-size-y));
+  transform-origin: 50% 50%; backface-visibility: hidden;
+}
+.o-galleryfig .o-gal-dome-img {
+  position: absolute; display: block; inset: 6px; border-radius: var(--tile-radius, 12px);
+  overflow: hidden; backface-visibility: hidden; cursor: pointer;
+  pointer-events: auto; transform: translateZ(0) scale(var(--tile-scale, 1));
+  -webkit-tap-highlight-color: transparent; box-shadow: 0 5px 16px rgba(0, 0, 0, 0.28);
+}
+.o-galleryfig .o-gal-dome-img:focus { outline: none; }
+/* the shared spotlight lives on <body>, NOT in the figure: a fixed layer that covers the viewport
+   and escapes every block. The scrim is the click-off target; the frame passes clicks through to it
+   except for its close button. The \u2039 \u203A arrows are overlay children pinned to the viewport edges, so
+   they stay put when a cycle resizes the frame. */
+.o-gal-spot { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; }
+.o-gal-spot-scrim {
+  position: absolute; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.4);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 500ms ease; pointer-events: none;
+}
+.o-gal-spot.on .o-gal-spot-scrim { opacity: 1; pointer-events: auto; }
+.o-gal-spot-frame {
+  position: fixed; z-index: 30; border-radius: 16px; overflow: hidden; background: #0b0b0f;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); transform-origin: top left; will-change: transform, opacity;
+  outline: none; pointer-events: none;
+}
+.o-gal-spot-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.o-gal-spot-cap {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; padding: 26px 16px 12px;
+  color: #fff; font: 500 14px var(--font-body, sans-serif); line-height: 1.45;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0)); pointer-events: none;
+}
+.o-gal-spot-close {
+  position: absolute; top: 10px; right: 10px; z-index: 2; width: 32px; height: 32px; line-height: 1;
+  border: 0; border-radius: 50%; cursor: pointer; color: #fff; background: rgba(0, 0, 0, 0.5);
+  font: 600 15px var(--font-body, sans-serif); pointer-events: auto;
+}
+.o-gal-spot-close:hover { background: rgba(0, 0, 0, 0.72); }
+/* pinned to the OVERLAY's edges (not the frame), so a cycle that changes the frame's bounds never
+   moves them. position:fixed keeps them at the viewport edge; z-index 40 puts them above scrim (10)
+   and frame (30). */
+.o-gal-spot-nav {
+  position: fixed; top: 50%; transform: translateY(-50%); z-index: 40; width: 44px; height: 44px;
+  line-height: 1; border: 0; border-radius: 50%; cursor: pointer; color: #fff; background: rgba(0, 0, 0, 0.5);
+  font: 600 22px var(--font-body, sans-serif); pointer-events: auto;
+  opacity: 0; transition: opacity 300ms ease, background 150ms ease;
+}
+.o-gal-spot.on .o-gal-spot-nav { opacity: 1; }
+.o-gal-spot-nav:hover { background: rgba(0, 0, 0, 0.72); }
+.o-gal-spot-prev { left: clamp(12px, 3vw, 40px); }
+.o-gal-spot-next { right: clamp(12px, 3vw, 40px); }
+/* drift: columns of tiles scrolling in opposite directions */
+.o-galleryfig .o-gal-drift {
+  display: flex; gap: 14px; height: 380px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+}
+.o-galleryfig .o-gal-drift .o-gal-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.o-galleryfig .o-gal-drift .o-gal-drift-tile { position: relative; margin-bottom: 14px; border-radius: 10px; overflow: hidden; flex: 0 0 auto; height: 150px; }
+.o-galleryfig .o-gal-drift .o-gal-cap {
+  position: absolute; left: 0; right: 0; bottom: 0; margin: 0; padding: 16px 8px 6px; color: #fff;
+  font: 600 11px var(--font-body); text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.o-galleryfig .o-gal-col-up { animation: o-gal-up var(--dur, 16s) linear var(--delay, 0s) infinite; }
+.o-galleryfig .o-gal-col-down { animation: o-gal-down var(--dur, 16s) linear var(--delay, 0s) infinite; }
+@keyframes o-gal-up { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+@keyframes o-gal-down { from { transform: translateY(-50%); } to { transform: translateY(0); } }
+/* compare: two pictures stacked in one frame; a draggable divider reveals the top one over the
+   bottom. The top layer is clipped to the reveal width, so neither picture is squashed. The rule and
+   the round grip both sit on the divider; the grip is also a keyboard slider. */
+.o-galleryfig .o-gal-compare {
+  position: relative; max-width: 720px; margin: 0 auto; height: 420px; overflow: hidden;
+  border-radius: 10px; touch-action: none; cursor: ew-resize; user-select: none;
+}
+.o-galleryfig .o-gal-compare .o-gal-cmp-top { position: absolute; inset: 0; clip-path: inset(0 calc(100% - var(--cmp, 50%)) 0 0); }
+.o-galleryfig .o-gal-compare .o-gal-cmp-rule {
+  position: absolute; top: 0; bottom: 0; left: var(--cmp, 50%); width: 2px; margin-left: -1px;
+  background: rgba(255, 255, 255, 0.9); box-shadow: 0 0 10px rgba(0, 0, 0, 0.45);
+}
+.o-galleryfig .o-gal-compare .o-gal-cmp-grip {
+  position: absolute; top: 50%; left: var(--cmp, 50%); transform: translate(-50%, -50%);
+  display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  color: #333; font: 700 15px var(--font-body); cursor: ew-resize; outline: none;
+}
+.o-galleryfig .o-gal-compare .o-gal-cmp-grip:focus-visible { box-shadow: 0 0 0 3px rgba(90, 120, 255, 0.7); }
+.o-galleryfig .o-gal-compare .o-gal-cmp-grip::before { content: "\\21D4"; }
+/* carousel: a fan of cards that cycles around. The front card is largest and centred; its neighbours
+   are rotated, scaled and offset behind it. The front card carries a caption over a bottom gradient
+   and a rounded tag pill in the top-right. Transforms are set by buildCarousel (gallery.ts). */
+.o-galleryfig .o-gal-carousel {
+  /* Full block width: the fan's horizontal spread is derived from this width in buildCarousel,
+     so the cards track the block rather than a fixed frame. */
+  position: relative; width: 100%; height: 420px; margin: 0 auto;
+  touch-action: none; cursor: grab;
+}
+.o-galleryfig .o-gal-carousel.o-gal-grabbing { cursor: grabbing; }
+.o-galleryfig .o-gal-carousel .o-gal-card {
+  position: absolute; top: 50%; left: 50%; width: min(300px, 72%); height: 380px; overflow: hidden;
+  border-radius: 14px; background: #0b0b0f; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  transform: translate(-50%, -50%); will-change: transform, opacity;
+  transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1), opacity 700ms ease;
+}
+.o-galleryfig .o-gal-carousel .o-gal-card-tag {
+  position: absolute; top: 10px; right: 10px; padding: 4px 10px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9); color: #1a1a1a; font: 700 10px var(--font-body);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.o-galleryfig .o-gal-carousel .o-gal-card-cap {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 30px 14px 12px; color: #fff;
+  font: 600 14px var(--font-body); background: linear-gradient(to top, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
+}
+@media (prefers-reduced-motion: reduce) {
+  .o-galleryfig .o-gal-col-up, .o-galleryfig .o-gal-col-down { animation: none; }
+  .o-galleryfig .o-gal-carousel .o-gal-card { transition: none; }
+}
+@media print {
+  .o-galleryfig .o-gal-accordion, .o-galleryfig .o-gal-dome, .o-galleryfig .o-gal-drift, .o-galleryfig .o-gal-compare, .o-galleryfig .o-gal-carousel { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; height: auto; perspective: none; }
+  .o-galleryfig .o-gal-accordion .o-gal-panel, .o-galleryfig .o-gal-dome-tile, .o-galleryfig .o-gal-carousel .o-gal-card { position: static; flex-grow: 0; margin: 0; width: auto; height: 200px; transform: none; opacity: 1; }
+  .o-galleryfig .o-gal-compare .o-gal-cmp-top { position: static; clip-path: none; }
+  .o-galleryfig .o-gal-compare .o-gal-cmp-rule, .o-galleryfig .o-gal-compare .o-gal-cmp-grip { display: none; }
+  .o-galleryfig .o-gal-sphere { transform: none; }
+  .o-gal-spot { display: none !important; }
+  .o-galleryfig .o-gal-drift .o-gal-col { animation: none; }
+}
+`;
+
+// src/blocks/timeline-css.ts
+var timelineCss = `/* @kind:timeline */
+figure.o-timelinefig { width:min(var(--obw,100%),100%);margin:26px auto }
+figure.o-timelinefig figcaption { margin-top:12px;font-size:13px;color:var(--ink-soft) }
+.o-timeline { --otl-accent:var(--accent);display:flex;flex-direction:column }
+/* the scroll window: vertical scrolls down, horizontal scrolls across, both around
+   an inner track sized to its content (the .o-gantt-wrap/.o-gantt-grid pattern) */
+.o-timeline-wrap { overflow:auto;position:relative }
+.o-timeline-track { position:relative;display:flex }
+.o-timeline-rail { position:absolute;background:var(--otl-accent) }
+.o-timeline-event { position:relative;display:flex }
+.o-timeline-marker {
+  flex-shrink:0;width:30px;height:30px;border-radius:50%;z-index:1;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--otl-accent);color:var(--paper);font:700 13px var(--font-body)
+}
+.o-timeline-card { border-radius:12px;background:color-mix(in srgb,var(--ink) 6%,var(--paper));padding:12px 16px }
+.o-timeline-date { font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-soft) }
+.o-timeline-title { font-weight:700;margin-top:2px }
+.o-timeline-body { margin-top:6px;font-size:13px;color:var(--ink-soft);white-space:pre-wrap;overflow-wrap:anywhere }
+/* vertical: rail down the left, markers on it, cards to the right */
+.o-timeline.is-vertical .o-timeline-wrap { max-height:var(--obh,62vh) }
+.o-timeline.is-vertical .o-timeline-track { flex-direction:column;padding-left:4px }
+.o-timeline.is-vertical .o-timeline-rail { left:19px;top:15px;bottom:15px;width:2px }
+.o-timeline.is-vertical .o-timeline-event { flex-direction:row;align-items:flex-start;gap:14px;padding:10px 0 }
+.o-timeline.is-vertical .o-timeline-card { flex:1 }
+/* horizontal: rail across the top, markers on it, cards below */
+.o-timeline.is-horizontal .o-timeline-wrap { overflow-x:auto }
+.o-timeline.is-horizontal .o-timeline-track { flex-direction:row;width:max-content;padding-top:4px }
+.o-timeline.is-horizontal .o-timeline-rail { top:19px;left:15px;right:15px;height:2px }
+.o-timeline.is-horizontal .o-timeline-event { flex-direction:column;align-items:center;gap:14px;padding:0 14px;width:240px }
+.o-timeline.is-horizontal .o-timeline-card { width:100%;box-sizing:border-box }
+/* print: flatten the scroll window so the whole timeline prints */
+@media print { .o-timeline-wrap { overflow:visible;max-height:none } }
+/* @endkind */
+`;
+
 // src/blocks/kinds-css.ts
 var CSS_ORDER = [
   "cover",
@@ -14033,7 +16578,10 @@ var CSS_ORDER = [
   "document",
   "slider",
   "draw",
-  "venn"
+  "venn",
+  "calendar",
+  "gallery",
+  "timeline"
 ];
 var KIND_CSS_BY_KEY = {
   cover: coverCss,
@@ -14051,7 +16599,10 @@ var KIND_CSS_BY_KEY = {
   document: documentCss,
   slider: sliderCss,
   draw: drawCss,
-  venn: vennCss
+  venn: vennCss,
+  calendar: calendarCss,
+  gallery: galleryCss,
+  timeline: timelineCss
 };
 var KINDS_CSS = "\n" + CSS_ORDER.map((k) => KIND_CSS_BY_KEY[k]).join("");
 
@@ -14142,6 +16693,69 @@ var THEMES = [
       "font-display": FONT_DISPLAY,
       "font-body": FONT_BODY
     }
+  },
+  {
+    // warm cream + a rust red — the editorial one; the only preset whose accent is warm
+    name: "ink",
+    label: "Ink",
+    tokens: {
+      bg: "#FBF7EF",
+      paper: "#FFFFFF",
+      ink: "#1F1C18",
+      "ink-soft": "#5A544A",
+      rule: "#E8E0D2",
+      "rule-soft": "#F2ECE0",
+      accent: "#9A3B2E",
+      "tint-a": "rgba(154, 59, 46, 0.05)",
+      "tint-b": "rgba(31, 28, 24, 0.04)",
+      chrome: "#FBF7EF",
+      "chrome-ink": "#1F1C18",
+      "chrome-soft": "#5A544A",
+      "font-display": FONT_DISPLAY,
+      "font-body": FONT_BODY
+    }
+  },
+  {
+    // cool slate + copper — Boardroom's neighbour, told apart by a warm accent
+    name: "harbour",
+    label: "Harbour",
+    tokens: {
+      bg: "#F1F4F6",
+      paper: "#FFFFFF",
+      ink: "#1B2429",
+      "ink-soft": "#515D66",
+      rule: "#DCE3E7",
+      "rule-soft": "#E9EEF1",
+      accent: "#9C5A28",
+      "tint-a": "rgba(156, 90, 40, 0.05)",
+      "tint-b": "rgba(27, 36, 41, 0.04)",
+      chrome: "#F1F4F6",
+      "chrome-ink": "#1B2429",
+      "chrome-soft": "#515D66",
+      "font-display": FONT_DISPLAY,
+      "font-body": FONT_BODY
+    }
+  },
+  {
+    // soft blush + plum
+    name: "bloom",
+    label: "Bloom",
+    tokens: {
+      bg: "#FBF4F6",
+      paper: "#FFFFFF",
+      ink: "#2B2027",
+      "ink-soft": "#645661",
+      rule: "#EDDEE4",
+      "rule-soft": "#F5EAEE",
+      accent: "#A24A72",
+      "tint-a": "rgba(162, 74, 114, 0.05)",
+      "tint-b": "rgba(43, 32, 39, 0.04)",
+      chrome: "#FBF4F6",
+      "chrome-ink": "#2B2027",
+      "chrome-soft": "#645661",
+      "font-display": FONT_DISPLAY,
+      "font-body": FONT_BODY
+    }
   }
 ];
 var THEME_CSS = themeCssFromTokens(THEMES[0].tokens);
@@ -14211,6 +16825,7 @@ ${runtimeJs}
 }
 export {
   BASE_CSS,
+  CALENDAR_PRESETS,
   CARD_H,
   CARD_W,
   CHART_FONT_STACK,
@@ -14218,6 +16833,7 @@ export {
   CHART_PALETTE,
   CHART_W,
   DIAGRAM_ICONS,
+  GALLERY_STYLES,
   GANTT_CARD_GAP,
   GANTT_CARD_HEIGHT,
   GANTT_CARD_INSET,
@@ -14240,9 +16856,12 @@ export {
   addDiagramLane,
   applyBrandLogoVar,
   applyFavicon,
+  applyLocalVideoBytes,
   assembleDeck,
   bandSlot,
   buildEditedCopy,
+  calendarGrid,
+  calendarPresetAnchor,
   canvasScale,
   cardScale,
   createViewer,
@@ -14251,9 +16870,11 @@ export {
   docMount,
   downloadCopy,
   drawSceneSvg,
+  finalizeCalendars,
   finalizeCountUps,
   finalizeDraws,
   finalizeFlows,
+  finalizeGalleries,
   finalizeGantts,
   finalizeGraphs,
   finalizeGrids,
@@ -14262,6 +16883,7 @@ export {
   finalizeSparklines,
   finalizeStageBlocks,
   finalizeTables,
+  finalizeTimelines,
   finalizeTrackers,
   finalizeVenns,
   fitCardSlide,
@@ -14278,11 +16900,13 @@ export {
   isRunsHeld,
   liteEditNodes,
   mergeVennOverlaps,
+  mountCalendars,
   mountCharts,
   mountCloneBlocks,
   mountCountUps,
   mountDraws,
   mountFlows,
+  mountGalleries,
   mountGantts,
   mountGraphs,
   mountGrids,
@@ -14292,11 +16916,13 @@ export {
   mountSparklines,
   mountStageBlocks,
   mountTables,
+  mountTimelines,
   mountTrackers,
   mountVenns,
   mountVideos,
   mulberry32,
   niceMax,
+  normalizeCalendarData,
   normalizeChartData,
   normalizeDrawData,
   normalizeFlowData,
@@ -14304,6 +16930,7 @@ export {
   normalizeGraphData,
   normalizeGridData,
   normalizeNotesData,
+  normalizeTimelineData,
   normalizeTrackerData,
   normalizeVennData,
   normalizeVideoData,
@@ -14311,6 +16938,7 @@ export {
   paginateDoc,
   parseChartFigureData,
   parseFlowSlideData,
+  parseGalleryData,
   parseGanttSlideData,
   parseGraphSlideData,
   parseGridSlideData,
@@ -14320,11 +16948,13 @@ export {
   parseVennSlideData,
   parseVideoFigureData,
   plotHeightBounds,
+  publishFoldBg,
   releaseCardBands,
   releaseFloatBands,
   releaseRuns,
   releaseRunsIn,
   removeDiagramLane,
+  renderCalendar,
   renderChart,
   renderDiagramError,
   renderDocToc,
@@ -14339,6 +16969,7 @@ export {
   renderNotesError,
   renderTable,
   renderTableError,
+  renderTimeline,
   renderTracker,
   renderTrackerError,
   renderVenn,
@@ -14352,6 +16983,8 @@ export {
   sceneBounds,
   setDiagramSnap,
   setHeadFavicon,
+  shiftCalendarMonth,
+  shiftCalendarTo,
   simplifyPoints,
   sketchyLine,
   sliceColor,

@@ -61,9 +61,10 @@ test('the Theme button reads the deck, offers every preset, applies one through 
   await btn.click();
   await expect(panel).toBeVisible();
   const rows = panel.getByTestId('theme-row');
-  // the four runtime presets — a fresh browser (localStorage cleared in beforeEach) has no
-  // saved themes yet, so this is the whole catalog
-  await expect(rows).toHaveCount(4);
+  // the seven runtime presets (origami-default, boardroom, meadow, dusk, ink, harbour, bloom —
+  // the last three arrived with the 0.4.9 vendor) — a fresh browser (localStorage cleared in
+  // beforeEach) has no saved themes yet, so this is the whole catalog
+  await expect(rows).toHaveCount(7);
   await expect(rows.filter({ hasText: 'Paper' })).toHaveAttribute('aria-current', 'true');
   await expect(rows.filter({ hasText: 'Boardroom' })).not.toHaveAttribute('aria-current', 'true');
 

@@ -130,7 +130,7 @@
    A NOTE ON WHAT `legend: false` DOES NOT DO. It removes the swatch row and nothing else. The row is
    an HTML block BELOW the SVG, not a band inside it (chart.ts, renderChart), so the plot has no
    space to reclaim — the picture is drawn at exactly the same size and the block under it goes. */
-export const CHART_TYPES = ['bar', 'line', 'pie', 'timeseries', 'scatter', 'waterfall', 'boxplot', 'radar', 'gauge', 'heatmap', 'treemap', 'sankey'];
+export const CHART_TYPES = ['bar', 'line', 'pie', 'timeseries', 'scatter', 'waterfall', 'boxplot', 'radar', 'gauge', 'heatmap', 'treemap', 'sankey', 'chord'];
 /** Max rows in a heatmap — its series are the grid's ROWS, so the cap matches the 24-column label
     cap rather than the 1-6 series cap every other type keeps. */
 export const HEATMAP_MAX_ROWS = 24;
@@ -158,6 +158,14 @@ export const TREEMAP_MAX_NODES = 60;
     edges is arithmetic a viewer does not notice, where an uncapped graph is not. */
 export const SANKEY_MAX_NODES = 60;
 export const SANKEY_MAX_LINKS = 120;
+/** Most nodes a CHORD takes, and most flows between them. A chord is the second graph-shaped picture
+    and it reads the same `labels` + `links` shape as a sankey, so the two caps are the same numbers
+    for the same reasons: 60 nodes is the widest cap in the format and past it the arcs are too short
+    to name, and 120 links (twice the node count) is where a followable diagram turns into a mat.
+    They are separate constants rather than an alias so the two pictures can diverge later without a
+    reader having to guess which one a number belongs to. */
+export const CHORD_MAX_NODES = 60;
+export const CHORD_MAX_LINKS = 120;
 /** Most hex COLUMNS a hexbin can print its counts at — above this the editor withholds `showValues`
     rather than offering a flag the renderer will drop.
 
@@ -242,6 +250,10 @@ function chartShape(d) {
         // 27 Sankey — the wave-5b TYPE. `links` is gated to it further down, and it is the only field in
         // this file that carries a RELATIONSHIP rather than a property of a label.
         isFlow: d.type === 'sankey',
+        // 28 Chord — the wave-5c TYPE. It reads the SAME `labels` + `links` shape as a sankey (a node and
+        // a flow between two nodes), and it is the same node-and-edge graph; only the picture differs, so
+        // every rule keyed to the shape is shared with isFlow and every rule keyed to the geometry is not.
+        isChord: d.type === 'chord',
         // 24 Hexagonal binning — a scatter FLAG, so it is only ever true on a scatter (the gate below
         // rejects it anywhere else, and every rule keyed to it therefore reads a scatter).
         isHex: isXY && d.hexbin === true,
@@ -272,7 +284,15 @@ function chartShape(d) {
    the legal node count depend on a field the picture never reads. TREEMAP_MAX_NODES states why 60.
    A SANKEY is pinned the same way and for the same reason — SANKEY_MAX_NODES states why 60 there. */
 function labelCap(d, s) {
-    return s.isTree ? TREEMAP_MAX_NODES : s.isFlow ? SANKEY_MAX_NODES : !s.isHeat && d.orientation === 'horizontal' ? 60 : 24;
+    return s.isTree
+        ? TREEMAP_MAX_NODES
+        : s.isFlow
+            ? SANKEY_MAX_NODES
+            : s.isChord
+                ? CHORD_MAX_NODES
+                : !s.isHeat && d.orientation === 'horizontal'
+                    ? 60
+                    : 24;
 }
 function checkLabels(d, s, bad) {
     const maxLabels = labelCap(d, s);
@@ -299,7 +319,7 @@ function checkLabels(d, s, bad) {
    …and a SANKEY joins them from the other side: its series carries no sizes at all (they are
    derived from `links`), so a second one would be a second set of nothing. */
 function singleSeriesName(d, s) {
-    return d.type === 'pie' ? 'pie chart' : s.isWf ? 'waterfall' : s.isBox ? 'box plot' : s.isGauge ? 'gauge' : s.isFunnel ? 'funnel' : s.isPolar ? 'radial bar' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : d.pareto === true ? 'pareto' : '';
+    return d.type === 'pie' ? 'pie chart' : s.isWf ? 'waterfall' : s.isBox ? 'box plot' : s.isGauge ? 'gauge' : s.isFunnel ? 'funnel' : s.isPolar ? 'radial bar' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : s.isChord ? 'chord' : d.pareto === true ? 'pareto' : '';
 }
 function checkSeries(d, s, bad) {
     // A HEATMAP's series are the grid's ROWS, so its cap is the label cap, not the 1-6 series cap.
@@ -450,14 +470,15 @@ function checkCategoryValues(o, i, s, bad) {
         if (!isFiniteNumber(n) || (!s.signed && n < 0)) {
             bad('series.value', `series ${i} value ${j}: must be a finite number${s.signed ? '' : ' ≥ 0'}`);
         }
-        else if (s.isFlow && n !== 0) {
+        else if ((s.isFlow || s.isChord) && n !== 0) {
             /* A SANKEY'S SERIES IS BALLAST, AND THE ZERO IS ENFORCED RATHER THAN IGNORED — the
                rule the treemap's interior nodes once carried, applied to every node instead. A node's
                size is its THROUGHPUT, which `links` already states in full; a number stored here
                would be a second source for it and the two would disagree the first time a flow was
                edited, with nothing on the picture able to say which one is being drawn. Requiring
-               the zero is what stops the file carrying a number no reader will ever see. */
-            bad('series.value', `series ${i} value ${j}: a sankey node is sized by its links, so its stored value must be 0`);
+               the zero is what stops the file carrying a number no reader will ever see.
+               A CHORD is the same graph one picture along and keeps the same rule. */
+            bad('series.value', `series ${i} value ${j}: a ${s.isChord ? 'chord' : 'sankey'} node is sized by its links, so its stored value must be 0`);
         }
     });
 }
@@ -574,7 +595,7 @@ function checkShapeReplacements(d, s, bad) {
         bad('showValues', `a ${s.isFunnel ? 'funnel' : 'gauge'} always prints its own value — showValues has no meaning`);
 }
 function axislessShapeName(s) {
-    return s.isRadar ? 'radar' : s.isGauge ? 'gauge' : s.isFunnel ? 'funnel' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : 'radial bar';
+    return s.isRadar ? 'radar' : s.isGauge ? 'gauge' : s.isFunnel ? 'funnel' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : s.isChord ? 'chord' : 'radial bar';
 }
 /* NO x/y AXIS, SO NO AXIS TITLE. A polar chart's spokes and rings are its axes and they are named
    on the chart itself; a funnel and a gauge have no axis at all. This is the stream-graph trap
@@ -583,9 +604,12 @@ function axislessShapeName(s) {
    so there is no axis anywhere on the picture for a title to name.
    …and a SANKEY joins them as the sixth. Its columns look like an axis and are not one: a column
    is a position in a topological ORDER, not a value on a scale, and the vertical extent is a stack
-   of throughputs with no origin. Naming either would name a measurement the picture never makes. */
+   of throughputs with no origin. Naming either would name a measurement the picture never makes.
+   …and a CHORD joins them as the seventh, from the other direction: its nodes sit on a CIRCLE, so
+   the angle a node occupies is a share of the total rather than a position on a scale, and there is
+   no straight axis anywhere on the picture for a title to name. */
 function checkAxisTitles(d, s, bad) {
-    if (!s.isRadar && !s.isGauge && !s.isFunnel && !s.isPolar && !s.isTree && !s.isFlow)
+    if (!s.isRadar && !s.isGauge && !s.isFunnel && !s.isPolar && !s.isTree && !s.isFlow && !s.isChord)
         return;
     if (d.xTitle !== undefined || d.yTitle !== undefined)
         bad('xTitle', `a ${axislessShapeName(s)} has no x/y axis to title`);
@@ -779,7 +803,7 @@ function collectFlow(l, i, labelCount, from, to, bad) {
    node has any number of predecessors, so there is no single chain and the walk would have
    to branch. Kahn instead repeatedly removes a node with no remaining incoming edge: what is
    left when nothing can be removed is exactly the part of the graph that is inside a cycle. */
-function checkFlowsAcyclic(from, to, labelCount, bad) {
+function checkFlowsAcyclic(from, to, labelCount, bad, what = 'sankey') {
     const indeg = new Array(labelCount).fill(0);
     const out = Array.from({ length: labelCount }, () => []);
     for (let i = 0; i < from.length; i++) {
@@ -801,16 +825,17 @@ function checkFlowsAcyclic(from, to, labelCount, bad) {
         return;
     // the lowest-indexed node still carrying an incoming edge — the entry point into the ring
     const stuck = indeg.findIndex((n) => n > 0);
-    bad('links', `the flows must be ACYCLIC — node ${stuck} is inside a cycle, and a cycle has no column to sit in`);
+    const why = what === 'chord' ? 'a cycle has no place in the diagram' : 'a cycle has no column to sit in';
+    bad('links', `the flows must be ACYCLIC — node ${stuck} is inside a cycle, and ${why}`);
 }
 /* EVERY NODE IN AT LEAST ONE FLOW. A node with no edge has no throughput, so no height; no
    edge, so no column; and nothing on the picture at all. It is rejected rather than dropped
    because a silently missing name is the one fault a reader of a printed deck cannot see. */
-function checkEveryNodeLinked(from, to, labelCount, bad) {
+function checkEveryNodeLinked(from, to, labelCount, bad, what = 'sankey') {
     const linked = new Set([...from, ...to]);
     for (let i = 0; i < labelCount; i++) {
         if (!linked.has(i))
-            bad('links', `node ${i} appears in no flow — a sankey node with no link has no place in the diagram`);
+            bad('links', `node ${i} appears in no flow — a ${what} node with no link has no place in the diagram`);
     }
 }
 /* ── 0.4.1 WAVE 5b — 27 SANKEY, the flows ────────────────────────────────────────────────────
@@ -822,20 +847,29 @@ function checkEveryNodeLinked(from, to, labelCount, bad) {
    A SANKEY NAMES AND VALUES EVERY NODE IT HAS ROOM FOR, unconditionally — the funnel's, the
    heatmap's and the treemap's precedent, now the fourth time it is reached. A node bar is a
    throughput with no axis beside it, so a bar with no number can only be estimated against the
-   other bars, and the flag would have nothing left to switch. */
-function checkSankeyLinks(d, s, bad) {
-    if (s.isFlow && d.showValues !== undefined) {
-        bad('showValues', 'a sankey prints each node’s name and throughput wherever there is room — showValues has no meaning');
+   other bars, and the flag would have nothing left to switch.
+
+   ── AND WAVE 5c SHARES EVERY ONE OF THOSE RULES WITH 28 CHORD ────────────────────────────────
+   A chord is the same node-and-edge graph as a sankey, and it carries the SAME `labels` + `links`
+   shape, so the gating, the endpoint indices, the self-loop refusal, the acyclicity rule and the
+   every-node-linked rule are the same rules and live here once. Only the WORDS that name the
+   picture in a message differ, which is why the two helpers below take the picture's own name. */
+function checkFlowLinks(d, s, bad) {
+    const flow = s.isFlow || s.isChord;
+    const what = s.isChord ? 'chord' : 'sankey';
+    const maxLinks = s.isChord ? CHORD_MAX_LINKS : SANKEY_MAX_LINKS;
+    if (flow && d.showValues !== undefined) {
+        bad('showValues', `a ${what} prints each node’s name and throughput wherever there is room — showValues has no meaning`);
     }
-    if (d.links !== undefined && !s.isFlow) {
-        bad('links', 'links is a sankey-only array of { from, to, value } flows');
+    if (d.links !== undefined && !flow) {
+        bad('links', 'links is a sankey/chord-only array of { from, to, value } flows');
         return;
     }
-    if (!s.isFlow)
+    if (!flow)
         return;
     const raw = d.links;
-    if (!Array.isArray(raw) || raw.length < 1 || raw.length > SANKEY_MAX_LINKS) {
-        bad('links', `a sankey needs a links array of 1–${SANKEY_MAX_LINKS} { from, to, value } flows`);
+    if (!Array.isArray(raw) || raw.length < 1 || raw.length > maxLinks) {
+        bad('links', `a ${what} needs a links array of 1–${maxLinks} { from, to, value } flows`);
         return;
     }
     let shaped = true;
@@ -847,8 +881,8 @@ function checkSankeyLinks(d, s, bad) {
     });
     if (!shaped)
         return;
-    checkFlowsAcyclic(from, to, s.labelCount, bad);
-    checkEveryNodeLinked(from, to, s.labelCount, bad);
+    checkFlowsAcyclic(from, to, s.labelCount, bad, what);
+    checkEveryNodeLinked(from, to, s.labelCount, bad, what);
 }
 /* ── 0.4.1 WAVE 6 — the two NAMING flags ─────────────────────────────────────────────────────
    `legend` is gated on what the PICTURE draws rather than on one type, which is new here and is
@@ -857,7 +891,11 @@ function checkSankeyLinks(d, s, bad) {
    are decoded by the colour SCALE each draws inside its own SVG (a scale is not a series key), and
    a sankey's palette repeats past eight nodes, so a swatch row there would claim a colour stands
    for one name when it stands for two. On all four there is no row to suppress, and a flag that
-   switches off something never drawn is this arc's cardinal sin. */
+   switches off something never drawn is this arc's cardinal sin.
+   A CHORD is NOT a fifth refusal, and the difference is the palette's meaning rather than its size.
+   A sankey's node colours key a node's POSITION in the flow and its palette repeats past eight; a
+   chord's arc colours key the NODE itself, which is the thing a swatch row names, so the row is
+   meaningful and the key is accepted. See renderChord's legend branch in runtime/chart.ts. */
 function checkLegend(d, s, bad) {
     if (d.legend === undefined)
         return;
@@ -945,7 +983,7 @@ function checkQuadrant(d, s, bad) {
 }
 /** The picture named in the link refusal — the type that cannot read a ledger range. */
 function unlinkableChartName(s) {
-    return s.isTs ? 'timeseries' : s.isBox ? 'box plot' : s.isGauge ? 'gauge' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : 'scatter';
+    return s.isTs ? 'timeseries' : s.isBox ? 'box plot' : s.isGauge ? 'gauge' : s.isTree ? 'treemap' : s.isFlow ? 'sankey' : s.isChord ? 'chord' : 'scatter';
 }
 function checkLinkFields(l, bad) {
     if (typeof l.ledgerId !== 'string' || l.ledgerId.length === 0 || l.ledgerId.length > 64)
@@ -987,7 +1025,7 @@ function checkLinkFields(l, bad) {
 function checkLedgerLink(d, s, bad) {
     if (d.link === undefined)
         return;
-    if (s.free || s.isBox || s.isGauge || s.isTree || s.isFlow) {
+    if (s.free || s.isBox || s.isGauge || s.isTree || s.isFlow || s.isChord) {
         bad('link', `a ${unlinkableChartName(s)} chart cannot link to a ledger`);
         return;
     }
@@ -1031,7 +1069,7 @@ export function validateChartData(data) {
     checkHeatmapShowValues(d, s, bad);
     checkTreemapParents(d, s, bad);
     checkTreemapFlags(d, s, bad);
-    checkSankeyLinks(d, s, bad);
+    checkFlowLinks(d, s, bad);
     checkLegend(d, s, bad);
     checkPieLabels(d, bad);
     checkPlotHeight(d, bad);

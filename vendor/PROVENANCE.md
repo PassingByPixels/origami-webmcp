@@ -1,14 +1,12 @@
 # Vendored artifacts - provenance
 
 Source repo: the Origami Folio monorepo (private)
-Source state: Folio master @ 610e732 (2026-09-03 pm, two runtime CSS fixes on top of 41061b8
-              card geometry + the 2026-09-02 optimize + UAT arcs: svg { text-rendering:
-              geometricPrecision } - chart/diagram labels were painted at a stale scale under the
-              card transform - and figure.o-chartfig reads --obw, so a chart can be narrowed like
-              every other data figure). Vendor = the dists of that commit. Only runtime-dist/index.js
-              (the stylesheet) and the css .d.ts files moved.
-Previous:     master @ 41061b8 (2026-09-02 copy)
-Copied: 2026-09-03
+Source state: Folio tag v0.4.9 @ b0c2805 (2026-09-23: calendar rail + notes popup,
+              table in-block grow, tracker chrome + top-pin, Ledger first in Data). Vendor =
+              the dists of that commit. The _grp/_ledger/_r1 fixture folders no longer exist
+              at source - nothing pruned on this copy.
+Previous:     master @ 610e732 (2026-09-03 copy)
+Copied: 2026-09-24
 
 - format-dist/    = packages/format/dist   (built ESM + d.ts; zero deps, browser-safe)
 - runtime-dist/   = packages/runtime/dist  (viewer IIFE + assembleDeck ESM; fixtures pruned)
@@ -28,3 +26,12 @@ Pruned from runtime-dist on copy: the `_grp`, `_ledger` and `_r1` fixture folder
 
 Refresh procedure: rebuild the source repo (npm run build), re-copy the three dists, prune the
 fixture folders, update this file, then re-run BOTH suites before trusting anything.
+
+## EOL trap when building on Windows (hit 2026-09-24)
+
+A checkout with core.autocrlf=true gives CRLF sources, and the built runtime IIFE then carries
+real CRLF line breaks. The 0.4.6+ format preserves a deck's EOL and detects it with a blunt
+`text.includes('\r\n')` — so an embedded CRLF runtime flips the whole deck's eol and every
+replaced slide inner is normalized to CRLF, breaking the byte-exact undo tests. Before copying:
+set core.autocrlf=false in the build worktree, `git checkout -- .`, rebuild, and verify the
+IIFE has 0 CR bytes (this copy: verified 0).

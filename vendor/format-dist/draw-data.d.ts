@@ -14,7 +14,7 @@ import type { Violation } from './types.js';
 export declare const DRAW_MAX_ELEMENTS = 200;
 export declare const DRAW_MAX_POINTS = 1200;
 export declare const DRAW_TEXT_MAX = 2000;
-export declare const DRAW_TYPES: readonly ["rect", "diamond", "ellipse", "arrow", "line", "freedraw", "text"];
+export declare const DRAW_TYPES: readonly ["rect", "diamond", "ellipse", "cylinder", "arrow", "line", "freedraw", "text"];
 export declare const DRAW_FILL_STYLES: readonly ["none", "hachure", "cross", "solid"];
 export declare const DRAW_STROKE_STYLES: readonly ["solid", "dashed", "dotted"];
 export declare const DRAW_FONTS: readonly ["playfair", "lora", "inter", "source-serif", "caveat"];

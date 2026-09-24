@@ -36,7 +36,7 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
   await installFakeHost(page, ['document']);
   await page.goto('/folio/index.html');
 
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 39 tools');
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 40 tools');
 
   const defs = await page.evaluate(() =>
     (window as any).__mcp.registered.map((d: any) => ({
@@ -47,7 +47,7 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
       annotations: d.annotations,
     }))
   );
-  expect(defs).toHaveLength(39);
+  expect(defs).toHaveLength(40);
   const names = defs.map((d: any) => d.name);
   // the whole loop is reachable from the host — propose, review, resolve, save
   expect(names).toEqual(
@@ -73,16 +73,16 @@ test('registers every tool on document.modelContext and reports it', async ({ pa
 test('falls back to navigator.modelContext when document has none', async ({ page }) => {
   await installFakeHost(page, ['navigator']);
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 39 tools');
-  expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(39);
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via navigator.modelContext — 40 tools');
+  expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(40);
 });
 
 test('prefers document.modelContext when BOTH surfaces exist', async ({ page }) => {
   await installFakeHost(page, ['document', 'navigator']);
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 39 tools');
+  await expect(page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 40 tools');
   // registered once, on the spec surface only — never double-registered across both
-  expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(39);
+  expect(await page.evaluate(() => (window as any).__mcp_document.registered.length)).toBe(40);
   expect(await page.evaluate(() => (window as any).__mcp_navigator.registered.length)).toBe(0);
 });
 

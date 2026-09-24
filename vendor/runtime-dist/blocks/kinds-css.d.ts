@@ -14,8 +14,11 @@ import { documentCss } from './document-css.js';
 import { sliderCss } from './slider-css.js';
 import { drawCss } from './draw-css.js';
 import { vennCss } from './venn-css.js';
-export { coverCss, bulletsCss, statsCss, ganttCss, flowCss, graphCss, trackerCss, notesCss, gridCss, tableCss, chartCss, videoCss, documentCss, sliderCss, drawCss, vennCss };
-export declare const CSS_ORDER: readonly ["cover", "bullets", "stats", "gantt", "flow", "graph", "tracker", "notes", "grid", "table", "chart", "video", "document", "slider", "draw", "venn"];
+import { calendarCss } from './calendar-css.js';
+import { galleryCss } from './gallery-css.js';
+import { timelineCss } from './timeline-css.js';
+export { coverCss, bulletsCss, statsCss, ganttCss, flowCss, graphCss, trackerCss, notesCss, gridCss, tableCss, chartCss, videoCss, documentCss, sliderCss, drawCss, vennCss, calendarCss, galleryCss, timelineCss };
+export declare const CSS_ORDER: readonly ["cover", "bullets", "stats", "gantt", "flow", "graph", "tracker", "notes", "grid", "table", "chart", "video", "document", "slider", "draw", "venn", "calendar", "gallery", "timeline"];
 /** kind key → that kind's CSS chunk. Exported so the byte-golden test snapshots the REAL
     map instead of a copy of it, which could silently drift out of step. */
 export declare const KIND_CSS_BY_KEY: Record<string, string>;

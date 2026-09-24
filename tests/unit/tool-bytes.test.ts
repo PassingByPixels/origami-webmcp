@@ -18,8 +18,13 @@ const utf8 = (s: string): number => new TextEncoder().encode(s).length;
     two trims), origami_guide's new `blocks` topic and inspect_render's outcome/subset contract
     landed at 16,401 bytes against a surface that already sat at 15,983. The extra ~400 bytes are
     ~100 tokens per turn; the features they describe replaced a 19-undo pivot, a hide/unhide
-    measuring loop (dozens of calls) and several get_kind_schema round trips in the feedback deck. */
-export const DESCRIPTION_BUDGET = 16_500;
+    measuring loop (dozens of calls) and several get_kind_schema round trips in the feedback deck.
+    RAISED 16_500 -> 17_400 on 2026-09-24 with one: the 40th tool (load_image, ~1.1 KB), the
+    four 0.4.9 kinds in get_block/set_block/add_fold's kind enums and their descriptions landed
+    at 17,313 bytes. The extra ~900 bytes are ~230 tokens per turn; they replaced a hand-assembled
+    <img data-oasset> figure plus a by-hand asset-table splice (unloadable without write_chunk
+    acrobatics) and made the v0.4.9 block kinds addable and addressable at all. */
+export const DESCRIPTION_BUDGET = 17_400;
 
 describe('per-turn bytes: what the host hands the model on EVERY turn', () => {
   it(`keeps the /folio/ tool descriptions under ${DESCRIPTION_BUDGET} bytes`, () => {

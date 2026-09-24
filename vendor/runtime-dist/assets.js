@@ -129,7 +129,11 @@ var FONT_SLOTS = {
   "font-lora": "Lora",
   "font-inter": "Inter",
   "font-source-serif": "Source Serif 4",
-  "font-caveat": "Caveat"
+  "font-caveat": "Caveat",
+  "font-dm-serif": "DM Serif Display",
+  "font-bitter": "Bitter",
+  "font-space-grotesk": "Space Grotesk",
+  "font-nunito": "Nunito"
 };
 var FONT_FORMAT = [
   ["data:font/woff2;", "woff2"],

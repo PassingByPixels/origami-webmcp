@@ -6,7 +6,7 @@ export const drawBlock = {
         'a freehand drawing — an IN-SLIDE block, insertable on any fold (a "Draw" fold is a free card holding one)',
         'shape: <figure class="o-drawfig anim"> holding ONE inert <script type="application/json" data-odata="draw"> block,',
         '  then <div class="o-draw" data-draw-mount></div> (the runtime renders the hand-drawn SVG here), then a <figcaption>',
-        'JSON shape: { elements: [ {id, type: rect|diamond|ellipse|arrow|line|freedraw|text, x, y, width, height,',
+        'JSON shape: { elements: [ {id, type: rect|diamond|ellipse|cylinder|arrow|line|freedraw|text, x, y, width, height,',
         '  angle?, stroke: "#hex", fill?: ""|"#hex", fillStyle?: hachure|cross|solid, strokeWidth?: 1-8,',
         '  strokeStyle?: solid|dashed|dotted, roughness?: 0|1|2, opacity?: 0-100, seed?, points?: [[dx,dy]...],',
         '  text?, fontSize?, font?: playfair|lora|inter|source-serif|caveat, textAlign?, name?,',

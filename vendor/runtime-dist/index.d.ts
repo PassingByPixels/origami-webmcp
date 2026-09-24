@@ -8,7 +8,7 @@ export { fontFacesCss, resolveAssetRefs, applyBrandLogoVar, applyFavicon } from 
 export { buildEditedCopy, downloadCopy, isInlineEditable, liteEditNodes, sanitizeInline } from './lite-edit.js';
 export { assembleDeck, setHeadFavicon, type AssembleInput } from './assemble.js';
 export { BASE_CSS, RUNTIME_CSS, LEDGER_EDITOR_CSS } from './css.js';
-export { freezeCardUnits, fitCardSlide, cardScale, canvasScale, CARD_W, CARD_H } from './card-canvas.js';
+export { freezeCardUnits, fitCardSlide, publishFoldBg, cardScale, canvasScale, CARD_W, CARD_H } from './card-canvas.js';
 export { KINDS_CSS } from './blocks/kinds-css.js';
 export { THEME_CSS, THEMES, type ThemePreset } from './themes.js';
 export { renderGantt, renderGanttError, parseGanttSlideData, normalizeGanttData, packLane, ganttWeekIndex, ganttLensColor, mountGantts, finalizeGantts, GANTT_LANE_PADDING, GANTT_CARD_HEIGHT, GANTT_CARD_VSPACING, GANTT_LABEL_WIDTH, GANTT_PX_PER_WEEK, GANTT_PX_MIN, GANTT_PX_MAX, GANTT_CARD_INSET, GANTT_CARD_GAP, GANTT_CARD_MIN_PX, type GanttRenderOpts, } from './gantt.js';
@@ -22,5 +22,8 @@ export { holdRuns, isRunsHeld, mountRuns, releaseRuns, releaseRunsIn, runnable, 
 export { renderFlow, renderGraph, renderDiagramError, parseFlowSlideData, parseGraphSlideData, normalizeFlowData, normalizeGraphData, mountFlows, finalizeFlows, mountGraphs, finalizeGraphs, setDiagramSnap, addDiagramLane, removeDiagramLane, graphLayout, DIAGRAM_ICONS, type GraphLayoutMode, type DiagramRenderOpts, } from './diagram.js';
 export { renderDraw, mountDraws, finalizeDraws, normalizeDrawData, drawSceneSvg, sceneBounds, mulberry32, sketchyLine, simplifyPoints, smoothPath, hachureLines, } from './draw.js';
 export { renderVenn, mountVenns, finalizeVenns, normalizeVennData, vennSceneSvg, vennLayout, vennViewBox, vennContainingSets, vennOverlapKey, wrapVennLabel, mergeVennOverlaps, parseVennSlideData, } from './venn.js';
+export { renderCalendar, mountCalendars, finalizeCalendars, normalizeCalendarData, calendarGrid, shiftCalendarMonth, shiftCalendarTo, calendarPresetAnchor, CALENDAR_PRESETS } from './calendar.js';
+export { renderTimeline, mountTimelines, finalizeTimelines, normalizeTimelineData } from './timeline.js';
+export { parseGalleryData, mountGalleries, finalizeGalleries, GALLERY_STYLES, type GalleryData, type GalleryImage, type GalleryStyle, type GalleryMountOptions } from './gallery.js';
 export { renderChart, mountCharts, parseChartFigureData, normalizeChartData, plotHeightBounds, niceMax, CHART_W, CHART_FONT_STACK, CHART_H, CHART_PALETTE, sliceColor, } from './chart.js';
-export { renderVideo, mountVideos, parseVideoFigureData, normalizeVideoData, type VideoRenderOpts, } from './video.js';
+export { renderVideo, mountVideos, parseVideoFigureData, normalizeVideoData, applyLocalVideoBytes, type LocalVideoPayload, type VideoRenderOpts, } from './video.js';

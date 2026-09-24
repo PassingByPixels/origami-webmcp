@@ -24,12 +24,15 @@ import {
   KINDS,
   extractDataBlocks,
   kindSchemaComment,
+  validateCalendarData,
   validateChartData,
   validateDrawData,
   validateFlowData,
   validateGanttData,
   validateGraphData,
   validateTableData,
+  validateTimelineData,
+  validateVideoData,
   validateVennData,
   CHART_TYPES,
   DRAW_FILL_STYLES,
@@ -41,9 +44,12 @@ import {
   type DeckModel,
   type Violation,
 } from '../../vendor/format-dist/index.js';
+// gallery-data is not re-exported from the vendor index (nothing else in the app needed it
+// before the gallery kind was exposed) — the file it lives in is vendored all the same
+import { validateGalleryData } from '../../vendor/format-dist/gallery-data.js';
 import { fillDiagramDefaults } from './data-blocks.js';
 import type { DeckStore } from './deck-store.js';
-import { blockJson, dataFigure } from './fold-starters.js';
+import { blockJson, dataFigure, galleryFigure, imageFigure } from './fold-starters.js';
 import { randomHex } from './ids.js';
 import type { ToolMode } from './modes.js';
 import type { JsonSchemaProp, ToolDef } from './registry.js';
@@ -59,12 +65,22 @@ const VALIDATORS: Record<string, (data: unknown) => Violation[]> = {
   flow: validateFlowData as (data: unknown) => Violation[],
   graph: validateGraphData as (data: unknown) => Violation[],
   table: validateTableData as (data: unknown) => Violation[],
+  video: validateVideoData as (data: unknown) => Violation[],
+  calendar: validateCalendarData as (data: unknown) => Violation[],
+  timeline: validateTimelineData as (data: unknown) => Violation[],
+  gallery: validateGalleryData as (data: unknown) => Violation[],
 };
 
 /** The data kinds /folio/'s typed block tools address, in the order get_block reports them.
-    Every one of them is a FIGURE this app knows how to rebuild (dataFigure), which is what
-    makes set_block safe to point at a whole block rather than at markup. */
-export const FOLIO_BLOCK_KINDS = ['chart', 'venn', 'flow', 'graph', 'gantt', 'draw', 'table'] as const;
+    Every one of them is a FIGURE this app knows how to rebuild — dataFigure for the seven
+    originals plus the 0.4.9 additions, galleryFigure for gallery (which has no mount class,
+    no figcaption and compact JSON, so dataFigure would write it wrong) — which is what makes
+    set_block safe to point at a whole block rather than at markup. */
+export const FOLIO_BLOCK_KINDS = ['chart', 'venn', 'flow', 'graph', 'gantt', 'draw', 'table', 'video', 'calendar', 'gallery', 'timeline'] as const;
+
+/** The kinds set_block/applyBlock rebuild through dataFigure's o-<kind>fig shape. Gallery is
+    the one exception and is special-cased at both rebuild sites. */
+const DATAFIGURE_KINDS: readonly string[] = FOLIO_BLOCK_KINDS.filter((k) => k !== 'gallery');
 
 /** The one validator for a data kind, for callers outside this file (the fold composer). There
     is no second opinion about what a chart is, so there is no second map either. */
@@ -181,7 +197,8 @@ function applyBlock(deck: DeckStore, site: BlockSite, kind: string, data: unknow
     refuse(`the ${kind} data breaks its own schema — NOTHING was applied and the Fold is unchanged`, { violations });
   }
   // site.style rides along: editing a block's DATA must not resize the block
-  const next = site.inner.slice(0, site.start) + blockFigure(kind, data, caption, site.style) + site.inner.slice(site.end);
+  const figure = kind === 'gallery' ? galleryFigure(data, site.style) : blockFigure(kind, data, caption, site.style);
+  const next = site.inner.slice(0, site.start) + figure + site.inner.slice(site.end);
   writeFoldInner(deck, site.chunkId, next);
 }
 
@@ -518,7 +535,6 @@ const inventory = (inner: string): string => {
 
 function folioTools(deck: DeckStore): ToolDef[] {
   const KIND_LIST = FOLIO_BLOCK_KINDS.join(' | ');
-
   /** The fold, or a refusal naming the tool that lists them. */
   const innerOf = (chunkId: string): string => {
     const slide = deck.model().slides.get(chunkId);
@@ -530,7 +546,7 @@ function folioTools(deck: DeckStore): ToolDef[] {
     {
       name: 'get_block',
       annotations: { readOnlyHint: true },
-      description: "READ A DATA BLOCK BEFORE YOU REPLACE IT. Returns one data block's JSON exactly as stored, plus its caption and kind schema. Address it by chunkId + kind (chart | venn | flow | graph | gantt | draw | table) and nth when the fold holds more than one of that kind (0 = first, the default). Leave kind out to get EVERY data block on the fold — one call instead of one per block. set_block REPLACES a block rather than patching it, so read here, edit what you read, send the whole thing back. Changes nothing.",
+      description: `READ A DATA BLOCK BEFORE YOU REPLACE IT. Returns one data block's JSON exactly as stored, plus its caption and kind schema. Address it by chunkId + kind (${KIND_LIST}) and nth when the fold holds more than one of that kind (0 = first, the default). Leave kind out to get EVERY data block on the fold — one call instead of one per block. set_block REPLACES a block rather than patching it, so read here, edit what you read, send the whole thing back. Changes nothing.`,
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -567,7 +583,7 @@ function folioTools(deck: DeckStore): ToolDef[] {
 
     {
       name: 'set_block',
-      description: "Replace the WHOLE JSON of one data block on one fold — this CHANGES THE DECK the human is looking at and re-renders it. Address it by chunkId + kind (chart | venn | flow | graph | gantt | draw | table) + nth (0 = first, the default) and pass the COMPLETE data: it REPLACES what is there, so call get_block first to keep part of it. The kind's validator runs before anything is applied and a bad shape is refused with the violation named; a table's formulas are baked; a flow/graph node with no `tone` and an edge with no `label` get \"\" (their legal blank, no meaning changes). A fold with no block of that kind is refused with the kinds it has — this never CREATES one, use add_fold. One undo step.",
+      description: `Replace the WHOLE JSON of one data block on one fold — this CHANGES THE DECK the human is looking at and re-renders it. Address it by chunkId + kind (${KIND_LIST}) + nth (0 = first, the default) and pass the COMPLETE data: it REPLACES what is there, so call get_block first to keep part of it. The kind's validator runs before anything is applied and a bad shape is refused with the violation named; tables bake; flow/graph blanks are filled; a gallery's images name asset ids from load_image. A fold with no block of that kind is refused with the kinds it has — this never CREATES one, use add_chunk. One undo step.`,
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -597,17 +613,63 @@ function folioTools(deck: DeckStore): ToolDef[] {
         /* Two carriers exist. Every figure this app builds is a <figure>, and that whole figure
            is rebuilt so the mount div and the caption stay in step with the data. A block in a
            hand-rolled wrapper (the table starter's .o-table-shell) has no figure to rebuild, so
-           only the JSON is replaced — the wrapper the human is looking at is left exactly as it is. */
+           only the JSON is replaced — the wrapper the human is looking at is left exactly as it is.
+           Gallery rebuilds through galleryFigure, not blockFigure: no mount class, no figcaption,
+           compact JSON — and a caption arg is inapplicable, so the result says so. */
+        const rebuilt = kind === 'gallery' ? galleryFigure(data, site?.style ?? '') : blockFigure(kind, data, caption ?? site?.caption ?? '', site?.style ?? '');
         const next = site
-          ? inner.slice(0, site.start) + blockFigure(kind, data, caption ?? site.caption, site.style) + inner.slice(site.end)
+          ? inner.slice(0, site.start) + rebuilt + inner.slice(site.end)
           : inner.slice(0, script.start) + `${DATA_OPEN(kind)}\n${blockJson(data)}\n</script>` + inner.slice(script.end);
         writeFoldInner(deck, chunkId, next);
         return ok({
           chunkId,
           kind,
           nth: n,
-          ...(site ? { caption: caption ?? site.caption } : { captionApplied: false, why: 'this block has no <figure>/<figcaption> carrier, so only its JSON was replaced' }),
+          ...(site && kind !== 'gallery' ? { caption: caption ?? site.caption } : { captionApplied: false, why: kind === 'gallery' ? 'a gallery carries no figcaption — its mounted board is its own caption' : 'this block has no <figure>/<figcaption> carrier, so only its JSON was replaced' }),
           note: APPLIED,
+        });
+      },
+    },
+
+    {
+      name: 'load_image',
+      description:
+        "Put ONE picture into the deck's ASSET TABLE so any fold can show it — this CHANGES THE DECK (one undo step) but adds no fold. `dataUrl` must be a data:image/* base64 URL (png, jpeg, gif, webp, svg); anything else is refused and NOTHING is stored. `id` is minted as img-xxxx when absent; pass your own to REPLACE a picture every figure naming that id shows. The asset is deck-level and on NO fold until referenced: the result returns the exact markup — an <img data-oasset=\"ID\"> figure, or a gallery images[] entry naming the id. An <img data-oasset> naming an id never loaded is refused at save_deck, so load BEFORE building that figure; a gallery naming a missing id still saves but renders without that picture.",
+      inputSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          dataUrl: { type: 'string', description: 'The picture as a data:image/<fmt>;base64,… URL — the deck is single-file, so keep pictures a few MB at most' },
+          id: { type: 'string', maxLength: 40, description: 'Asset id, minted as img-xxxx when absent. Stable ids are how figures address this picture' },
+          alt: { type: 'string', maxLength: 200, description: 'What the picture shows — goes into the markup snippets this result hands back' },
+        },
+        required: ['dataUrl'],
+      },
+      execute: async ({ dataUrl, id, alt }) => {
+        if (typeof dataUrl !== 'string' || !/^data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/]+={0,2}$/.test(dataUrl)) {
+          return fail('dataUrl must be a data:image/<fmt>;base64,… URL — e.g. "data:image/png;base64,iVBOR…" — and full-match the base64 shape. A remote http(s) URL is refused: the deck is single-file and inert');
+        }
+        if (dataUrl.length > 10_000_000) {
+          return fail(`this dataUrl is ${(dataUrl.length / 1_000_000).toFixed(1)} MB of text — a deck is a single file the browser must parse and the human must save; keep pictures a few MB at most`);
+        }
+        if (typeof id === 'string' && id.length > 0 && !/^[A-Za-z0-9_-]+$/.test(id)) {
+          return fail(`asset id "${id}" is not a valid asset id — letters, digits, "_" and "-" only (it is minted as img-xxxx when you leave it out)`);
+        }
+        const assetId = typeof id === 'string' && id.length > 0 ? id : 'img-' + randomHex(4);
+        const altText = typeof alt === 'string' ? alt : '';
+        return deck.mutate((m) => {
+          const existed = m.assets.has(assetId);
+          deck.apply(m, { t: 'asset.put', id: assetId, dataUrl });
+          return ok({
+            assetId,
+            replaced: existed,
+            bytes: dataUrl.length,
+            useItNow: {
+              imageFigure: imageFigure(assetId, altText || 'picture'),
+              gallery: { style: 'single', images: [{ asset: assetId, ...(altText ? { alt: altText } : {}) }] },
+            },
+            note: 'stored in the deck asset table and re-rendered — not yet on disk (the human saves). Reference the id in a gallery block or an <img data-oasset> figure; a figure naming an id that is never loaded is refused at save_deck',
+          });
         });
       },
     },

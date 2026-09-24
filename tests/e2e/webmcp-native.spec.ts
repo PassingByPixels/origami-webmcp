@@ -159,10 +159,15 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
     expect(withoutFlag.s.document, 'modelContext must be absent without the flag').toBe(false);
     expect(withoutFlag.s.navigator).toBe(false);
     expect(withFlag.document, '--enable-features=WebMCP must expose document.modelContext').toBe(true);
-    expect(withFlag.navigator).toBe(true);
+    /* navigator.modelContext was asserted ON here too — but Chrome 153 (Sep 2026 stable) ships
+       only the document surface: {"document":true,"navigator":false} under the flag. The app
+       prefers document.modelContext wherever both exist and falls back to navigator only when
+       document is absent (webmcp-shim.spec), so the contract this app relies on is the document
+       surface. The navigator surface is logged, not asserted: its presence is Chrome's call. */
+    console.log(`  navigator surface under the flag -> ${withFlag.navigator} (Chrome ${withoutFlag.v}: document-surface only)`);
   });
 
-  test('the app registers all 39 tools on Chrome\'s own modelContext', async () => {
+  test('the app registers all 40 tools on Chrome\'s own modelContext', async () => {
     const launched = await launchChrome(FEATURE_ARGS);
     if ('skip' in launched) skipLoudly(launched.skip);
     const c = launched as Chrome;
@@ -170,17 +175,17 @@ test.describe('native WebMCP in the installed stable Chrome', () => {
       await c.page.goto(URL);
 
       // the app's own status line, read from the real browser
-      await expect(c.page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 39 tools');
+      await expect(c.page.getByTestId('mcp-status')).toHaveText('WebMCP: connected via document.modelContext — 40 tools');
 
       // and Chrome agrees: its registry holds them
       const tools = await c.page.evaluate(async () => {
         const t = await (document as any).modelContext.getTools();
         return t.map((x: any) => ({ name: x.name, hasDescription: typeof x.description === 'string' && x.description.length > 40, schema: typeof x.inputSchema }));
       });
-      expect(tools).toHaveLength(39);
+      expect(tools).toHaveLength(40);
       expect(tools.map((t: any) => t.name).sort()).toEqual([
         'accept_proposal', 'add_chunk', 'add_custom_fold', 'add_fold', 'add_ledger', 'apply_theme', 'create_deck', 'define_block', 'delete_block',
-        'delete_chunk', 'delete_theme', 'export_deck', 'get_block', 'get_kind_schema', 'inspect_render', 'list_activity', 'list_block_defs', 'list_chunks', 'list_proposals', 'list_starters', 'list_themes',
+        'delete_chunk', 'delete_theme', 'export_deck', 'get_block', 'get_kind_schema', 'inspect_render', 'list_activity', 'list_block_defs', 'list_chunks', 'list_proposals', 'list_starters', 'list_themes', 'load_image',
         'move_chunk', 'origami_guide', 'propose_add', 'propose_chunk', 'propose_delete', 'read_chunk', 'reject_proposal', 'revert_to_saved', 'run_batch', 'save_deck',
         'save_theme', 'set_block', 'set_chunk_meta', 'set_deck_meta', 'set_fold_type', 'set_header', 'undo', 'write_chunk',
       ]);

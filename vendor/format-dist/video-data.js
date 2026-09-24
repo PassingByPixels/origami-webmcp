@@ -16,6 +16,14 @@
  * must contain `embed:<host>` for that provider's player origin (the F30
  * vocabulary's first real user). No capability → the runtime falls back to a
  * link card that opens the watch URL in a browser tab.
+ *
+ * A LOCAL FILE is the other source: provider 'local' carries a path RELATIVE to
+ * the deck (url = "media/intro.mp4", videoId = ""), and the runtime builds a
+ * native <video> from it — no provider, no iframe, no `embed:` capability. The
+ * path must stay relative and inside the deck folder: validation rejects a
+ * scheme, a leading "/" or "//", a backslash, a ".." segment, and any extension
+ * outside mp4|m4v|webm|ogv|mov, so a deck can never smuggle a remote URL through
+ * the local field.
  */
 export const VIDEO_PROVIDERS = ['youtube', 'vimeo', 'loom'];
 /** Tokenless embed providers. Player origins are fixed here — deck data can
@@ -43,13 +51,16 @@ export const VIDEO_PROVIDER_SPECS = {
         needsReferrer: false, // not live-verified yet — flip if a real share 153s
     },
 };
-/** Manifest capability token a provider needs; null for plain links. */
+/** Manifest capability token a provider needs; null for plain links and local
+    files (neither is a provider embed, so neither grants a capability). */
 export function videoCapability(provider) {
-    return provider === 'link' ? null : `embed:${VIDEO_PROVIDER_SPECS[provider].host}`;
+    if (provider === 'link' || provider === 'local')
+        return null;
+    return `embed:${VIDEO_PROVIDER_SPECS[provider].host}`;
 }
-/** Player iframe URL; null when the data can't embed (links, bad ids). */
+/** Player iframe URL; null when the data can't embed (links, local files, bad ids). */
 export function videoEmbedUrl(data) {
-    if (data.provider === 'link')
+    if (data.provider === 'link' || data.provider === 'local')
         return null;
     const spec = VIDEO_PROVIDER_SPECS[data.provider];
     if (!spec || !spec.idRe.test(data.videoId))
@@ -102,6 +113,61 @@ export function parseVideoUrl(raw) {
 }
 const URL_MAX = 2000;
 const TITLE_MAX = 200;
+/** Local paths are short, deck-relative and never a URL. */
+const LOCAL_PATH_MAX = 300;
+const LOCAL_PATH_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const LOCAL_VIDEO_EXT = /\.(mp4|m4v|webm|ogv|mov)$/i;
+/**
+ * Safety shape for a local video path: non-empty, length-capped, relative to the
+ * deck, no scheme, no leading "/" or "//", no backslashes, no ".." segment.
+ * Shared with the runtime's render-time re-check — deck data is untrusted at
+ * mount, and a path that fails this must never become a src.
+ */
+export function localVideoPathIsSafe(url) {
+    if (url === '' || url.length > LOCAL_PATH_MAX)
+        return false;
+    if (LOCAL_PATH_SCHEME.test(url))
+        return false;
+    if (url.startsWith('/'))
+        return false; // also catches protocol-relative "//"
+    if (url.includes('\\'))
+        return false;
+    if (url.split('/').includes('..'))
+        return false;
+    return true;
+}
+/** Every video block's `<script data-odata="video">` carrier, anywhere in the HTML. */
+const VIDEO_DATA_RE = /<script\b[^>]*\bdata-odata="video"[^>]*>([\s\S]*?)<\/script>/g;
+/**
+ * The distinct deck-relative paths a deck (or a slide) references with provider
+ * 'local', in document order. The sandboxed Present stage and editor canvas cannot
+ * resolve such a path themselves, so their parent page uses this to find the files
+ * to read and hand over. Pure string work — no DOM, no deck model. A malformed data
+ * block is skipped; the runtime surfaces its own error when it mounts that block.
+ */
+export function collectLocalVideoRefs(html) {
+    const refs = [];
+    const seen = new Set();
+    for (const m of html.matchAll(VIDEO_DATA_RE)) {
+        let data;
+        try {
+            data = JSON.parse(m[1]);
+        }
+        catch {
+            continue;
+        }
+        if (data === null || typeof data !== 'object' || Array.isArray(data))
+            continue;
+        const d = data;
+        if (d.provider !== 'local' || typeof d.url !== 'string')
+            continue;
+        if (!localVideoPathIsSafe(d.url) || seen.has(d.url))
+            continue;
+        seen.add(d.url);
+        refs.push(d.url);
+    }
+    return refs;
+}
 /** Strict shape check for one video data block. REJECT, never repair. */
 export function validateVideoData(data) {
     const v = [];
@@ -112,8 +178,8 @@ export function validateVideoData(data) {
     }
     const d = data;
     const provider = d.provider;
-    if (provider !== 'link' && !VIDEO_PROVIDERS.includes(provider)) {
-        bad('provider', `provider must be one of ${VIDEO_PROVIDERS.join('|')}|link`);
+    if (provider !== 'link' && provider !== 'local' && !VIDEO_PROVIDERS.includes(provider)) {
+        bad('provider', `provider must be one of ${VIDEO_PROVIDERS.join('|')}|link|local`);
         return v;
     }
     if (typeof d.url !== 'string' || d.url.length > URL_MAX) {
@@ -130,6 +196,21 @@ export function validateVideoData(data) {
             bad('videoId', 'a plain link carries no videoId — use ""');
         if (d.url !== '' && parseVideoUrl(d.url) === null)
             bad('url', 'url must be https (or "" while unset)');
+        return v;
+    }
+    if (provider === 'local') {
+        if (d.videoId !== '')
+            bad('videoId', 'a local file carries no videoId — use ""');
+        if (d.url === '')
+            bad('url', 'a local path is required — e.g. media/intro.mp4');
+        else if (d.url.length > LOCAL_PATH_MAX)
+            bad('url', `a local path must be at most ${LOCAL_PATH_MAX} characters`);
+        else if (!localVideoPathIsSafe(d.url)) {
+            bad('url', 'a local path must be relative to the deck — no scheme, no leading "/" or "//", no backslashes, no ".." segments');
+        }
+        else if (!LOCAL_VIDEO_EXT.test(d.url)) {
+            bad('url', 'a local path must end in a video file (.mp4, .m4v, .webm, .ogv, .mov)');
+        }
         return v;
     }
     // Embeddable providers: id pattern + provider/url agreement. The url is what

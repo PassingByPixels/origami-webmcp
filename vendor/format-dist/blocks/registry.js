@@ -16,6 +16,9 @@ import { compositeBlock } from './block.js';
 import { sliderBlock } from './slider.js';
 import { drawBlock } from './draw.js';
 import { vennBlock } from './venn.js';
+import { calendarBlock } from './calendar.js';
+import { galleryBlock } from './gallery.js';
+import { timelineBlock } from './timeline.js';
 /** Every format-layer block facet, in canonical (KINDS declaration) order. This
     array IS the source of truth the `KINDS` map projects from; `KIND_DATA_SPECS`
     projects the `data`-carrying subset (in its own historical order). Adding a
@@ -40,6 +43,9 @@ export const FORMAT_BLOCKS = [
     sliderBlock,
     drawBlock,
     vennBlock,
+    calendarBlock,
+    galleryBlock,
+    timelineBlock,
 ];
 /** Registry indexed by kind for O(1) facet lookup. @__PURE__ so an unused import
     (e.g. from the runtime viewer, which never reads the registry) tree-shakes away. */

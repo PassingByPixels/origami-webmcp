@@ -7,4 +7,5 @@ export declare function freezeCardUnits(doc?: Document): void;
 export declare function canvasScale(el: HTMLElement): number;
 /** The scale a card is drawn at inside `box`, letterboxed. */
 export declare function cardScale(box: HTMLElement): number;
+export declare function publishFoldBg(box: HTMLElement, slide: HTMLElement | null): void;
 export declare function fitCardSlide(box: HTMLElement, slide: HTMLElement | null): () => void;

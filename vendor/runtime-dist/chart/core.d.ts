@@ -38,6 +38,7 @@ export declare function estTextWidth(text: string, fontSize: number): number;
 /** The longest PREFIX of `text` whose estimated width fits `avail`, cut on a code-point boundary.
     Returns '' when not even the first character fits — the caller decides what to do about that. */
 export declare function fitPrefix(text: string, fontSize: number, avail: number): string;
+export declare function markTip(el: SVGElement, text: string): void;
 /** A pinned `yMax` applied to a data maximum under the EXTEND-ONLY rule: a pin may only PUSH the
     axis out, never truncate it below the data. Clipping would draw two different values at the same
     place, against an axis that says they are the same — which is the one failure a reader of a

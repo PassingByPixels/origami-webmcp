@@ -2,6 +2,11 @@ import type { GanttCard, GanttData } from '@origami/format';
 export declare const GANTT_LANE_PADDING = 8;
 export declare const GANTT_CARD_HEIGHT = 36;
 export declare const GANTT_CARD_VSPACING = 6;
+/** The sticky axis and the grid's bottom padding — chrome that keeps its size whatever the author
+    does to the rows, so ganttRowScale takes them off the budget before dividing. Mirrors
+    `.o-gantt-axis { height: 52px }` and `.o-gantt-grid { padding-bottom: 10px }` in gantt-css.ts. */
+export declare const GANTT_AXIS_H = 52;
+export declare const GANTT_GRID_PAD_B = 10;
 export declare const GANTT_LABEL_WIDTH = 230;
 export declare const GANTT_PX_PER_WEEK = 80;
 export declare const GANTT_PX_MIN = 24;

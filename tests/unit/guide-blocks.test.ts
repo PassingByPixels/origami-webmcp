@@ -74,11 +74,13 @@ describe('origami_guide({topic:"blocks"})', () => {
     expect(topic.model).toMatch(/every call before it already landed/);
   });
 
-  it('stays under an 8 KB budget', async () => {
+  it('stays under a 10 KB budget', async () => {
     const h = harness();
     const topic = await h.json('origami_guide', { topic: 'blocks' });
     const bytes = Buffer.byteLength(JSON.stringify(topic), 'utf8');
-    expect(bytes, `topic:"blocks" is ${bytes} bytes`).toBeLessThanOrEqual(8_192);
+    // 8 KB until 2026-09-24, when the 0.4.9 kinds (video, calendar, gallery, timeline) joined
+    // the topic alongside load_image — four documented kinds is real surface, not bloat
+    expect(bytes, `topic:"blocks" is ${bytes} bytes`).toBeLessThanOrEqual(10_240);
   });
 
   it('origami_guide() with no topic lists "blocks" among the topics, and QUICKSTART points at it', async () => {

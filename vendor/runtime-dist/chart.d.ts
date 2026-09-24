@@ -23,8 +23,8 @@ export declare const CHART_H = 360;
     AT TODAY'S NUMBERS THE COLUMN WINS AND THE plotW TERM NEVER FIRES, and the margin is narrower
     than it looks. A disc picture's plotW is 582 on all four (640 − 46 − 12; they are all
     fixed-width and all axis-free, so no band ever moves mL), and the column leaves a disc at most
-    505 (547 − 12 − 30, the least-banded case) — 77 units short. The widest sheet term ANY branch can
-    produce is a treemap's 523, still under 582, so the term is dormant across the whole set.
+    562 (604 − 12 − 30, the least-banded case) — 20 units short. The widest sheet term ANY branch can
+    produce is a treemap's 580, still under 582, so the term is dormant across the whole set.
 
     IT IS KEPT DELIBERATELY. It is the ceiling the control needs the moment PRINT_COLUMN_H moves
     again, and a clamp that is only right because a stricter one stands in front of it is a lie

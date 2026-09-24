@@ -13,7 +13,7 @@ import type { Violation } from './types.js';
  * Same carrier rules as every data block: "<" always escaped, the literal
  * script form enforced by validateSlideContent.
  */
-export declare const CHART_TYPES: readonly ["bar", "line", "pie", "timeseries", "scatter", "waterfall", "boxplot", "radar", "gauge", "heatmap", "treemap", "sankey"];
+export declare const CHART_TYPES: readonly ["bar", "line", "pie", "timeseries", "scatter", "waterfall", "boxplot", "radar", "gauge", "heatmap", "treemap", "sankey", "chord"];
 /** Max rows in a heatmap — its series are the grid's ROWS, so the cap matches the 24-column label
     cap rather than the 1-6 series cap every other type keeps. */
 export declare const HEATMAP_MAX_ROWS = 24;
@@ -41,6 +41,14 @@ export declare const TREEMAP_MAX_NODES = 60;
     edges is arithmetic a viewer does not notice, where an uncapped graph is not. */
 export declare const SANKEY_MAX_NODES = 60;
 export declare const SANKEY_MAX_LINKS = 120;
+/** Most nodes a CHORD takes, and most flows between them. A chord is the second graph-shaped picture
+    and it reads the same `labels` + `links` shape as a sankey, so the two caps are the same numbers
+    for the same reasons: 60 nodes is the widest cap in the format and past it the arcs are too short
+    to name, and 120 links (twice the node count) is where a followable diagram turns into a mat.
+    They are separate constants rather than an alias so the two pictures can diverge later without a
+    reader having to guess which one a number belongs to. */
+export declare const CHORD_MAX_NODES = 60;
+export declare const CHORD_MAX_LINKS = 120;
 /** Most hex COLUMNS a hexbin can print its counts at — above this the editor withholds `showValues`
     rather than offering a flag the renderer will drop.
 

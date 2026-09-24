@@ -141,7 +141,26 @@ const MEASURER = (nonce: string, ids: string[], mountMs: number, settleMs: numbe
         if(!sec){g={id:id,measured:false,reason:'this fold is not on the stage — it is hidden, so the deck never lays it out'};}
         else if(rect(sec).height===0){g={id:id,measured:false,reason:'the fold is in the deck but rendered with zero height, and no tab could bring it on screen'};}
         else{
-          if(rect(sec).top>2){sec.scrollIntoView(); await sleep(60);}   // scroll folds: read it where a reader would
+          /* Read the fold where a READER would: fully in view, its top clear of the fixed
+             masthead. header.o-top is position:fixed, so a blind scrollIntoView() parks the
+             fold at the frame's very top - UNDER the masthead - and the measurement then says
+             "clipped by the masthead" for a fold a reader sees fine. Scroll only when the fold
+             is not already fully visible, and after scrolling drop its top just below the
+             masthead instead of at the frame's top edge. */
+          var hd=document.querySelector('header.o-top');
+          var hb=hd?rect(hd).bottom:0;
+          if(rect(sec).top>hb+2||rect(sec).bottom>innerHeight){
+            sec.scrollIntoView({block:'start'});
+            await sleep(60);
+            if(rect(sec).top<hb){
+              /* scrollIntoView scrolled the fold's SCROLL CONTAINER (a .o-stage wrapper with
+                 overflow), not the window - window.scrollBy is a no-op here. Scroll that box
+                 by the delta instead: fold top lands exactly at the masthead's bottom edge. */
+              var box=(function(el){var p=el.parentElement;while(p&&p!==document.body){var s=getComputedStyle(p);if(/(auto|scroll)/.test(s.overflowY))return p;p=p.parentElement;}return document.scrollingElement||document.documentElement;})(sec);
+              box.scrollTop+=rect(sec).top-hb;
+              await sleep(60);
+            }
+          }
           g=measureOne(sec); g.id=id;
         }
         out.push(g); progress(g);

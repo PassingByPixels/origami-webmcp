@@ -50,10 +50,10 @@ test.beforeEach(async ({ page }) => {
 
 test('boots with the tools registered and reports the WebMCP surface honestly', async ({ page }) => {
   await page.goto('/folio/index.html');
-  await expect(page.getByTestId('tool-count')).toHaveText('39');
+  await expect(page.getByTestId('tool-count')).toHaveText('40');
   // plain Chromium, no --enable-features flag: the status line must SAY so rather than pretend
   await expect(page.getByTestId('mcp-status')).toContainText('WebMCP: not available (console only)');
-  await expect(page.getByTestId('mcp-status')).toContainText('39 tools registered locally');
+  await expect(page.getByTestId('mcp-status')).toContainText('40 tools registered locally');
   // an agent can run the whole loop, review included — and so can a human, once the console is
   // opened (it ships collapsed now, so this is the click that reveals the list, not a shortcut)
   await openConsole(page);
@@ -700,18 +700,19 @@ test('a composed chart fold fits 1280x720 even when the card also carries prose'
 test('a composed node graph and the node-graph starter both FIT 1280x720', async ({ page }) => {
   /* The defect this test holds shut: a default, unedited node graph rendered 875px against 720px
      of screen — an overflow an agent got before it had typed anything, on both routes into a
-     graph (add_fold and the starter). MEASURED through the real render at 1280x720:
+     graph (add_fold and the starter). MEASURED through the real render at 1280x720.
 
-       --obh   (none)  600  500  450  400  380  360  340  320  300  280 and below
-       card     875    956  856  806  756  736  716  696  676  656  654 (flat)
+     The 0.4.5-era runtime put ~356px of chrome AROUND the --obh plot, so a card grew 1:1 with
+     the ask and --obh:500 measured 856px. The 0.4.9 runtime rebuilt that bargain: --obh now
+     sizes the card ITSELF (minus its caption bar), measured on the v0.4.9 vendor at 1280x720:
 
-     The slope is 1.0px per unit down to ~290, where the card hits its own 654px floor. The
-     composer's default (GRAPH_FIT_HEIGHT) puts the card at 676. A graph that names its own
-     height is OBEYED rather than clamped, and this proves that too: a block asking for 500 makes
-     a card TALLER than the default one, and is then reported as an overflow rather than being
-     quietly shrunk — a card that will not fit is overfull, which is inspect_render's to say.
-     (The delta is not asserted to the pixel: below roughly 290 the card stops shrinking at its
-     own floor, so the slope is 1.0 only above that knee.) */
+       --obh   320 (default)  340  500   800    900
+       card    291            309  454   ~907   ~1007 (fold contentHeight)
+
+     The ask is still OBEYED — a taller ask renders a taller card, sublinearly — and a graph that
+     asks for more than the screen still overflows on purpose and is reported as one: --obh:900
+     measured 1107px of fold against 720px of screen. That deliberate overflow is what the last
+     assertions hold shut, in place of the old 500. */
   await page.goto('/folio/index.html');
   await invoke(page, 'create_deck', { title: 'Graph fit', discard: true });
 
@@ -738,7 +739,8 @@ test('a composed node graph and the node-graph starter both FIT 1280x720', async
   const starter = await invoke(page, 'add_chunk', { starter: 'node-graph' });
   expect(starter.state).toContain('ok');
   const short = await invoke(page, 'add_fold', { title: 'Short on purpose', blocks: [{ graph: GRAPH, height: 340 }] });
-  const tall = await invoke(page, 'add_fold', { title: 'Tall on purpose', blocks: [{ graph: GRAPH, height: 500 }] });
+  const mid = await invoke(page, 'add_fold', { title: 'Mid on purpose', blocks: [{ graph: GRAPH, height: 500 }] });
+  const tall = await invoke(page, 'add_fold', { title: 'Tall on purpose', blocks: [{ graph: GRAPH, height: 900 }] });
 
   const res = await invoke(page, 'inspect_render', { viewport: { width: 1280, height: 720 } });
   expect(res.body.measured).toBe(true);
@@ -746,18 +748,22 @@ test('a composed node graph and the node-graph starter both FIT 1280x720', async
 
   console.log(
     `  graph @1280x720: composed ${fold(composed.body.chunkId).contentHeight}px, starter ${fold(starter.body.chunkId).contentHeight}px, ` +
-      `height:340 ${fold(short.body.chunkId).contentHeight}px, height:500 ${fold(tall.body.chunkId).contentHeight}px (720px on screen)`
+      `height:340 ${fold(short.body.chunkId).contentHeight}px, height:500 ${fold(mid.body.chunkId).contentHeight}px, ` +
+      `height:900 ${fold(tall.body.chunkId).contentHeight}px (720px on screen)`
   );
 
   expect(fold(composed.body.chunkId).fits, `composed graph measured ${fold(composed.body.chunkId).contentHeight}px`).toBe(true);
   expect(fold(composed.body.chunkId).rendersAnything).toBe(true);
   expect(fold(starter.body.chunkId).fits, `node-graph starter measured ${fold(starter.body.chunkId).contentHeight}px`).toBe(true);
   expect(fold(starter.body.chunkId).rendersAnything).toBe(true);
-  // the block's own height is obeyed, not clamped to the composer's default
-  expect(fold(tall.body.chunkId).contentHeight).toBeGreaterThan(fold(short.body.chunkId).contentHeight);
-  expect(fold(tall.body.chunkId).contentHeight).toBeGreaterThan(fold(composed.body.chunkId).contentHeight);
+  // the block's own height is obeyed, not clamped to the composer's default — taller asks,
+  // taller cards (sublinearly, per the 0.4.9 runtime's card-is-the-height bargain)
+  expect(fold(mid.body.chunkId).contentHeight).toBeGreaterThan(fold(short.body.chunkId).contentHeight);
+  expect(fold(tall.body.chunkId).contentHeight).toBeGreaterThan(fold(mid.body.chunkId).contentHeight);
   expect(fold(short.body.chunkId).fits, `height:340 measured ${fold(short.body.chunkId).contentHeight}px`).toBe(true);
-  expect(fold(tall.body.chunkId).fits, 'height:500 is what the author asked for, so it overflows on purpose').toBe(false);
+  // 500 no longer overflows a 720 screen — the 0.4.9 runtime renders the card itself at ~454px
+  expect(fold(mid.body.chunkId).fits, 'height:500 fits the screen now that the card IS the height').toBe(true);
+  expect(fold(tall.body.chunkId).fits, 'height:900 is what the author asked for, so it overflows on purpose').toBe(false);
 
   // and the ONLY overflow on the deck is that deliberate one
   expect(res.body.warnings.filter((w: any) => w.issue === 'overflow').map((w: any) => w.fold)).toEqual([tall.body.chunkId]);

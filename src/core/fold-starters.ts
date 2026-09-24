@@ -131,6 +131,33 @@ const TABLE_STARTER = {
   ],
 };
 
+/* ---------- seeds for the 0.4.9 kinds, verbatim from palette.ts ---------- */
+
+/** palette.ts VIDEO_STARTER — the unset placeholder; the video panel takes a pasted
+    URL from there. provider 'link' with an empty url needs no embed capability. */
+const VIDEO_STARTER = {
+  provider: 'link',
+  videoId: '',
+  url: '',
+  title: 'New video',
+};
+
+/** palette.ts TIMELINE_STARTER — four dated stages; orientation is absent (vertical default). */
+const TIMELINE_STARTER = {
+  events: [
+    { title: 'Understand', body: 'Clarify the people, process and outcome that matter.' },
+    { title: 'Shape', body: 'Agree the approach and the first slice of work.' },
+    { title: 'Build', body: 'Make the smallest thing that works end to end.' },
+    { title: 'Improve', body: 'Measure, learn and iterate.' },
+  ],
+};
+
+/** palette.ts calendarBlockHtml's seed — the current month, no notes. */
+const calendarStarter = (): { year: number; month: number } => {
+  const now = new Date();
+  return { year: now.getFullYear(), month: now.getMonth() + 1 };
+};
+
 /* ---------- the fold builders, verbatim from palette.ts ---------- */
 
 const ganttFoldInner = (): string => `
@@ -216,6 +243,67 @@ const ledgerFoldInner = (): string => `
   </div>
 `;
 
+/* ---------- 0.4.9 kinds: video / timeline / calendar / gallery ----------
+   video, timeline and calendar are dataFigure-compatible: their palette builders emit
+   o-<kind>fig / o-<kind> / data-<kind>-mount with a figcaption, exactly dataFigure's shape.
+   videoFoldInner has no palette counterpart (the Studio inserts video from the "+ Add block"
+   menu, not the rail) — the free-card wrapper is the shape kinds.video.howToAdd steers to,
+   and the seed + figure bytes are palette.ts verbatim. */
+
+const videoFoldInner = (): string => `
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Media</p>
+    <h2 class="anim" style="--i:1">Video</h2>
+    ${dataFigure('video', 'o-videofig', 'o-video', VIDEO_STARTER, 'Video caption')}
+  </div>
+`;
+
+const timelineFoldInner = (): string => `
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Journey</p>
+    <h2 class="anim" style="--i:1">Timeline</h2>
+    ${dataFigure('timeline', 'o-timelinefig', 'o-timeline', TIMELINE_STARTER, 'Timeline')}
+  </div>
+`;
+
+const calendarFoldInner = (): string => `
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Month</p>
+    <h2 class="anim" style="--i:1">Calendar</h2>
+    ${dataFigure('calendar', 'o-calendarfig', 'o-calendar', calendarStarter(), 'Calendar')}
+  </div>
+`;
+
+const galleryFoldInner = (): string => `
+  <div class="slide-inner">
+    <p class="eyebrow anim" style="--i:0">Pictures</p>
+    <h2 class="anim" style="--i:1">Gallery</h2>
+    ${galleryFigure({ images: [] })}
+  </div>
+`;
+
+/** palette.ts galleryBlockHtml — VERBATIM, with the figure's `style` the one addition (the
+    block-size grips' carrier, same rule dataFigure applies). A gallery differs from every
+    other figure kind: NO mount class (the runtime styles the bare mount), NO figcaption (the
+    mounted board carries its own bar), COMPACT JSON (no 2-space indent), and both "<" AND ">"
+    escaped. A blank, not-yet-chosen gallery omits `style`: the schema rejects "" but the
+    runtime reads an absent style as `single`, so the figure stays valid and renderable. */
+export const galleryFigure = (data: unknown, style = ''): string => {
+  const d = data as { style?: string; images: unknown[] };
+  const payload: { style?: string; images: unknown[] } = { images: d.images };
+  if (d.style) payload.style = d.style;
+  const json = JSON.stringify(payload).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return `<figure class="o-galleryfig anim"${style ? ` style="${style}"` : ''}><script type="application/json" data-odata="gallery">${json}</script><div data-gallery-mount></div></figure>`;
+};
+
+/** palette.ts imageBlockHtml — verbatim, with palette.ts's own escape helpers inlined (kept
+    local rather than imported from block-tools.ts, which imports this file). An image addresses
+    the deck ASSET TABLE by id (never a URL): the runtime sets img.src from the deck's assets at
+    render, and an id with no asset is refused by validateAssets at save. */
+export const escapeAttr = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export const imageFigure = (assetId: string, alt: string): string =>
+  `<figure class="o-img anim"><img data-oasset="${escapeAttr(assetId)}" alt="${escapeAttr(alt)}"><figcaption>${escapeAttr(alt)}</figcaption></figure>`;
+
 export interface FoldStarter {
   key: string;
   /** The name the Studio's own rail button uses. */
@@ -237,6 +325,10 @@ export const FOLD_STARTERS: FoldStarter[] = [
   { key: 'drawing', name: 'Drawing', block: 'draw', label: 'Drawing', use: 'A hand-drawn sketch on a fixed 800x450 canvas — boxes, arrows and text with a seeded jitter.', inner: drawFoldInner },
   { key: 'venn', name: 'Venn diagram', block: 'venn', label: 'Venn diagram', use: 'Two or three overlapping sets. Seeded with two circles; add a third by raising count and sets.', inner: vennFoldInner },
   { key: 'ledger', name: 'Ledger', block: 'table', label: 'Ledger', use: 'A live spreadsheet block. Seeded EMPTY (4 columns x 5 blank rows) — fill the cells and add formulas, which are baked by the calc engine on write.', inner: ledgerFoldInner },
+  { key: 'video', name: 'Video', block: 'video', label: 'Video', use: 'An embedded player (YouTube, Vimeo, Loom — a capability is granted automatically) or a plain link card. Seeded UNSET: set_block with provider/videoId/url, or write the JSON by hand.', inner: videoFoldInner },
+  { key: 'timeline', name: 'Timeline', block: 'timeline', label: 'Timeline', use: 'A dated sequence of stages, vertical by default — set orientation to "horizontal" in the JSON. Seeded with a four-stage example to overwrite.', inner: timelineFoldInner },
+  { key: 'calendar', name: 'Calendar', block: 'calendar', label: 'Calendar', use: 'An editable month grid with notes per day. Seeded with the CURRENT month; set_block with year/month and entries.', inner: calendarFoldInner },
+  { key: 'gallery', name: 'Gallery', block: 'gallery', label: 'Gallery', use: 'A picture board (single, accordion, dome, drift, compare, carousel). Seeded EMPTY: call load_image for each picture first, then set_block with { style, images: [{ asset, alt }] } naming the asset ids.', inner: galleryFoldInner },
 ];
 
 export const findStarter = (key: string): FoldStarter | undefined => FOLD_STARTERS.find((s) => s.key === key);
