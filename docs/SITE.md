@@ -43,37 +43,39 @@ Sections top to bottom:
    around it.
    Eight petals around a small center disc (the crane mark sits in the center). Petal =
    a kite (long diamond) pointing outward, drawn as TWO facet polygons split along its
-   spine — the left facet a darker shade of the petal colour, the right lighter — plus a
+   spine �?" the left facet a darker shade of the petal colour, the right lighter �?" plus a
    hairline crease down the spine, so it reads as folded paper (reference: the photo's
-   copper/black kusudama, simplified). Petals at i×45°. Assignment:
-   - Folio — green pair (accent family). Links `folio/`.
-   - Draw — copper pair (warm, from the warn/copper family). Links `draw/`.
-   - Charts — ink pair (near-black facets). Links `charts/`.
-   - Gantt — sage pair (lighter green). Links `gantt/`.
-   - Design — OUTLINED petal, dashed crease, tiny "soon" chip near its tip. Links `design/`.
-   - Three remaining — pale rule-grey fills, low opacity, no label, not links. They are the
+   copper/black kusudama, simplified). Petals at iA-45A�. Assignment:
+   - Folio �?" green pair (accent family). Links `folio/`.
+   - Draw �?" copper pair (warm, from the warn/copper family). Links `draw/`.
+   - Maps �?" sea/slate pair (water and paper). Links `maps/`.
+   - Charts �?" ink pair (near-black facets). Links `charts/`.
+   - Gantt �?" sage pair (lighter green). Links `gantt/`.
+   - Design �?" OUTLINED petal, dashed crease, tiny "soon" chip near its tip. Links `design/`.
+   - Two remaining �?" pale rule-grey fills, low opacity, no label, not links. They are the
      room to grow; un-greying one later = one config row.
    Hover on an active petal: lift 4px along its own axis + show its name label beyond the
    tip. Whole petal is an `<a>`. Petal data lives in ONE config array (name, href, colour
-   pair, active flag) — the flower renders from it.
-4. **Tool cards** (the accessible nav — petals alone are hostile). A card is a folded sheet:
+   pair, active flag) �?" the flower renders from it.
+4. **Tool cards** (the accessible nav �?" petals alone are hostile). A card is a folded sheet:
    two facets split by one hairline crease, one corner turned back, layered shadows, and its
    own tilt of up to 2 degrees. Hover lifts the card 4px and straightens it. Contents: colour
-   swatch, name, status chip, one-liner, and the action. The action is "Open →", or
-   "Take a look →" for a tool that is not built yet. One-liners:
+   swatch, name, status chip, one-liner, and the action. The action is "Open �+'", or
+   "Take a look �+'" for a tool that is not built yet. One-liners:
    - Folio: "Decks and documents. The whole editor, in the tab." Chip LIVE.
    - Draw: "Hand-drawn sketches and diagrams."
+   - Maps: "Procedural world maps an agent can redraw." Chip LIVE.
    - Charts: "Twelve chart types and a Venn."
    - Gantt: "Roadmaps on a real calendar."
    - Design: "Pages and posters. Coming soon." Chip SOON.
 
    **Layout of the desk.** Above 980px: three columns. Folio and Charts at the left, Draw and
-   Gantt at the right, the flower between them across both rows, and Design across the full
-   width below. Each side card is CENTRED in its row, so the slack the taller flower leaves is
-   split and no gap on the desk is more than about 120px — measured at 1440, the widest is
-   96px. From 980px down: two columns, the flower on top. From 560px down: one column — the
-   flower, then the cards in the order the flower names them, with the tilts flattened to
-   0.5 degrees.
+   Gantt at the right, the flower between them across both rows, Maps directly under the
+   flower in the centre column, and Design across the full width below. Each side card is
+   CENTRED in its row, so the slack the taller flower leaves is split and no gap on the desk
+   is more than about 120px �?" measured at 1440, the widest is 96px. From 980px down: two
+   columns, the flower on top. From 560px down: one column �?" the flower, then the cards in
+   the order the flower names them, with the tilts flattened to 0.5 degrees.
 
    The Design card spans the desk from 561px up, and its crease moves to the far right end
    there: a crease at the usual 42.6% would split a wide sheet down the middle and read as two

@@ -79,6 +79,13 @@ async function copyStatics() {
     await appAssets(out);
   }
 
+  /* ---- Maps: the one leaf that is ALREADY self-contained (no bundle, no shell — its whole
+         app is one HTML file with its own MapsMCP bench; see docs/MAPS.md) ---- */
+  const maps = join(dist, 'maps');
+  await mkdir(maps, { recursive: true });
+  await cp(join(root, 'src/app/maps.html'), join(maps, 'index.html'));
+  await writeFile(join(maps, 'favicon.svg'), CRANE_FILE, 'utf8');
+
   /* ---- the site ---- */
   await writeFile(join(dist, 'favicon.svg'), CRANE_FILE, 'utf8');
   await writeFile(join(dist, 'site.css'), await siteCss(), 'utf8');

@@ -81,7 +81,7 @@ a { color: inherit; }
 
 /* ---------- page frame ---------- */
 
-/* Wider than the old 960: the desk needs the width, or the five cards crowd the flower. The
+/* Wider than the old 960: the desk needs the width, or the six cards crowd the flower. The
    prose pages are unaffected — .doc keeps its own 620px measure inside this. */
 main {
   max-width: 1120px;
@@ -207,11 +207,13 @@ main {
 
 /* ---------- the desk: the flower, with the cards laid around it ---------- */
 
-/* Five cards around one centrepiece, and no bare patch of desk between them:
+/* Six cards around one centrepiece, and no bare patch of desk between them:
    - Folio and Charts hold the left column, Draw and Gantt the right. Each pair is CENTRED in
      its row, so the slack the taller flower leaves is split three ways (~26px each) instead of
      collecting into one hole. Stretching the cards instead was worse: a card tall enough to
      fill the column is a half-empty sheet, and an empty sheet reads as a fault, not as desk.
+   - Maps sits directly UNDER the flower, in the centre column the flower leaves free from
+     row 3 — the one slot that reads as "the next sheet off the press".
    - Design lies ACROSS the bottom, all three columns wide. As a portrait card centred under
      the flower it left a ~330px dead patch of linen either side of it at 1440. A landscape
      sheet closes the composition and reads as deliberate. */
@@ -228,7 +230,8 @@ main {
 .slot-charts { grid-column: 1; grid-row: 2; align-self: center; }
 .slot-draw   { grid-column: 3; grid-row: 1; align-self: center; }
 .slot-gantt  { grid-column: 3; grid-row: 2; align-self: center; }
-.slot-design { grid-column: 1 / 4; grid-row: 3; }
+.slot-maps   { grid-column: 2; grid-row: 3; align-self: center; justify-self: center; width: min(420px, 100%); }
+.slot-design { grid-column: 1 / 4; grid-row: 4; }
 
 /* ---------- a card is a folded sheet of paper ---------- */
 
@@ -290,6 +293,7 @@ main {
 .slot-draw   { --tilt: 1.8deg; }
 .slot-charts { --tilt: 1.2deg; }
 .slot-gantt  { --tilt: -1.1deg; }
+.slot-maps   { --tilt: -0.8deg; }
 .slot-design { --tilt: 0.9deg; }
 
 .tool-name {
@@ -499,9 +503,10 @@ main {
   .slot-flower { grid-column: 1 / 3; grid-row: 1; margin-bottom: 6px; }
   .slot-folio  { grid-column: 1; grid-row: 2; }
   .slot-draw   { grid-column: 2; grid-row: 2; }
-  .slot-charts { grid-column: 1; grid-row: 3; }
-  .slot-gantt  { grid-column: 2; grid-row: 3; }
-  .slot-design { grid-column: 1 / 3; grid-row: 4; }
+  .slot-maps   { grid-column: 1; grid-row: 3; }
+  .slot-charts { grid-column: 2; grid-row: 3; }
+  .slot-gantt  { grid-column: 1; grid-row: 4; }
+  .slot-design { grid-column: 1 / 3; grid-row: 5; }
   .note, .prop-plane { display: none; }
   .notes { grid-template-columns: minmax(0, 1fr); }
 }
@@ -512,6 +517,7 @@ main {
   .slot-flower,
   .slot-folio,
   .slot-draw,
+  .slot-maps,
   .slot-charts,
   .slot-gantt,
   .slot-design {
@@ -522,6 +528,7 @@ main {
      still not look printed on */
   .slot-folio  { --tilt: -0.5deg; }
   .slot-draw   { --tilt: 0.5deg; }
+  .slot-maps   { --tilt: -0.5deg; }
   .slot-charts { --tilt: 0.5deg; }
   .slot-gantt  { --tilt: -0.5deg; }
   .slot-design { --tilt: 0.5deg; }

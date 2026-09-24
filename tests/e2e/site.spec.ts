@@ -10,18 +10,18 @@ import { expect, test } from '@playwright/test';
  */
 
 /** Every href the petals and the cards carry. All of them are real pages in dist/. */
-const LIVE = ['folio/', 'draw/', 'charts/', 'gantt/', 'design/'];
+const LIVE = ['folio/', 'draw/', 'maps/', 'charts/', 'gantt/', 'design/'];
 const BMC = 'https://buymeacoffee.com/passingbypixels';
 /* Support moved off a mailbox and onto the Labs site. One address, asserted in both the places
    the site names it: the footer of every page, and the privacy copy. */
 const SUPPORT = 'https://origamilabs.nl/support';
 
-test('the flower has eight petals — five links and three left to grow into', async ({ page }) => {
+test('the flower has eight petals — six links and two left to grow into', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('flower')).toBeVisible();
   await expect(page.getByTestId('petal')).toHaveCount(8);
-  await expect(page.getByTestId('petal-link')).toHaveCount(5);
-  await expect(page.locator('.petal-idle')).toHaveCount(3);
+  await expect(page.getByTestId('petal-link')).toHaveCount(6);
+  await expect(page.locator('.petal-idle')).toHaveCount(2);
   // an idle petal is not a link and cannot be tabbed to
   await expect(page.locator('.petal-idle a')).toHaveCount(0);
 });
@@ -30,7 +30,7 @@ test('every petal href is matched by a tool card with the same href, in the same
   await page.goto('/');
   const petals = await page.getByTestId('petal-link').evaluateAll((els) => els.map((e) => e.getAttribute('href')));
   const cards = await page.getByTestId('tool-card').evaluateAll((els) => els.map((e) => e.getAttribute('href')));
-  expect(petals).toEqual(['folio/', 'draw/', 'charts/', 'gantt/', 'design/']);
+  expect(petals).toEqual(['folio/', 'draw/', 'maps/', 'charts/', 'gantt/', 'design/']);
   expect(cards).toEqual(petals);
 });
 
@@ -68,7 +68,7 @@ test('the ring alternates, so no two blank petals ever sit side by side', async 
   expect(ring).toEqual([
     { petal: 'folio', angle: 0 },
     { petal: 'draw', angle: 45 },
-    { petal: 'empty-2', angle: 90 },
+    { petal: 'maps', angle: 90 },
     { petal: 'charts', angle: 135 },
     { petal: 'empty-4', angle: 180 },
     { petal: 'gantt', angle: 225 },
@@ -101,7 +101,7 @@ test('every named petal is labelled without a mouse; hover and keyboard focus li
 
   // permanent labels: the flower names its tools with nothing hovered
   const labels = await page.locator('.petal-label').allTextContents();
-  expect(labels).toEqual(['Folio', 'Draw', 'Charts', 'Gantt', 'Design']);
+  expect(labels).toEqual(['Folio', 'Draw', 'Maps', 'Charts', 'Gantt', 'Design']);
   await expect(page.locator('.petal-idle .petal-label')).toHaveCount(0);
 
   const folio = page.locator('[data-petal="folio"]');
@@ -217,9 +217,9 @@ test('the home page says the tools run both ways — by hand and by agent', asyn
 test('every card names its action, and Design offers only a look', async ({ page }) => {
   await page.goto('/');
   const actions = await page.locator('[data-testid="tool-card"] .tool-go').allTextContents();
-  expect(actions).toEqual(['Open →', 'Open →', 'Open →', 'Open →', 'Take a look →']);
+  expect(actions).toEqual(['Open →', 'Open →', 'Open →', 'Open →', 'Open →', 'Take a look →']);
   // the status chips come off the same config row as the petal colours
-  for (const href of ['folio/', 'draw/', 'charts/', 'gantt/']) {
+  for (const href of ['folio/', 'draw/', 'maps/', 'charts/', 'gantt/']) {
     await expect(page.locator(`[data-testid="tool-card"][href="${href}"] .tool-chip`), href).toHaveText('live');
   }
   await expect(page.locator('[data-testid="tool-card"][href="design/"] .tool-chip')).toHaveText('soon');
@@ -230,6 +230,7 @@ test('every card names its action, and Design offers only a look', async ({ page
   expect(swatches).toEqual([
     'rgb(63, 95, 57)', // Folio, accent shaded
     'rgb(138, 69, 34)', // Draw, copper
+    'rgb(47, 74, 95)', // Maps, sea/slate
     'rgb(23, 23, 23)', // Charts, ink
     'rgb(124, 150, 115)', // Gantt, sage
     'rgb(183, 202, 176)', // Design, pale sage
@@ -260,7 +261,7 @@ test('on a phone the desk stacks: the flower, then the cards in the order the fl
   const order = await page
     .locator('.desk > *:not(.note):not(.prop-plane)')
     .evaluateAll((els) => els.map((e) => e.className.replace('tool-card ', '')));
-  expect(order).toEqual(['slot-flower', 'slot-folio', 'slot-draw', 'slot-charts', 'slot-gantt', 'slot-design']);
+  expect(order).toEqual(['slot-flower', 'slot-folio', 'slot-draw', 'slot-maps', 'slot-charts', 'slot-gantt', 'slot-design']);
   // one column: every card is laid out at the same x. offsetLeft, not the bounding box — the
   // per-card tilt moves the box by a fraction of a pixel and would make this flaky.
   const xs = await page.getByTestId('tool-card').evaluateAll((els) => els.map((e) => (e as HTMLElement).offsetLeft));
@@ -269,7 +270,7 @@ test('on a phone the desk stacks: the flower, then the cards in the order the fl
   const tilts = await page
     .getByTestId('tool-card')
     .evaluateAll((els) => els.map((e) => getComputedStyle(e).getPropertyValue('--tilt').trim()));
-  expect(tilts).toEqual(['-0.5deg', '0.5deg', '0.5deg', '-0.5deg', '0.5deg']);
+  expect(tilts).toEqual(['-0.5deg', '0.5deg', '-0.5deg', '0.5deg', '-0.5deg', '0.5deg']);
 });
 
 test('every tool page carries the support slot — one plain link, no widget', async ({ page }) => {

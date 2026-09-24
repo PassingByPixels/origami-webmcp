@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Origami Maps · v0.1.00</title>
+  <style>
+    :root {
+      --bg: #0e1218;
+      --panel: #161c26;
+      --panel2: #1c2430;
+      --line: #2a3545;
+      --text: #e8eef6;
+      --muted: #8b9bb0;
+      --accent: #6ec8ff;
+      --accent2: #7dffb3;
+      --warn: #ffb454;
+      --danger: #ff7b7b;
+      --mono: ui-monospace, "Cascadia Code", "Segoe UI Mono", Consolas, monospace;
+      --sans: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+    body { display: grid; grid-template-rows: auto 1fr; }
+    header {
+      display: flex; align-items: center; gap: 16px; padding: 10px 16px;
+      border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #121820, #0e1218);
+    }
+    header h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .02em; }
+    header .ver { color: var(--accent); font-family: var(--mono); font-size: 12px; }
+    header .hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr 340px;
+      min-height: 0;
+    }
+    aside, .agent {
+      background: var(--panel);
+      border-right: 1px solid var(--line);
+      overflow: auto;
+      padding: 12px;
+      min-height: 0;
+    }
+    .agent { border-right: 0; border-left: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+    .stage {
+      position: relative; min-height: 0; background: #0a0d12;
+      display: grid; place-items: center; overflow: hidden;
+    }
+    canvas#map {
+      max-width: 100%; max-height: 100%;
+      image-rendering: pixelated;
+      cursor: crosshair;
+      box-shadow: 0 0 0 1px var(--line), 0 20px 60px rgba(0,0,0,.45);
+    }
+    h2 {
+      margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 650;
+    }
+    .card {
+      background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px;
+    }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%; background: #0f141c; color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 7px 9px; font: 12px/1.4 var(--mono);
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    input[type="range"] { width: 100%; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    button {
+      background: #243041; color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 7px 10px; font-size: 12px; cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); color: #fff; }
+    button.primary { background: #1d3a52; border-color: #2f6f99; color: var(--accent); }
+    button.good { background: #1a3a2d; border-color: #2f7a55; color: var(--accent2); }
+    button.ghost { background: transparent; }
+    .statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-family: var(--mono); font-size: 11px; }
+    .stat { background: #0f141c; border-radius: 8px; padding: 7px 8px; border: 1px solid var(--line); }
+    .stat b { display: block; color: var(--muted); font-weight: 500; font-size: 10px; margin-bottom: 2px; }
+    .layers { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 12px; }
+    .layers label { display: flex; gap: 6px; align-items: center; margin: 0; color: var(--text); }
+    #log {
+      flex: 1; min-height: 140px; overflow: auto; font: 11px/1.45 var(--mono);
+      background: #0b1017; border: 1px solid var(--line); border-radius: 10px; padding: 8px;
+    }
+    #log .line { margin: 0 0 6px; white-space: pre-wrap; word-break: break-word; }
+    #log .ts { color: var(--muted); }
+    #log .ok { color: var(--accent2); }
+    #log .cmd { color: var(--accent); }
+    #log .err { color: var(--danger); }
+    #log .note { color: var(--warn); }
+    .hud {
+      position: absolute; left: 12px; bottom: 12px; right: 12px;
+      display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none;
+    }
+    .chip {
+      pointer-events: none; background: rgba(14,18,24,.82); border: 1px solid var(--line);
+      border-radius: 999px; padding: 5px 10px; font: 11px var(--mono); color: var(--muted);
+      backdrop-filter: blur(6px);
+    }
+    .chip strong { color: var(--text); font-weight: 600; }
+    .presets button { flex: 1; min-width: 0; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .tools-doc { font: 11px/1.45 var(--mono); color: var(--muted); max-height: 160px; overflow: auto; }
+    .tools-doc code { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Origami Maps</h1>
+    <span class="ver">v0.1.00 · agent-first WebMCP mockup</span>
+    <span class="hint">Self-contained · no server compute · open this file, run tools from the console or agent panel</span>
+  </header>
+  <div class="layout">
+    <aside>
+      <div class="card">
+        <h2>World controls</h2>
+        <label>Seed</label>
+        <div class="row">
+          <input id="seedInput" type="text" value="origami-prime" />
+          <button id="btnRandomSeed" class="ghost">Random</button>
+        </div>
+        <label>Map size <span id="sizeVal">96</span></label>
+        <input id="sizeInput" type="range" min="48" max="160" step="8" value="96" />
+        <label>Sea level <span id="seaVal">0.42</span></label>
+        <input id="seaInput" type="range" min="0.20" max="0.70" step="0.01" value="0.42" />
+        <label>Moisture bias <span id="moistVal">0.55</span></label>
+        <input id="moistInput" type="range" min="0.10" max="0.90" step="0.01" value="0.55" />
+        <label>Temperature bias <span id="tempVal">0.50</span></label>
+        <input id="tempInput" type="range" min="0.10" max="0.90" step="0.01" value="0.50" />
+        <label>Population density <span id="popVal">0.55</span></label>
+        <input id="popInput" type="range" min="0.10" max="0.95" step="0.01" value="0.55" />
+        <div class="btns">
+          <button id="btnRegen" class="primary">Regenerate all</button>
+          <button id="btnTerrain">Terrain only</button>
+          <button id="btnClimate">Recalc weather</button>
+          <button id="btnPop">Recalc population</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Quick paint (human)</h2>
+        <label>Brush</label>
+        <select id="brushMode">
+          <option value="raise">Raise land</option>
+          <option value="lower">Lower / dig sea</option>
+          <option value="ridge">Mountain ridge</option>
+          <option value="wet">Add moisture</option>
+          <option value="dry">Dry climate</option>
+          <option value="settle">Drop settlement</option>
+          <option value="note">Jot map note</option>
+        </select>
+        <label>Brush radius <span id="brushVal">4</span></label>
+        <input id="brushInput" type="range" min="1" max="12" step="1" value="4" />
+        <div class="btns presets">
+          <button data-preset="islands">Islands</button>
+          <button data-preset="continent">Continent</button>
+          <button data-preset="archipelago">Archipelago</button>
+          <button data-preset="harsh">Harsh north</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Layers</h2>
+        <div class="layers">
+          <label><input type="checkbox" data-layer="height" checked /> Height</label>
+          <label><input type="checkbox" data-layer="biome" checked /> Biome</label>
+          <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
+          <label><input type="checkbox" data-layer="weather" /> Weather</label>
+          <label><input type="checkbox" data-layer="population" /> Population</label>
+          <label><input type="checkbox" data-layer="states" checked /> States</label>
+          <label><input type="checkbox" data-layer="settlements" checked /> Towns</label>
+          <label><input type="checkbox" data-layer="notes" checked /> Notes</label>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Live stats</h2>
+        <div class="statgrid" id="stats"></div>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <canvas id="map" width="768" height="768"></canvas>
+      <div class="hud">
+        <div class="chip" id="cellHud">Hover a cell</div>
+        <div class="chip" id="worldHud">—</div>
+      </div>
+    </main>
+
+    <section class="agent">
+      <div class="card" style="margin:0">
+        <h2>Agent lab bench</h2>
+        <p style="margin:0 0 8px;font-size:12px;color:var(--muted)">
+          Humans watch the map. Agents call <code style="color:var(--accent)">window.MapsMCP</code>
+          (WebMCP-shaped). Paste a JSON tool call or use presets.
+        </p>
+        <label>Tool call (JSON)</label>
+        <textarea id="agentCmd">{
+  "tool": "regenerate",
+  "args": { "seed": "demo-west" }
+}</textarea>
+        <div class="btns">
+          <button id="btnRunTool" class="good">Run tool</button>
+          <button id="btnListTools">list_tools</button>
+          <button id="btnSummary">get_summary</button>
+          <button id="btnExport">export_map</button>
+          <button id="btnImport">import_map</button>
+        </div>
+      </div>
+
+      <details open>
+        <summary>Draft WebMCP surface (v0.1)</summary>
+        <div class="tools-doc" id="toolsDoc"></div>
+      </details>
+
+      <h2>Activity log</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+
+<script>
+/**
+ * Origami Maps v0.1.00
+ * Proof of concept: Azgaar-inspired pipeline, agent-first mutations, pure client-side.
+ *
+ * Azgaar inspiration (not a port):
+ *   settings → generators → world data → renderer
+ *   editors = controlled mutations of world state
+ *
+ * Gaps vs Azgaar for WebMCP use (why this mock exists):
+ *  - UI-first editors, not a stable tool/API contract
+ *  - hard for agents to "raise west coast + drier + rename kingdom" without eyes on SVG
+ *  - regeneration often full-world; partial layer recalc is fuzzy across modules
+ *  - no structured get_* summaries sized for LLM context
+ *  - .map format is rich but not agent-ergonomic for surgical edits
+ *  - weather/pop/routes cascade is deep; agents need explicit recalculate tools
+ */
+(() => {
+  const VERSION = "0.1.00";
+  const canvas = document.getElementById("map");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  // ——— PRNG (mulberry32 + string hash) ———
+  function hashStr(s) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  }
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ——— Value noise ———
+  function makeNoise2D(seed) {
+    const rnd = mulberry32(seed);
+    const table = new Float64Array(512);
+    for (let i = 0; i < 512; i++) table[i] = rnd();
+    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function g(ix, iy) {
+      const i = ((ix * 374761393) ^ (iy * 668265263) ^ seed) & 511;
+      return table[i];
+    }
+    return function noise(x, y) {
+      const x0 = Math.floor(x), y0 = Math.floor(y);
+      const fx = fade(x - x0), fy = fade(y - y0);
+      const v00 = g(x0, y0), v10 = g(x0 + 1, y0);
+      const v01 = g(x0, y0 + 1), v11 = g(x0 + 1, y0 + 1);
+      return lerp(lerp(v00, v10, fx), lerp(v01, v11, fx), fy);
+    };
+  }
+  function fbm(noise, x, y, oct = 5) {
+    let amp = 0.5, freq = 1, sum = 0, norm = 0;
+    for (let i = 0; i < oct; i++) {
+      sum += noise(x * freq, y * freq) * amp;
+      norm += amp; amp *= 0.5; freq *= 2;
+    }
+    return sum / norm;
+  }
+
+  const BIOMES = [
+    { id: "ocean", name: "Ocean", color: [28, 72, 118], pop: 0 },
+    { id: "coast", name: "Coast", color: [62, 130, 150], pop: 0.35 },
+    { id: "lake", name: "Lake", color: [48, 110, 150], pop: 0.05 },
+    { id: "ice", name: "Ice", color: [210, 230, 245], pop: 0.02 },
+    { id: "tundra", name: "Tundra", color: [170, 185, 175], pop: 0.08 },
+    { id: "taiga", name: "Taiga", color: [70, 110, 80], pop: 0.18 },
+    { id: "grass", name: "Grassland", color: [120, 160, 80], pop: 0.55 },
+    { id: "forest", name: "Forest", color: [45, 110, 55], pop: 0.4 },
+    { id: "savanna", name: "Savanna", color: [170, 160, 70], pop: 0.35 },
+    { id: "desert", name: "Desert", color: [210, 185, 120], pop: 0.08 },
+    { id: "swamp", name: "Swamp", color: [70, 100, 70], pop: 0.15 },
+    { id: "mountain", name: "Mountain", color: [120, 115, 110], pop: 0.12 },
+    { id: "peak", name: "Peak", color: [235, 235, 240], pop: 0.01 },
+  ];
+  const BIOME_INDEX = Object.fromEntries(BIOMES.map((b, i) => [b.id, i]));
+
+  const NAME_A = ["Ash","Bel","Cor","Dun","Eri","Fen","Gal","Hel","Ith","Jor","Kal","Lor","Mor","Nor","Or","Pel","Quin","Rav","Sel","Tor","Ul","Vor","Wyn","Xor","Yel","Zan"];
+  const NAME_B = ["a","an","ar","en","eth","ia","il","in","is","or","um","us","yn"];
+  const NAME_C = ["burg","dale","ford","gate","haven","hold","keep","march","mere","mouth","port","reach","stead","stone","vale","wick","wood"];
+
+  function placeName(rnd) {
+    return NAME_A[(rnd() * NAME_A.length) | 0] +
+      NAME_B[(rnd() * NAME_B.length) | 0] +
+      NAME_C[(rnd() * NAME_C.length) | 0];
+  }
+  function stateName(rnd) {
+    const roots = ["Aure","Brin","Cae","Drel","Eld","Faer","Gry","Hallow","Irid","Jad","Kael","Lun","Myth","Nym","Obsid","Prax","Quel","Riven","Sol","Thal"];
+    const ends = ["ia","land","mark","or","ain","gard","heim","dom","esse","ara"];
+    return roots[(rnd() * roots.length) | 0] + ends[(rnd() * ends.length) | 0];
+  }
+
+  const world = {
+    version: VERSION,
+    seed: "origami-prime",
+    size: 96,
+    seaLevel: 0.42,
+    moistureBias: 0.55,
+    temperatureBias: 0.50,
+    populationDensity: 0.55,
+    template: "continent",
+    width: 96,
+    height: 96,
+    cells: null,
+    rivers: [],
+    settlements: [],
+    states: [],
+    notes: [],
+    markers: [],
+    generatedAt: null,
+  };
+
+  const view = {
+    layers: {
+      height: true, biome: true, rivers: true, weather: false,
+      population: false, states: true, settlements: true, notes: true,
+    },
+    hover: null,
+  };
+
+  function idx(x, y) { return y * world.width + x; }
+  function inBounds(x, y) { return x >= 0 && y >= 0 && x < world.width && y < world.height; }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function makeCells(n) {
+    const cells = new Array(n);
+    for (let i = 0; i < n; i++) {
+      cells[i] = {
+        h: 0, m: 0, t: 0, flow: 0, biome: 0,
+        pop: 0, state: -1, river: -1, coast: false,
+      };
+    }
+    return cells;
+  }
+
+  function applyTemplateMask(x, y, w, h, template, noise) {
+    const nx = x / (w - 1), ny = y / (h - 1);
+    const dx = nx * 2 - 1, dy = ny * 2 - 1;
+    const r = Math.sqrt(dx * dx + dy * dy);
+    if (template === "islands") {
+      const island = fbm(noise, x * 0.08 + 20, y * 0.08 + 20, 3);
+      return 0.55 - r * 0.35 + (island - 0.5) * 0.55;
+    }
+    if (template === "archipelago") {
+      const a = fbm(noise, x * 0.15, y * 0.15, 2);
+      return (a - 0.42) * 1.4 - r * 0.15;
+    }
+    if (template === "harsh") {
+      return 0.62 - ny * 0.25 - r * 0.2 + (1 - ny) * 0.08;
+    }
+    // continent
+    return 0.68 - Math.pow(r, 1.35) * 0.75;
+  }
+
+  // ——— GENERATORS ———
+  function generateHeightmap() {
+    const { width: w, height: h, seed, seaLevel, template } = world;
+    const noise = makeNoise2D(hashStr(seed + ":h"));
+    const ridge = makeNoise2D(hashStr(seed + ":ridge"));
+    const cells = world.cells;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const n = fbm(noise, x * 0.045, y * 0.045, 6);
+        const rdg = Math.abs(fbm(ridge, x * 0.03 + 3, y * 0.03 - 2, 4) - 0.5) * 2;
+        let height = n * 0.72 + (1 - rdg) * 0.18;
+        height += applyTemplateMask(x, y, w, h, template, noise) * 0.35;
+        // edge falloff into ocean
+        const edge = Math.min(x, y, w - 1 - x, h - 1 - y) / Math.max(8, Math.min(w, h) * 0.08);
+        height *= clamp(edge, 0.15, 1);
+        cells[idx(x, y)].h = clamp(height, 0, 1);
+      }
+    }
+    // simple coastal blur
+    for (let pass = 0; pass < 1; pass++) {
+      const copy = cells.map(c => c.h);
+      for (let y = 1; y < h - 1; y++) {
+        for (let x = 1; x < w - 1; x++) {
+          const i = idx(x, y);
+          cells[i].h = (
+            copy[i] * 4 +
+            copy[idx(x - 1, y)] + copy[idx(x + 1, y)] +
+            copy[idx(x, y - 1)] + copy[idx(x, y + 1)]
+          ) / 8;
+        }
+      }
+    }
+    markCoasts(seaLevel);
+  }
+
+  function markCoasts(sea) {
+    const { width: w, height: h, cells } = world;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const c = cells[idx(x, y)];
+        c.coast = false;
+        if (c.h < sea) continue;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (!inBounds(nx, ny)) continue;
+          if (cells[idx(nx, ny)].h < sea) { c.coast = true; break; }
+        }
+      }
+    }
+  }
+
+  function generateClimate() {
+    const { width: w, height: h, cells, seaLevel, moistureBias, temperatureBias, seed } = world;
+    const nM = makeNoise2D(hashStr(seed + ":m"));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const c = cells[idx(x, y)];
+        const lat = y / (h - 1); // 0 north cold … 1 south warm (simple)
+        let temp = (1 - Math.abs(lat - 0.55) * 1.4) * 0.75 + temperatureBias * 0.35;
+        temp -= Math.max(0, c.h - seaLevel) * 0.85;
+        temp += (fbm(nM, x * 0.02, y * 0.02, 2) - 0.5) * 0.1;
+        c.t = clamp(temp, 0, 1);
+
+        let moist = moistureBias * 0.7 + fbm(nM, x * 0.05 + 9, y * 0.05, 4) * 0.45;
+        // coastal moisture
+        if (c.coast) moist += 0.12;
+        if (c.h < seaLevel) moist = 1;
+        // rain shadow: drier east of high ground (toy model)
+        if (x > 2) {
+          const west = cells[idx(x - 2, y)].h;
+          if (west > seaLevel + 0.25 && c.h > seaLevel) moist -= (west - seaLevel) * 0.35;
+        }
+        moist -= Math.max(0, c.h - 0.75) * 0.4;
+        c.m = clamp(moist, 0, 1);
+      }
+    }
+  }
+
+  function generateRivers() {
+    const { width: w, height: h, cells, seaLevel, seed } = world;
+    const rnd = mulberry32(hashStr(seed + ":rivers"));
+    world.rivers = [];
+    for (const c of cells) { c.flow = 0; c.river = -1; }
+
+    // accumulate flow downhill
+    const order = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) order.push([x, y]);
+    order.sort((a, b) => cells[idx(b[0], b[1])].h - cells[idx(a[0], a[1])].h);
+
+    const down = new Int32Array(w * h).fill(-1);
+    for (const [x, y] of order) {
+      const i = idx(x, y);
+      if (cells[i].h < seaLevel) continue;
+      let best = -1, bh = cells[i].h;
+      for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (!inBounds(nx, ny)) continue;
+        const ni = idx(nx, ny);
+        if (cells[ni].h < bh) { bh = cells[ni].h; best = ni; }
+      }
+      down[i] = best;
+      cells[i].flow += 1;
+      if (best >= 0) cells[best].flow += cells[i].flow;
+    }
+
+    const threshold = Math.max(8, (w * h) * 0.0018);
+    const used = new Set();
+    let rid = 0;
+    for (const [x, y] of order) {
+      const i = idx(x, y);
+      if (cells[i].h < seaLevel + 0.08) continue;
+      if (cells[i].flow < threshold) continue;
+      if (used.has(i)) continue;
+      if (rnd() > 0.35) continue;
+      const path = [];
+      let cur = i;
+      while (cur >= 0 && cells[cur].h >= seaLevel && path.length < 400) {
+        if (used.has(cur) && path.length > 3) break;
+        path.push(cur);
+        used.add(cur);
+        cells[cur].river = rid;
+        cur = down[cur];
+        if (cur >= 0 && cells[cur].h < seaLevel) {
+          path.push(cur);
+          break;
+        }
+      }
+      if (path.length >= 5) {
+        world.rivers.push({ id: rid, cells: path, name: placeName(rnd) + " River" });
+        // boost moisture along river
+        for (const ci of path) {
+          cells[ci].m = clamp(cells[ci].m + 0.18, 0, 1);
+          const cx = ci % w, cy = (ci / w) | 0;
+          for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+            const nx = cx + dx, ny = cy + dy;
+            if (inBounds(nx, ny)) cells[idx(nx, ny)].m = clamp(cells[idx(nx, ny)].m + 0.06, 0, 1);
+          }
+        }
+        rid++;
+      }
+      if (rid > 28) break;
+    }
+  }
+
+  function assignBiomes() {
+    const { cells, seaLevel } = world;
+    for (const c of cells) {
+      if (c.h < seaLevel - 0.03) { c.biome = BIOME_INDEX.ocean; continue; }
+      if (c.h < seaLevel) { c.biome = BIOME_INDEX.coast; continue; }
+      if (c.h > 0.88) { c.biome = BIOME_INDEX.peak; continue; }
+      if (c.h > 0.72) { c.biome = BIOME_INDEX.mountain; continue; }
+      if (c.t < 0.22) { c.biome = c.m > 0.45 ? BIOME_INDEX.ice : BIOME_INDEX.tundra; continue; }
+      if (c.t < 0.38) { c.biome = c.m > 0.4 ? BIOME_INDEX.taiga : BIOME_INDEX.tundra; continue; }
+      if (c.m > 0.72 && c.h < 0.55) { c.biome = BIOME_INDEX.swamp; continue; }
+      if (c.m < 0.28) { c.biome = c.t > 0.55 ? BIOME_INDEX.desert : BIOME_INDEX.savanna; continue; }
+      if (c.m < 0.42) { c.biome = BIOME_INDEX.savanna; continue; }
+      if (c.m > 0.58) { c.biome = BIOME_INDEX.forest; continue; }
+      c.biome = BIOME_INDEX.grass;
+    }
+  }
+
+  function generatePopulation() {
+    const { cells, seaLevel, populationDensity, width: w, height: h } = world;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const c = cells[idx(x, y)];
+        if (c.h < seaLevel) { c.pop = 0; continue; }
+        const b = BIOMES[c.biome];
+        let suit = b.pop;
+        suit *= 0.55 + c.m * 0.5;
+        suit *= 0.7 + (1 - Math.abs(c.t - 0.55)) * 0.5;
+        if (c.coast) suit *= 1.35;
+        if (c.river >= 0) suit *= 1.45;
+        if (c.h > 0.7) suit *= 0.45;
+        c.pop = suit * populationDensity * (0.7 + ((x * 17 + y * 31) % 10) * 0.03);
+      }
+    }
+  }
+
+  function generateStatesAndSettlements() {
+    const { cells, width: w, height: h, seed, seaLevel } = world;
+    const rnd = mulberry32(hashStr(seed + ":polity"));
+    world.settlements = [];
+    world.states = [];
+    for (const c of cells) c.state = -1;
+
+    // candidate scores
+    const candidates = [];
+    for (let y = 2; y < h - 2; y++) {
+      for (let x = 2; x < w - 2; x++) {
+        const c = cells[idx(x, y)];
+        if (c.h < seaLevel) continue;
+        if (c.pop < 0.12) continue;
+        candidates.push({ x, y, s: c.pop + (c.coast ? 0.15 : 0) + (c.river >= 0 ? 0.2 : 0) + rnd() * 0.05 });
+      }
+    }
+    candidates.sort((a, b) => b.s - a.s);
+
+    const capitals = [];
+    const minDist = Math.max(6, Math.min(w, h) * 0.12);
+    for (const c of candidates) {
+      if (capitals.length >= 8) break;
+      let ok = true;
+      for (const p of capitals) {
+        const d = Math.hypot(p.x - c.x, p.y - c.y);
+        if (d < minDist) { ok = false; break; }
+      }
+      if (ok) capitals.push(c);
+    }
+
+    const palette = [
+      [220, 90, 90], [90, 160, 220], [120, 200, 120], [220, 170, 80],
+      [180, 120, 210], [80, 200, 190], [230, 130, 160], [160, 160, 100],
+    ];
+
+    capitals.forEach((cap, si) => {
+      const name = stateName(rnd);
+      world.states.push({
+        id: si, name, capital: null,
+        color: palette[si % palette.length],
+        population: 0,
+      });
+      const id = world.settlements.length;
+      world.settlements.push({
+        id, name: placeName(rnd), x: cap.x, y: cap.y,
+        kind: "capital", state: si, population: 0,
+      });
+      world.states[si].capital = id;
+    });
+
+    // more towns
+    for (const c of candidates) {
+      if (world.settlements.length >= 22) break;
+      let tooClose = false;
+      for (const s of world.settlements) {
+        if (Math.hypot(s.x - c.x, s.y - c.y) < minDist * 0.55) { tooClose = true; break; }
+      }
+      if (tooClose) continue;
+      if (rnd() > 0.55) continue;
+      world.settlements.push({
+        id: world.settlements.length,
+        name: placeName(rnd),
+        x: c.x, y: c.y,
+        kind: c.s > 0.5 ? "city" : "town",
+        state: -1,
+        population: 0,
+      });
+    }
+
+    // assign cells to nearest capital
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const c = cells[idx(x, y)];
+        if (c.h < seaLevel) { c.state = -1; continue; }
+        let best = -1, bd = 1e9;
+        for (let si = 0; si < capitals.length; si++) {
+          const cap = capitals[si];
+          const d = Math.hypot(cap.x - x, cap.y - y) + (1 - c.h) * 2;
+          if (d < bd) { bd = d; best = si; }
+        }
+        c.state = best;
+      }
+    }
+
+    for (const s of world.settlements) {
+      if (s.state < 0) s.state = cells[idx(s.x, s.y)].state;
+      const base = cells[idx(s.x, s.y)].pop;
+      s.population = Math.round(base * (s.kind === "capital" ? 4200 : s.kind === "city" ? 1800 : 600) * (8 + rnd() * 6));
+    }
+    for (const st of world.states) {
+      let p = 0;
+      for (const c of cells) if (c.state === st.id) p += c.pop;
+      for (const s of world.settlements) if (s.state === st.id) p += s.population / 5000;
+      st.population = Math.round(p * 1200);
+    }
+  }
+
+  function fullGenerate(opts = {}) {
+    if (opts.seed != null) world.seed = String(opts.seed);
+    if (opts.size != null) world.size = clamp(opts.size | 0, 32, 192);
+    if (opts.seaLevel != null) world.seaLevel = +opts.seaLevel;
+    if (opts.moistureBias != null) world.moistureBias = +opts.moistureBias;
+    if (opts.temperatureBias != null) world.temperatureBias = +opts.temperatureBias;
+    if (opts.populationDensity != null) world.populationDensity = +opts.populationDensity;
+    if (opts.template != null) world.template = opts.template;
+
+    world.width = world.size;
+    world.height = world.size;
+    world.cells = makeCells(world.width * world.height);
+    world.notes = world.notes || [];
+    world.markers = world.markers || [];
+    if (opts.clearAnnotations) { world.notes = []; world.markers = []; }
+
+    generateHeightmap();
+    generateClimate();
+    generateRivers();
+    assignBiomes();
+    generatePopulation();
+    generateStatesAndSettlements();
+    world.generatedAt = new Date().toISOString();
+    syncForm();
+    render();
+    updateStats();
+  }
+
+  function recalculateWeather() {
+    generateClimate();
+    generateRivers();
+    assignBiomes();
+    generatePopulation();
+    // keep polities; refresh pops lightly
+    for (const s of world.settlements) {
+      const c = world.cells[idx(s.x, s.y)];
+      if (!c) continue;
+      s.population = Math.max(50, Math.round(s.population * (0.85 + c.pop)));
+    }
+    render(); updateStats();
+  }
+
+  function recalculatePopulation() {
+    generatePopulation();
+    for (const st of world.states) {
+      let p = 0;
+      for (const c of world.cells) if (c.state === st.id) p += c.pop;
+      st.population = Math.round(p * 1200);
+    }
+    render(); updateStats();
+  }
+
+  function paintBrush(cx, cy, mode, radius) {
+    const r = radius | 0;
+    const { cells, seaLevel } = world;
+    for (let y = cy - r; y <= cy + r; y++) {
+      for (let x = cx - r; x <= cx + r; x++) {
+        if (!inBounds(x, y)) continue;
+        const d = Math.hypot(x - cx, y - cy);
+        if (d > r) continue;
+        const fall = 1 - d / (r + 0.01);
+        const c = cells[idx(x, y)];
+        if (mode === "raise" || mode === "ridge") {
+          c.h = clamp(c.h + 0.06 * fall * (mode === "ridge" ? 1.4 : 1), 0, 1);
+        } else if (mode === "lower") {
+          c.h = clamp(c.h - 0.07 * fall, 0, 1);
+        } else if (mode === "wet") {
+          c.m = clamp(c.m + 0.1 * fall, 0, 1);
+        } else if (mode === "dry") {
+          c.m = clamp(c.m - 0.1 * fall, 0, 1);
+        }
+      }
+    }
+    if (mode === "raise" || mode === "lower" || mode === "ridge") {
+      markCoasts(seaLevel);
+      generateClimate();
+      generateRivers();
+      assignBiomes();
+      generatePopulation();
+    } else if (mode === "wet" || mode === "dry") {
+      assignBiomes();
+      generatePopulation();
+    }
+    render(); updateStats();
+  }
+
+  function addSettlementAt(x, y, name, kind = "town") {
+    if (!inBounds(x, y)) throw new Error("out of bounds");
+    const c = world.cells[idx(x, y)];
+    if (c.h < world.seaLevel) throw new Error("cannot settle on ocean");
+    const rnd = mulberry32(hashStr(world.seed + ":s" + world.settlements.length));
+    const s = {
+      id: world.settlements.length,
+      name: name || placeName(rnd),
+      x, y, kind,
+      state: c.state,
+      population: Math.round(400 + c.pop * 2000),
+    };
+    world.settlements.push(s);
+    render(); updateStats();
+    return s;
+  }
+
+  function jotNote(x, y, text) {
+    const n = { id: world.notes.length, x, y, text: String(text || "note") };
+    world.notes.push(n);
+    render();
+    return n;
+  }
+
+  // ——— RENDER ———
+  function biomeColor(c, layers) {
+    const b = BIOMES[c.biome].color;
+    let r = b[0], g = b[1], bl = b[2];
+    if (layers.height) {
+      const shade = 0.75 + c.h * 0.5;
+      r *= shade; g *= shade; bl *= shade;
+    }
+    if (layers.weather) {
+      // blend temperature (red) / moisture (blue)
+      r = r * 0.55 + c.t * 180;
+      g = g * 0.55 + 40;
+      bl = bl * 0.55 + c.m * 180;
+    }
+    if (layers.population) {
+      const p = clamp(c.pop, 0, 1);
+      r = r * (1 - p) + 255 * p;
+      g = g * (1 - p) + 220 * p * 0.4;
+      bl = bl * (1 - p) + 40 * p;
+    }
+    if (layers.states && c.state >= 0 && c.h >= world.seaLevel) {
+      const col = world.states[c.state].color;
+      r = r * 0.55 + col[0] * 0.45;
+      g = g * 0.55 + col[1] * 0.45;
+      bl = bl * 0.55 + col[2] * 0.45;
+    }
+    return [r|0, g|0, bl|0];
+  }
+
+  function render() {
+    const { width: w, height: h, cells } = world;
+    const scale = Math.floor(Math.min(canvas.width / w, canvas.height / h));
+    const ox = ((canvas.width - w * scale) / 2) | 0;
+    const oy = ((canvas.height - h * scale) / 2) | 0;
+    ctx.fillStyle = "#070a0e";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const img = ctx.createImageData(w, h);
+    const d = img.data;
+    for (let i = 0; i < cells.length; i++) {
+      let rgb;
+      if (!view.layers.biome && view.layers.height) {
+        const v = (cells[i].h * 255) | 0;
+        rgb = [v, v, v + 10];
+        if (cells[i].h < world.seaLevel) rgb = [20, 40 + v * 0.3, 80 + v * 0.5];
+      } else {
+        rgb = biomeColor(cells[i], view.layers);
+      }
+      const p = i * 4;
+      d[p] = rgb[0]; d[p + 1] = rgb[1]; d[p + 2] = rgb[2]; d[p + 3] = 255;
+    }
+    // draw small then scale up for crisp pixels
+    const off = document.createElement("canvas");
+    off.width = w; off.height = h;
+    off.getContext("2d").putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, ox, oy, w * scale, h * scale);
+
+    // rivers
+    if (view.layers.rivers) {
+      ctx.lineCap = "round";
+      for (const river of world.rivers) {
+        ctx.beginPath();
+        let first = true;
+        for (const ci of river.cells) {
+          const x = (ci % w) * scale + ox + scale / 2;
+          const y = ((ci / w) | 0) * scale + oy + scale / 2;
+          if (first) { ctx.moveTo(x, y); first = false; }
+          else ctx.lineTo(x, y);
+        }
+        const width = clamp(1.2 + river.cells.length * 0.015, 1.2, 3.5);
+        ctx.strokeStyle = "rgba(120, 200, 255, 0.85)";
+        ctx.lineWidth = width;
+        ctx.stroke();
+      }
+    }
+
+    // state borders (cheap edge detect)
+    if (view.layers.states) {
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const c = cells[idx(x, y)];
+          if (c.state < 0) continue;
+          const right = inBounds(x + 1, y) ? cells[idx(x + 1, y)].state : -2;
+          const downC = inBounds(x, y + 1) ? cells[idx(x, y + 1)].state : -2;
+          if (right !== c.state) ctx.fillRect(ox + (x + 1) * scale - 1, oy + y * scale, 1, scale);
+          if (downC !== c.state) ctx.fillRect(ox + x * scale, oy + (y + 1) * scale - 1, scale, 1);
+        }
+      }
+    }
+
+    // settlements
+    if (view.layers.settlements) {
+      for (const s of world.settlements) {
+        const px = ox + s.x * scale + scale / 2;
+        const py = oy + s.y * scale + scale / 2;
+        const rad = s.kind === "capital" ? 4.2 : s.kind === "city" ? 3.2 : 2.4;
+        ctx.beginPath();
+        ctx.arc(px, py, rad, 0, Math.PI * 2);
+        ctx.fillStyle = s.kind === "capital" ? "#ffe08a" : "#f2f6ff";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.65)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        if (scale >= 6 && (s.kind === "capital" || s.kind === "city")) {
+          ctx.font = "10px Segoe UI";
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.strokeStyle = "rgba(0,0,0,0.7)";
+          ctx.lineWidth = 3;
+          ctx.strokeText(s.name, px + 6, py - 4);
+          ctx.fillText(s.name, px + 6, py - 4);
+        }
+      }
+    }
+
+    if (view.layers.notes) {
+      for (const n of world.notes) {
+        const px = ox + n.x * scale + scale / 2;
+        const py = oy + n.y * scale + scale / 2;
+        ctx.fillStyle = "#ffb454";
+        ctx.fillRect(px - 2, py - 2, 4, 4);
+        ctx.font = "10px Cascadia Code, monospace";
+        ctx.fillStyle = "#ffb454";
+        ctx.fillText(n.text.slice(0, 28), px + 6, py + 3);
+      }
+    }
+
+    // store transform for hit tests
+    world._view = { ox, oy, scale };
+    document.getElementById("worldHud").innerHTML =
+      `<strong>${world.seed}</strong> · ${w}×${h} · sea ${world.seaLevel.toFixed(2)} · ${world.template}`;
+  }
+
+  function cellAtEvent(ev) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width / rect.width;
+    const sy = canvas.height / rect.height;
+    const mx = (ev.clientX - rect.left) * sx;
+    const my = (ev.clientY - rect.top) * sy;
+    const v = world._view;
+    if (!v) return null;
+    const x = Math.floor((mx - v.ox) / v.scale);
+    const y = Math.floor((my - v.oy) / v.scale);
+    if (!inBounds(x, y)) return null;
+    return { x, y, cell: world.cells[idx(x, y)] };
+  }
+
+  // ——— STATS / LOG ———
+  function log(msg, cls = "") {
+    const el = document.getElementById("log");
+    const line = document.createElement("div");
+    line.className = "line " + cls;
+    const ts = new Date().toLocaleTimeString();
+    line.innerHTML = `<span class="ts">[${ts}]</span> ${msg}`;
+    el.prepend(line);
+  }
+
+  function updateStats() {
+    const land = world.cells.filter(c => c.h >= world.seaLevel).length;
+    const ocean = world.cells.length - land;
+    const pop = world.states.reduce((a, s) => a + s.population, 0);
+    const html = [
+      ["Land cells", land],
+      ["Ocean cells", ocean],
+      ["Rivers", world.rivers.length],
+      ["Settlements", world.settlements.length],
+      ["States", world.states.length],
+      ["Notes", world.notes.length],
+      ["Pop (est.)", pop.toLocaleString()],
+      ["Generated", (world.generatedAt || "").slice(11, 19) || "—"],
+    ].map(([k, v]) => `<div class="stat"><b>${k}</b>${v}</div>`).join("");
+    document.getElementById("stats").innerHTML = html;
+  }
+
+  function syncForm() {
+    document.getElementById("seedInput").value = world.seed;
+    document.getElementById("sizeInput").value = world.size;
+    document.getElementById("sizeVal").textContent = world.size;
+    document.getElementById("seaInput").value = world.seaLevel;
+    document.getElementById("seaVal").textContent = (+world.seaLevel).toFixed(2);
+    document.getElementById("moistInput").value = world.moistureBias;
+    document.getElementById("moistVal").textContent = (+world.moistureBias).toFixed(2);
+    document.getElementById("tempInput").value = world.temperatureBias;
+    document.getElementById("tempVal").textContent = (+world.temperatureBias).toFixed(2);
+    document.getElementById("popInput").value = world.populationDensity;
+    document.getElementById("popVal").textContent = (+world.populationDensity).toFixed(2);
+  }
+
+  // ——— AGENT API (WebMCP-shaped) ———
+  const TOOLS = [
+    { name: "list_tools", desc: "List MapsMCP tools", args: {} },
+    { name: "get_summary", desc: "Compact world summary for agents", args: {} },
+    { name: "get_status", desc: "Seed, size, layer flags, counts", args: {} },
+    { name: "set_seed", desc: "Set seed (does not regen until regenerate)", args: { seed: "string" } },
+    { name: "set_options", desc: "size, seaLevel, moistureBias, temperatureBias, populationDensity, template", args: { any: "number|string" } },
+    { name: "regenerate", desc: "Full pipeline regenerate", args: { seed: "?", template: "?", clearAnnotations: "?" } },
+    { name: "regenerate_terrain", desc: "Heightmap + dependent layers", args: {} },
+    { name: "recalculate_weather", desc: "Climate, rivers, biomes, pop cascade", args: {} },
+    { name: "recalculate_population", desc: "Population only from current terrain/biome", args: {} },
+    { name: "paint_height", desc: "raise|lower|ridge at x,y radius", args: { x: "int", y: "int", mode: "raise|lower|ridge", radius: "int" } },
+    { name: "paint_climate", desc: "wet|dry brush", args: { x: "int", y: "int", mode: "wet|dry", radius: "int" } },
+    { name: "add_settlement", desc: "Place town/city/capital", args: { x: "int", y: "int", name: "?", kind: "?" } },
+    { name: "rename_settlement", desc: "Rename by id", args: { id: "int", name: "string" } },
+    { name: "rename_state", desc: "Rename state by id", args: { id: "int", name: "string" } },
+    { name: "jot_note", desc: "Map annotation for worldbuilding", args: { x: "int", y: "int", text: "string" } },
+    { name: "plot_marker", desc: "Named marker", args: { x: "int", y: "int", label: "string" } },
+    { name: "get_regions", desc: "States with caps and pop", args: {} },
+    { name: "get_rivers", desc: "River list", args: {} },
+    { name: "get_settlements", desc: "Settlement list", args: {} },
+    { name: "get_cell", desc: "One cell detail", args: { x: "int", y: "int" } },
+    { name: "sample_cells", desc: "Downsampled cell grid for LLM", args: { step: "int?" } },
+    { name: "set_layers", desc: "Toggle render layers", args: { layer: "bool" } },
+    { name: "export_map", desc: "Serializable world JSON (no typed arrays)", args: {} },
+    { name: "import_map", desc: "Load exported JSON", args: { data: "object" } },
+  ];
+
+  function summarize() {
+    return {
+      version: world.version,
+      seed: world.seed,
+      size: world.size,
+      template: world.template,
+      seaLevel: world.seaLevel,
+      climate: { moistureBias: world.moistureBias, temperatureBias: world.temperatureBias },
+      counts: {
+        land: world.cells.filter(c => c.h >= world.seaLevel).length,
+        rivers: world.rivers.length,
+        settlements: world.settlements.length,
+        states: world.states.length,
+        notes: world.notes.length,
+      },
+      states: world.states.map(s => ({
+        id: s.id, name: s.name, population: s.population,
+        capital: world.settlements.find(t => t.id === s.capital)?.name,
+      })),
+      topSettlements: [...world.settlements].sort((a, b) => b.population - a.population).slice(0, 8)
+        .map(s => ({ id: s.id, name: s.name, kind: s.kind, pop: s.population, x: s.x, y: s.y, state: s.state })),
+      rivers: world.rivers.map(r => ({ id: r.id, name: r.name, length: r.cells.length })),
+      notes: world.notes,
+      hint: "Use paint_height / recalculate_weather / rename_* for surgical edits. Humans see the canvas update live.",
+    };
+  }
+
+  function exportMap() {
+    return {
+      version: world.version,
+      seed: world.seed,
+      size: world.size,
+      width: world.width,
+      height: world.height,
+      seaLevel: world.seaLevel,
+      moistureBias: world.moistureBias,
+      temperatureBias: world.temperatureBias,
+      populationDensity: world.populationDensity,
+      template: world.template,
+      cells: world.cells.map(c => ({
+        h: +c.h.toFixed(4), m: +c.m.toFixed(4), t: +c.t.toFixed(4),
+        biome: c.biome, pop: +c.pop.toFixed(4), state: c.state, river: c.river, coast: c.coast,
+      })),
+      rivers: world.rivers,
+      settlements: world.settlements,
+      states: world.states,
+      notes: world.notes,
+      markers: world.markers,
+      generatedAt: world.generatedAt,
+    };
+  }
+
+  function importMap(data) {
+    if (!data || !data.cells) throw new Error("invalid map data");
+    Object.assign(world, {
+      seed: data.seed || world.seed,
+      size: data.size || data.width,
+      width: data.width,
+      height: data.height,
+      seaLevel: data.seaLevel,
+      moistureBias: data.moistureBias,
+      temperatureBias: data.temperatureBias,
+      populationDensity: data.populationDensity,
+      template: data.template || "continent",
+      rivers: data.rivers || [],
+      settlements: data.settlements || [],
+      states: data.states || [],
+      notes: data.notes || [],
+      markers: data.markers || [],
+      generatedAt: data.generatedAt || new Date().toISOString(),
+    });
+    world.cells = data.cells.map(c => ({ flow: 0, ...c }));
+    syncForm(); render(); updateStats();
+  }
+
+  function callTool(name, args = {}) {
+    const t0 = performance.now();
+    let result;
+    switch (name) {
+      case "list_tools":
+        result = TOOLS; break;
+      case "get_summary":
+        result = summarize(); break;
+      case "get_status":
+        result = {
+          version: VERSION, seed: world.seed, size: world.size, layers: { ...view.layers },
+          settlements: world.settlements.length, states: world.states.length, rivers: world.rivers.length,
+        };
+        break;
+      case "set_seed":
+        world.seed = String(args.seed ?? world.seed); syncForm();
+        result = { seed: world.seed, note: "call regenerate to apply" }; break;
+      case "set_options":
+        fullGenerate({ ...args, seed: args.seed ?? world.seed });
+        result = summarize(); break;
+      case "regenerate":
+        fullGenerate(args);
+        result = summarize(); break;
+      case "regenerate_terrain":
+        generateHeightmap(); generateClimate(); generateRivers(); assignBiomes(); generatePopulation();
+        generateStatesAndSettlements(); render(); updateStats();
+        result = summarize(); break;
+      case "recalculate_weather":
+        recalculateWeather(); result = summarize(); break;
+      case "recalculate_population":
+        recalculatePopulation(); result = summarize(); break;
+      case "paint_height":
+        paintBrush(args.x|0, args.y|0, args.mode || "raise", args.radius ?? 4);
+        result = { ok: true, at: [args.x, args.y], mode: args.mode || "raise" }; break;
+      case "paint_climate":
+        paintBrush(args.x|0, args.y|0, args.mode || "wet", args.radius ?? 4);
+        result = { ok: true, at: [args.x, args.y], mode: args.mode || "wet" }; break;
+      case "add_settlement":
+        result = addSettlementAt(args.x|0, args.y|0, args.name, args.kind || "town"); break;
+      case "rename_settlement": {
+        const s = world.settlements.find(z => z.id === (args.id|0));
+        if (!s) throw new Error("settlement not found");
+        s.name = String(args.name); render();
+        result = s; break;
+      }
+      case "rename_state": {
+        const s = world.states.find(z => z.id === (args.id|0));
+        if (!s) throw new Error("state not found");
+        s.name = String(args.name); render();
+        result = s; break;
+      }
+      case "jot_note":
+        result = jotNote(args.x|0, args.y|0, args.text); break;
+      case "plot_marker":
+        world.markers.push({ x: args.x|0, y: args.y|0, label: String(args.label || "mark") });
+        jotNote(args.x|0, args.y|0, args.label || "mark");
+        result = world.markers[world.markers.length - 1]; break;
+      case "get_regions":
+        result = world.states.map(s => ({ ...s, capital: world.settlements.find(t => t.id === s.capital) })); break;
+      case "get_rivers":
+        result = world.rivers.map(r => ({ id: r.id, name: r.name, length: r.cells.length })); break;
+      case "get_settlements":
+        result = world.settlements; break;
+      case "get_cell": {
+        const x = args.x|0, y = args.y|0;
+        if (!inBounds(x, y)) throw new Error("oob");
+        const c = world.cells[idx(x, y)];
+        result = { x, y, ...c, biomeName: BIOMES[c.biome].name, stateName: world.states[c.state]?.name || null }; break;
+      }
+      case "sample_cells": {
+        const step = Math.max(2, args.step|0 || Math.ceil(world.width / 16));
+        const rows = [];
+        for (let y = 0; y < world.height; y += step) {
+          const row = [];
+          for (let x = 0; x < world.width; x += step) {
+            const c = world.cells[idx(x, y)];
+            row.push(c.h < world.seaLevel ? "~" : BIOMES[c.biome].id[0]);
+          }
+          rows.push(row.join(""));
+        }
+        result = { step, legend: " ~ ocean; first letter of biome id", grid: rows }; break;
+      }
+      case "set_layers":
+        Object.assign(view.layers, args);
+        document.querySelectorAll("[data-layer]").forEach(el => {
+          if (args[el.dataset.layer] != null) el.checked = !!args[el.dataset.layer];
+        });
+        render(); result = { ...view.layers }; break;
+      case "export_map":
+        result = exportMap(); break;
+      case "import_map":
+        importMap(args.data || args); result = summarize(); break;
+      default:
+        throw new Error("unknown tool: " + name);
+    }
+    const ms = Math.round(performance.now() - t0);
+    log(`<span class="cmd">${name}</span> → ok <span class="ts">(${ms}ms)</span>`, "ok");
+    return result;
+  }
+
+  window.MapsMCP = {
+    version: VERSION,
+    tools: TOOLS,
+    call: callTool,
+    // ergonomic aliases
+    regenerate: (a) => callTool("regenerate", a || {}),
+    get_summary: () => callTool("get_summary"),
+    export_map: () => callTool("export_map"),
+  };
+
+  // Optional WebMCP-style registration if host provides it later
+  if (navigator.modelContext && typeof navigator.modelContext.registerTool === "function") {
+    try {
+      for (const t of TOOLS) {
+        navigator.modelContext.registerTool({
+          name: "maps_" + t.name,
+          description: t.desc,
+          execute: async (args) => callTool(t.name, args || {}),
+        });
+      }
+      log("Registered tools with navigator.modelContext", "note");
+    } catch (e) {
+      log("WebMCP host register skipped: " + e.message, "note");
+    }
+  }
+
+  document.getElementById("toolsDoc").textContent = TOOLS.map(t =>
+    `${t.name} — ${t.desc}`
+  ).join("\n");
+
+  // ——— UI hooks ———
+  function readFormOpts() {
+    return {
+      seed: document.getElementById("seedInput").value.trim() || "seed",
+      size: +document.getElementById("sizeInput").value,
+      seaLevel: +document.getElementById("seaInput").value,
+      moistureBias: +document.getElementById("moistInput").value,
+      temperatureBias: +document.getElementById("tempInput").value,
+      populationDensity: +document.getElementById("popInput").value,
+    };
+  }
+
+  document.getElementById("btnRegen").onclick = () => {
+    fullGenerate(readFormOpts());
+    log("Human: regenerate all", "note");
+  };
+  document.getElementById("btnTerrain").onclick = () => {
+    Object.assign(world, readFormOpts());
+    callTool("regenerate_terrain");
+  };
+  document.getElementById("btnClimate").onclick = () => callTool("recalculate_weather");
+  document.getElementById("btnPop").onclick = () => callTool("recalculate_population");
+  document.getElementById("btnRandomSeed").onclick = () => {
+    document.getElementById("seedInput").value = "map-" + Math.random().toString(36).slice(2, 8);
+  };
+
+  ["sizeInput","seaInput","moistInput","tempInput","popInput","brushInput"].forEach(id => {
+    document.getElementById(id).oninput = (e) => {
+      const map = {
+        sizeInput: "sizeVal", seaInput: "seaVal", moistInput: "moistVal",
+        tempInput: "tempVal", popInput: "popVal", brushInput: "brushVal",
+      };
+      const el = document.getElementById(map[id]);
+      if (el) el.textContent = id.includes("size") || id.includes("brush") ? e.target.value : (+e.target.value).toFixed(2);
+    };
+  });
+
+  document.querySelectorAll("[data-layer]").forEach(el => {
+    el.onchange = () => {
+      view.layers[el.dataset.layer] = el.checked;
+      render();
+    };
+  });
+
+  document.querySelectorAll("[data-preset]").forEach(btn => {
+    btn.onclick = () => {
+      const p = btn.dataset.preset;
+      const opts = readFormOpts();
+      opts.template = p;
+      if (p === "islands") { opts.seaLevel = 0.5; opts.moistureBias = 0.62; }
+      if (p === "continent") { opts.seaLevel = 0.42; opts.moistureBias = 0.55; }
+      if (p === "archipelago") { opts.seaLevel = 0.52; opts.moistureBias = 0.6; }
+      if (p === "harsh") { opts.seaLevel = 0.4; opts.temperatureBias = 0.32; opts.moistureBias = 0.4; }
+      fullGenerate(opts);
+      log("Preset: " + p, "note");
+    };
+  });
+
+  let painting = false;
+  canvas.addEventListener("pointerdown", (ev) => {
+    painting = true;
+    canvas.setPointerCapture(ev.pointerId);
+    applyPointer(ev);
+  });
+  canvas.addEventListener("pointerup", () => { painting = false; });
+  canvas.addEventListener("pointermove", (ev) => {
+    const hit = cellAtEvent(ev);
+    if (hit) {
+      const c = hit.cell;
+      document.getElementById("cellHud").innerHTML =
+        `<strong>${hit.x},${hit.y}</strong> · ${BIOMES[c.biome].name} · h${c.h.toFixed(2)} m${c.m.toFixed(2)} t${c.t.toFixed(2)} · pop ${c.pop.toFixed(2)}` +
+        (c.state >= 0 ? ` · ${world.states[c.state].name}` : "");
+      view.hover = hit;
+    }
+    if (painting) applyPointer(ev);
+  });
+
+  function applyPointer(ev) {
+    const hit = cellAtEvent(ev);
+    if (!hit) return;
+    const mode = document.getElementById("brushMode").value;
+    const r = +document.getElementById("brushInput").value;
+    if (mode === "settle") {
+      if (ev.type === "pointerdown") {
+        try {
+          const s = addSettlementAt(hit.x, hit.y);
+          log(`Human settlement ${s.name} @${hit.x},${hit.y}`, "note");
+        } catch (e) { log(e.message, "err"); }
+      }
+      return;
+    }
+    if (mode === "note") {
+      if (ev.type === "pointerdown") {
+        const text = prompt("Map note", "point of interest");
+        if (text) jotNote(hit.x, hit.y, text);
+      }
+      return;
+    }
+    paintBrush(hit.x, hit.y, mode, r);
+  }
+
+  document.getElementById("btnRunTool").onclick = () => {
+    try {
+      const raw = document.getElementById("agentCmd").value.trim();
+      const obj = JSON.parse(raw);
+      const name = obj.tool || obj.name;
+      const args = obj.args || obj.arguments || {};
+      const result = callTool(name, args);
+      const shown = typeof result === "object" ? JSON.stringify(result, null, 2) : String(result);
+      log(shown.slice(0, 1200) + (shown.length > 1200 ? "…" : ""), "ok");
+      console.log("MapsMCP result", result);
+    } catch (e) {
+      log(String(e.message || e), "err");
+    }
+  };
+  document.getElementById("btnListTools").onclick = () => {
+    document.getElementById("agentCmd").value = JSON.stringify({ tool: "list_tools", args: {} }, null, 2);
+  };
+  document.getElementById("btnSummary").onclick = () => {
+    document.getElementById("agentCmd").value = JSON.stringify({ tool: "get_summary", args: {} }, null, 2);
+    document.getElementById("btnRunTool").click();
+  };
+  document.getElementById("btnExport").onclick = () => {
+    const data = callTool("export_map");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `origami-map-${world.seed}.json`;
+    a.click();
+    log("Exported map JSON", "ok");
+  };
+  document.getElementById("btnImport").onclick = async () => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "application/json,.json";
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+      try {
+        const data = JSON.parse(await file.text());
+        callTool("import_map", { data });
+        log("Imported " + file.name, "ok");
+      } catch (e) { log(e.message, "err"); }
+    };
+    input.click();
+  };
+
+  // boot
+  fullGenerate({ seed: "origami-prime", template: "continent", clearAnnotations: true });
+  log(`Origami Maps v${VERSION} ready · window.MapsMCP.call(name, args)`, "ok");
+  log("Azgaar gap focus: structured tools, layer recalc, LLM-sized get_summary/sample_cells, live human-visible canvas", "note");
+})();
+</script>
+</body>
+</html>

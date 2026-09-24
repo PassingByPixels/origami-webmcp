@@ -27,8 +27,8 @@ export const SUPPORT_URL = 'https://origamilabs.nl/support';
 const BLANK = { dark: '#E3DCCE', light: '#EFE9DE', crease: '#DBD3C3', stroke: '#E8E2D6' };
 
 /* Order IS the ring: angle rises 45 degrees a row, so a blank never sits next to a blank, and
-   the cards (the rows with an href, in this order) come out Folio · Draw · Charts · Gantt ·
-   Design — the order docs/SITE.md asks for. */
+   the cards (the rows with an href, in this order) come out Folio · Draw · Maps · Charts ·
+   Gantt · Design — the order docs/SITE.md asks for. */
 export const PETALS = [
   {
     name: 'Folio',
@@ -50,7 +50,17 @@ export const PETALS = [
     light: '#C87B45',
     crease: '#6E3418',
   },
-  { ...BLANK, angle: 90 },
+  {
+    name: 'Maps',
+    chip: 'live',
+    href: 'maps/',
+    angle: 90,
+    blurb: 'Procedural world maps an agent can redraw.',
+    // the sea/slate family: water and paper, between Draw's copper and Charts' ink
+    dark: '#2F4A5F',
+    light: '#5F7E96',
+    crease: '#24384A',
+  },
   {
     name: 'Charts',
     chip: 'live',
